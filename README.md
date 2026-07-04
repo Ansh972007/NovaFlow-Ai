@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# NovaFlow AI
 
-## Getting Started
+**Enterprise AI workspace** — unified interface for chat, knowledge bases, and AI applications.
 
-First, run the development server:
+> v0.1 — Initial scaffold: landing, auth UI, dashboard shell, API client.
+
+## What's included (checkpoint v0.1)
+
+- Next.js 16 app (JavaScript, App Router, Tailwind CSS)
+- Branded landing page with features & roadmap
+- Login / register pages (Bisheng-compatible API)
+- Dashboard shell with user info
+- API client with dev proxy to backend
+- Project docs & deploy notes
+
+## Quick start
+
+### 1. Backend
+
+NovaFlow AI uses a compatible backend API. For local dev, run Bisheng:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd path/to/bisheng/docker
+docker compose -f docker-compose.yml -p bisheng up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Backend + default API: `http://localhost:3001`
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+### 2. Frontend
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cd novaflow-ai
+cp .env.example .env.local
+npm install
+npm run dev
+```
 
-## Learn More
+Open **http://localhost:3000**
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Sign in
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Use your backend account or register a new user at `/login?mode=register`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project structure
 
-## Deploy on Vercel
+```
+novaflow-ai/
+├── src/
+│   ├── app/              # Pages (landing, login, dashboard, docs)
+│   ├── components/       # UI components (Logo, Navbar)
+│   └── lib/api/          # API client & auth helpers
+├── docs/                 # Architecture & roadmap
+├── deploy/               # Docker / deployment configs
+└── public/               # Static assets
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Environment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Backend API base URL |
+| `NEXT_PUBLIC_APP_NAME` | `NovaFlow AI` | Display name |
+
+## Roadmap
+
+| Version | Goal |
+|---------|------|
+| **v0.1** | Landing, auth UI, dashboard shell ✅ |
+| v0.2 | Streaming chat |
+| v0.3 | Knowledge upload & list |
+| v0.4 | Setup wizard + templates |
+| v1.0 | Production deploy |
+
+## Tech stack
+
+- **Frontend:** Next.js, React, Tailwind CSS, Axios
+- **Backend (current):** Bisheng-compatible API (FastAPI)
+- **Infra:** Docker, MySQL, Redis, Milvus, Elasticsearch
+
+## License
+
+Proprietary — NovaFlow AI. Backend architecture references open-source Bisheng patterns.
