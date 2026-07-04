@@ -1,8 +1,8 @@
 import { FLOW_TYPE } from "@/lib/api/apps";
+import { getApiBaseUrl } from "@/lib/api/config";
 
 function getWsUrl(path) {
-  const apiUrl =
-    process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+  const apiUrl = getApiBaseUrl();
   const url = new URL(apiUrl);
   const protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const token =

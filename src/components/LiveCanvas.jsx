@@ -6,7 +6,7 @@ function rand(min, max) {
   return Math.random() * (max - min) + min;
 }
 
-export default function LiveCanvas({ variant = "light", mouseTracking = true }) {
+export default function LiveCanvas({ variant = "light", mouseTracking = true, tone = "neutral" }) {
   const canvasRef = useRef(null);
   const mouseRef = useRef({ x: -9999, y: -9999 });
   const frameRef = useRef(null);
@@ -24,11 +24,23 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true }) 
     let nodes = [];
     let pulses = [];
 
-    const density = isSubtle ? 0.00005 : 0.00008;
-    const maxDist = isSubtle ? 160 : 210;
+    const isViolet = tone === "violet";
+
+    const density = isDark && isViolet ? 0.000055 : isViolet ? 0.000042 : isSubtle ? 0.00005 : 0.00008;
+    const maxDist = isDark && isViolet ? 175 : isViolet ? 155 : isSubtle ? 160 : 210;
     const nodeCount = () => Math.min(100, Math.max(40, Math.floor(w * h * density)));
 
     function palette() {
+      if (isDark && isViolet) {
+        return {
+          node: "rgba(196,181,253,0.95)",
+          nodeGlow: "rgba(139,92,246,0.38)",
+          line: "rgba(139,92,246,0.22)",
+          lineBright: "rgba(167,139,250,0.68)",
+          pulse: "rgba(224,231,255,0.95)",
+          cursor: "rgba(139,92,246,0.28)",
+        };
+      }
       if (isDark) {
         return {
           node: "rgba(255,255,255,0.75)",
@@ -37,6 +49,16 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true }) 
           lineBright: "rgba(255,255,255,0.45)",
           pulse: "rgba(255,255,255,0.95)",
           cursor: "rgba(255,255,255,0.12)",
+        };
+      }
+      if (isViolet) {
+        return {
+          node: "rgba(91,33,182,0.5)",
+          nodeGlow: "rgba(139,92,246,0.16)",
+          line: "rgba(99,102,241,0.11)",
+          lineBright: "rgba(124,58,237,0.32)",
+          pulse: "rgba(91,33,182,0.8)",
+          cursor: "rgba(139,92,246,0.11)",
         };
       }
       return {
@@ -188,7 +210,13 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true }) 
 
         ctx.beginPath();
         ctx.arc(mx, my, 4, 0, Math.PI * 2);
-        ctx.fillStyle = isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.25)";
+        ctx.fillStyle = isDark
+          ? isViolet
+            ? "rgba(167,139,250,0.65)"
+            : "rgba(255,255,255,0.5)"
+          : isViolet
+            ? "rgba(124,58,237,0.4)"
+            : "rgba(0,0,0,0.25)";
         ctx.fill();
       }
 
@@ -222,7 +250,7 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true }) 
         window.removeEventListener("mouseleave", onLeave);
       }
     };
-  }, [variant, mouseTracking]);
+  }, [variant, mouseTracking, tone]);
 
   return (
     <canvas

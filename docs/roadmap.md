@@ -1,13 +1,21 @@
 # Roadmap
 
-## v0.2 — Chat (current)
+## v0.3 — Knowledge (current)
+
+- [x] Knowledge base list (`/knowledge`)
+- [x] Create knowledge base
+- [x] File upload with progress
+- [x] Processing status (auto-refresh)
+- [ ] Q&A preview
+- [ ] Push tag v0.3.0
+
+## v0.2 — Chat (done)
 
 - [x] Chat page with sidebar
 - [x] List online assistants / apps
 - [x] WebSocket streaming chat
 - [x] Session history (localStorage)
 - [x] Stop generation button
-- [ ] Push tag v0.2.0
 
 ## v0.1 — Foundation (done)
 
@@ -16,13 +24,6 @@
 - [x] Login / register UI
 - [x] API client + auth encryption
 - [x] Dashboard shell
-
-## v0.3 — Knowledge
-
-- [ ] Knowledge base list
-- [ ] File upload with progress
-- [ ] Processing status
-- [ ] Q&A preview
 
 ## v0.4 — Onboarding
 

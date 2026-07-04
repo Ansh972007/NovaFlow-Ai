@@ -8,23 +8,22 @@
 
 - Next.js 16 app (JavaScript, App Router, Tailwind CSS)
 - Branded landing page with features & roadmap
-- Login / register pages (Bisheng-compatible API)
+- Login / register pages (NovaFlow API)
 - Dashboard shell with user info
 - API client with dev proxy to backend
 - Project docs & deploy notes
 
 ## Quick start
 
-### 1. Backend
+### 1. Backend (NovaFlow API)
 
-NovaFlow AI uses a compatible backend API. For local dev, run Bisheng:
+NovaFlow needs its API running locally. From the project root:
 
-```bash
-cd path/to/bisheng/docker
-docker compose -f docker-compose.yml -p bisheng up -d
+```powershell
+.\deploy\start-backend.ps1
 ```
 
-Backend + default API: `http://localhost:3001`
+Default API URL: `http://localhost:3001`
 
 ### 2. Frontend
 
@@ -74,9 +73,9 @@ novaflow-ai/
 ## Tech stack
 
 - **Frontend:** Next.js, React, Tailwind CSS, Axios
-- **Backend (current):** Bisheng-compatible API (FastAPI)
+- **Backend:** NovaFlow API (FastAPI, port 3001)
 - **Infra:** Docker, MySQL, Redis, Milvus, Elasticsearch
 
 ## License
 
-Proprietary — NovaFlow AI. Backend architecture references open-source Bisheng patterns.
+Proprietary — NovaFlow AI.

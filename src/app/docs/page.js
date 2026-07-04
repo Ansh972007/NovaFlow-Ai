@@ -11,7 +11,7 @@ const sections = [
   {
     title: "Quick start",
     steps: [
-      { n: "01", text: "Start backend", code: "docker compose -p bisheng up -d" },
+      { n: "01", text: "Start NovaFlow API", code: ".\\deploy\\start-backend.ps1" },
       { n: "02", text: "Configure env", code: "cp .env.example .env.local" },
       { n: "03", text: "Run frontend", code: "npm run dev" },
       { n: "04", text: "Open app", code: "http://localhost:3000" },

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getApiBaseUrl } from "./config";
 
 const client = axios.create({
   baseURL: "/api/v1",
@@ -8,15 +9,20 @@ const client = axios.create({
 });
 
 function formatApiError(error) {
+  const apiUrl = getApiBaseUrl();
+
   if (!error.response) {
-    return "Cannot reach the backend. Start Bisheng Docker on port 3001, then try again.";
+    if (error.code === "ECONNABORTED") {
+      return "NovaFlow API timed out. Check that the backend is running and try again.";
+    }
+    return `Cannot reach the NovaFlow API at ${apiUrl}. Start the NovaFlow backend, then refresh this page.`;
   }
 
   const status = error.response.status;
   const data = error.response.data;
 
   if (status === 500 || status === 502 || status === 503) {
-    return "Backend server is unavailable. Run: docker compose -p bisheng up -d";
+    return "NovaFlow API is temporarily unavailable. Make sure the backend is running on port 3001.";
   }
 
   if (data?.status_message) {
@@ -24,7 +30,7 @@ function formatApiError(error) {
   }
 
   if (typeof data === "string" && data.includes("Internal Server Error")) {
-    return "Backend server is unavailable. Please start the API on port 3001.";
+    return "NovaFlow API is unavailable. Please start the backend on port 3001.";
   }
 
   return error.message || `Request failed (${status})`;

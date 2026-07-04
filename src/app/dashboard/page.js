@@ -8,29 +8,53 @@ import AppHeader from "@/components/AppHeader";
 import LiveBackground from "@/components/LiveBackground";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
+import { getOnlineApps, getAssistants } from "@/lib/api/apps";
+import { listKnowledge } from "@/lib/api/knowledge";
+import { loadSessions } from "@/lib/chat/storage";
 
 const ease = [0.16, 1, 0.3, 1];
 
 const quickLinks = [
   { href: "/chat", label: "Chat", desc: "Talk to your AI assistants", icon: "💬", live: true },
-  { href: "#", label: "Knowledge", desc: "Upload & search documents", icon: "📚", live: false },
+  { href: "/knowledge", label: "Knowledge", desc: "Upload & search documents", icon: "📚", live: true },
   { href: "#", label: "Apps", desc: "Manage assistants & flows", icon: "⚡", live: false },
   { href: "#", label: "Settings", desc: "Models & configuration", icon: "⚙️", live: false },
-];
-
-const stats = [
-  { value: "12", suffix: "", label: "Active chats" },
-  { value: "3", suffix: "", label: "Assistants" },
-  { value: "98", suffix: "%", label: "Uptime" },
 ];
 
 export default function DashboardPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState([
+    { value: "0", suffix: "", label: "Chat sessions" },
+    { value: "0", suffix: "", label: "Assistants" },
+    { value: "0", suffix: "", label: "Knowledge bases" },
+  ]);
 
   useEffect(() => {
     getUserInfo()
-      .then(setUser)
+      .then(async (u) => {
+        setUser(u);
+        const sessions = loadSessions();
+        let apps = [];
+        try {
+          apps = (await getOnlineApps()) || [];
+          if (!apps.length) apps = (await getAssistants()) || [];
+        } catch {
+          apps = [];
+        }
+        let kbTotal = 0;
+        try {
+          const kb = await listKnowledge({ pageSize: 1 });
+          kbTotal = kb?.total || 0;
+        } catch {
+          kbTotal = 0;
+        }
+        setStats([
+          { value: String(sessions.length), suffix: "", label: "Chat sessions" },
+          { value: String(apps.length), suffix: "", label: "Assistants" },
+          { value: String(kbTotal), suffix: "", label: "Knowledge bases" },
+        ]);
+      })
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
@@ -67,10 +91,18 @@ export default function DashboardPage() {
                 </p>
               </div>
               {!loading && user && (
-                <Link href="/chat" className="group btn-primary inline-flex shrink-0">
-                  Open Chat
-                  <span className="transition-transform group-hover:translate-x-0.5">→</span>
-                </Link>
+                <div className="flex flex-wrap gap-3">
+                  <Link href="/chat" className="group btn-primary inline-flex shrink-0">
+                    Open Chat
+                    <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                  </Link>
+                  <Link
+                    href="/knowledge"
+                    className="inline-flex shrink-0 items-center rounded-full border border-border bg-white px-5 py-3 text-sm font-semibold hover:bg-surface"
+                  >
+                    Knowledge
+                  </Link>
+                </div>
               )}
             </div>
 

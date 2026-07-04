@@ -6,7 +6,13 @@ export async function getPublicKey() {
 }
 
 export async function encryptPassword(password) {
-  const publicKey = await getPublicKey();
+  const res = await getPublicKey();
+  const publicKey = typeof res === "string" ? res : res?.public_key;
+
+  if (!publicKey) {
+    throw new Error("Could not load encryption key from NovaFlow API");
+  }
+
   const encrypt = new JSEncrypt();
   encrypt.setPublicKey(publicKey);
   const encrypted = encrypt.encrypt(password);

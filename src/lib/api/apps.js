@@ -24,7 +24,7 @@ export async function getChatMessages(chatId) {
   return client.get(`/session/chat/messages/${chatId}`);
 }
 
-/** Flow types from Bisheng backend */
+/** Flow types from NovaFlow API */
 export const FLOW_TYPE = {
   SKILL: 1,
   ASSISTANT: 5,

@@ -1,89 +1,128 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useRef } from "react";
 
-const ease = [0.16, 1, 0.3, 1];
+const suggestions = [
+  "Summarize my documents",
+  "Write a short email",
+  "Explain step by step",
+  "What can you do?",
+];
 
-export default function ChatMessages({ messages, streaming, error }) {
+export default function ChatMessages({ messages, streaming, error, assistantName, onSuggest }) {
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streaming, error]);
+
+  const showThinking =
+    streaming && messages.length > 0 && messages[messages.length - 1]?.role === "user";
+
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-8">
-      {messages.length === 0 && !error && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.6, ease }}
-          className="flex flex-1 flex-col items-center justify-center text-center"
-        >
-          <div className="relative mb-6">
-            <span className="absolute inset-0 animate-pulse rounded-full bg-black/5" />
-            <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-black text-xl font-bold text-white">
+    <div className="flex flex-1 flex-col overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6">
+        {messages.length === 0 && !error && (
+          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+            <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900 text-xs font-bold text-white">
               NF
             </div>
-          </div>
-          <p className="font-serif text-2xl tracking-tight">Start a conversation</p>
-          <p className="mt-2 max-w-sm text-sm text-muted">
-            Messages stream in real time from your connected assistant.
-          </p>
-        </motion.div>
-      )}
+            <h2 className="text-xl font-semibold tracking-tight text-neutral-900">
+              {assistantName || "NovaFlow Assistant"}
+            </h2>
+            <p className="mt-2 max-w-sm text-sm text-neutral-500">
+              Ask a question below or pick a starter prompt.
+            </p>
 
-      <AnimatePresence initial={false}>
-        {messages.map((msg) => (
-          <motion.div
-            key={msg.id}
-            initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            transition={{ duration: 0.35, ease }}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[70%] ${
-                msg.role === "user"
-                  ? "rounded-tr-md bg-black text-white shadow-lg shadow-black/10"
-                  : "rounded-tl-md border border-border bg-white text-foreground shadow-sm"
-              }`}
-            >
-              <p className="whitespace-pre-wrap break-words">
-                {msg.content || (msg.streaming ? "…" : "")}
-              </p>
-              {msg.streaming && (
-                <span className="mt-2 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current opacity-60" />
-              )}
-            </div>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-
-      {streaming && messages[messages.length - 1]?.role === "user" && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="flex justify-start"
-        >
-          <div className="flex items-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
-            <span className="flex gap-1">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted"
-                  style={{ animationDelay: `${i * 150}ms` }}
-                />
+            <div className="mt-8 flex w-full max-w-md flex-wrap justify-center gap-2">
+              {suggestions.map((text) => (
+                <button
+                  key={text}
+                  type="button"
+                  onClick={() => onSuggest?.(text)}
+                  className="rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs text-neutral-700 transition-colors hover:border-neutral-400 hover:bg-neutral-50"
+                >
+                  {text}
+                </button>
               ))}
-            </span>
-            Thinking…
+            </div>
           </div>
-        </motion.div>
-      )}
+        )}
 
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-        >
-          {error}
-        </motion.div>
-      )}
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+          >
+            {msg.role === "assistant" && (
+              <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-900 text-[9px] font-bold text-white">
+                NF
+              </div>
+            )}
+
+            <div className={`max-w-[85%] sm:max-w-[75%] ${msg.role === "user" ? "text-right" : ""}`}>
+              {msg.role === "assistant" && (
+                <p className="mb-1 text-[11px] font-medium text-neutral-400">
+                  {assistantName || "Assistant"}
+                </p>
+              )}
+              <div
+                className={`text-sm leading-relaxed sm:text-[15px] ${
+                  msg.role === "user"
+                    ? "inline-block rounded-2xl rounded-tr-sm bg-white/90 px-4 py-3 text-neutral-900 shadow-sm backdrop-blur-sm ring-1 ring-black/5"
+                    : "text-neutral-800"
+                }`}
+              >
+                <p className="whitespace-pre-wrap break-words">
+                  {msg.content || (msg.streaming ? "" : "…")}
+                </p>
+                {msg.streaming && !msg.content && (
+                  <span className="inline-flex gap-1 py-1">
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        className="h-1 w-1 animate-bounce rounded-full bg-neutral-400"
+                        style={{ animationDelay: `${i * 120}ms` }}
+                      />
+                    ))}
+                  </span>
+                )}
+                {msg.streaming && msg.content && (
+                  <span className="ml-0.5 inline-block h-3.5 w-px animate-pulse bg-neutral-400 align-middle" />
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {showThinking && (
+          <div className="flex gap-3">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-200 text-[9px] font-bold text-neutral-500">
+              NF
+            </div>
+            <div className="flex items-center gap-2 py-2 text-sm text-neutral-500">
+              <span className="flex gap-1">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="h-1 w-1 animate-bounce rounded-full bg-neutral-400"
+                    style={{ animationDelay: `${i * 140}ms` }}
+                  />
+                ))}
+              </span>
+              Thinking…
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div ref={bottomRef} className="h-px shrink-0" />
+      </div>
     </div>
   );
 }
