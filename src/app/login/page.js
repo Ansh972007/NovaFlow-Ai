@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import AuthLivePanel from "@/components/AuthLivePanel";
+import AuthShowcasePanel from "@/components/AuthShowcasePanel";
 import AuthFormPanel from "@/components/AuthFormPanel";
 import LiveBackground from "@/components/LiveBackground";
 import CursorGlow from "@/components/CursorGlow";
@@ -91,7 +91,7 @@ function LoginForm() {
       <CursorGlow />
 
       <div className="relative grid min-h-screen lg:grid-cols-2">
-        <AuthLivePanel isRegister={isRegister} greeting={greeting} />
+        <AuthShowcasePanel isRegister={isRegister} greeting={greeting} />
         <AuthFormPanel
           isRegister={isRegister}
           email={email}
