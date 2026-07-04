@@ -2,29 +2,26 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import Logo from "@/components/Logo";
+import { motion } from "framer-motion";
+import CursorGlow from "@/components/CursorGlow";
+import AppHeader from "@/components/AppHeader";
+import LiveBackground from "@/components/LiveBackground";
+import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
 
+const ease = [0.16, 1, 0.3, 1];
+
 const quickLinks = [
-  { href: "#", label: "Chat", desc: "Talk to your AI apps", badge: "Soon" },
-  {
-    href: "#",
-    label: "Knowledge",
-    desc: "Upload & search documents",
-    badge: "Soon",
-  },
-  {
-    href: "#",
-    label: "Apps",
-    desc: "Manage assistants & flows",
-    badge: "Soon",
-  },
-  {
-    href: "#",
-    label: "Settings",
-    desc: "Models & workspace config",
-    badge: "Soon",
-  },
+  { href: "/chat", label: "Chat", desc: "Talk to your AI assistants", icon: "💬", live: true },
+  { href: "#", label: "Knowledge", desc: "Upload & search documents", icon: "📚", live: false },
+  { href: "#", label: "Apps", desc: "Manage assistants & flows", icon: "⚡", live: false },
+  { href: "#", label: "Settings", desc: "Models & configuration", icon: "⚙️", live: false },
+];
+
+const stats = [
+  { value: "12", suffix: "", label: "Active chats" },
+  { value: "3", suffix: "", label: "Assistants" },
+  { value: "98", suffix: "%", label: "Uptime" },
 ];
 
 export default function DashboardPage() {
@@ -39,66 +36,111 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="min-h-full bg-background">
-      <header className="border-b border-nova-border bg-nova-surface">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Logo size="sm" />
-          <div className="flex items-center gap-4">
-            {!loading && user && (
-              <span className="hidden text-sm text-nova-muted sm:inline">
-                {user.user_name}
-              </span>
-            )}
-            <Link
-              href="/login"
-              className="text-sm font-medium text-nova-muted hover:text-foreground"
-            >
-              {user ? "Account" : "Sign in"}
-            </Link>
-          </div>
-        </div>
-      </header>
+    <div className="relative min-h-screen overflow-hidden">
+      <CursorGlow />
+      <LiveBackground variant="subtle" showNetwork mouseTracking />
 
-      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <div className="rounded-2xl border border-nova-border bg-nova-surface p-8">
-          <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
-            v0.1 checkpoint
-          </p>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="mt-2 max-w-xl text-nova-muted">
-            {loading
-              ? "Loading workspace…"
-              : user
-                ? `Welcome, ${user.user_name}. Your NovaFlow AI workspace is ready.`
-                : "Sign in to connect to your backend and unlock the workspace."}
-          </p>
-          {!loading && !user && (
-            <Link
-              href="/login"
-              className="nova-gradient mt-6 inline-block rounded-lg px-6 py-2.5 text-sm font-semibold text-white"
-            >
-              Sign in
-            </Link>
-          )}
-        </div>
+      <div className="relative z-10">
+        <AppHeader user={user} />
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {quickLinks.map((item) => (
-            <div
-              key={item.label}
-              className="rounded-xl border border-nova-border bg-nova-surface p-5 opacity-90"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold">{item.label}</h2>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-nova-muted dark:bg-slate-800">
-                  {item.badge}
-                </span>
+        <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease }}
+            className="glass-card rounded-[1.5rem] p-8 sm:p-10"
+          >
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold tracking-[0.2em] text-muted uppercase">
+                  Workspace
+                </p>
+                <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">
+                  Dashboard
+                </h1>
+                <p className="mt-3 max-w-xl text-muted">
+                  {loading
+                    ? "Loading your workspace…"
+                    : user
+                      ? `Welcome back, ${user.user_name}.`
+                      : "Sign in to access your AI workspace."}
+                </p>
               </div>
-              <p className="mt-2 text-sm text-nova-muted">{item.desc}</p>
+              {!loading && user && (
+                <Link href="/chat" className="group btn-primary inline-flex shrink-0">
+                  Open Chat
+                  <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                </Link>
+              )}
             </div>
-          ))}
-        </div>
-      </main>
+
+            {user && (
+              <div className="mt-10 grid grid-cols-3 gap-4 border-t border-border pt-8">
+                {stats.map((stat, i) => (
+                  <motion.div
+                    key={stat.label}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 + i * 0.08, ease }}
+                    className="text-center sm:text-left"
+                  >
+                    <p className="text-2xl font-semibold tabular-nums sm:text-3xl">
+                      <AnimatedCounter value={stat.value} suffix={stat.suffix} />
+                    </p>
+                    <p className="mt-1 text-xs text-muted">{stat.label}</p>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {quickLinks.map((item, i) => (
+              <motion.div
+                key={item.label}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 + i * 0.06, duration: 0.5, ease }}
+              >
+                {item.live ? (
+                  <Link href={item.href} className="glass-card card-hover block rounded-2xl p-6">
+                    <div className="flex items-start justify-between">
+                      <span className="text-2xl">{item.icon}</span>
+                      <span className="rounded-full bg-black px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
+                        Live
+                      </span>
+                    </div>
+                    <h2 className="mt-4 font-semibold">{item.label}</h2>
+                    <p className="mt-1 text-sm text-muted">{item.desc}</p>
+                  </Link>
+                ) : (
+                  <div className="glass-card rounded-2xl p-6 opacity-50">
+                    <span className="text-2xl opacity-60">{item.icon}</span>
+                    <div className="mt-4 flex items-center justify-between">
+                      <h2 className="font-semibold">{item.label}</h2>
+                      <span className="text-xs font-medium text-muted">Soon</span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted">{item.desc}</p>
+                  </div>
+                )}
+              </motion.div>
+            ))}
+          </div>
+
+          {!loading && !user && (
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4, ease }}
+              className="mt-10 text-center"
+            >
+              <Link href="/login" className="btn-primary">
+                Sign in to get started
+              </Link>
+            </motion.div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

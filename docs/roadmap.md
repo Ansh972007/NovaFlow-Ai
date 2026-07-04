@@ -1,20 +1,21 @@
 # Roadmap
 
-## v0.1 — Foundation (current)
+## v0.2 — Chat (current)
+
+- [x] Chat page with sidebar
+- [x] List online assistants / apps
+- [x] WebSocket streaming chat
+- [x] Session history (localStorage)
+- [x] Stop generation button
+- [ ] Push tag v0.2.0
+
+## v0.1 — Foundation (done)
 
 - [x] Project scaffold & git init
 - [x] Landing page + branding
 - [x] Login / register UI
 - [x] API client + auth encryption
 - [x] Dashboard shell
-- [ ] Push to remote GitHub
-
-## v0.2 — Chat
-
-- [ ] Chat layout & message list
-- [ ] Streaming responses (WebSocket/SSE)
-- [ ] Session history
-- [ ] Share link styling
 
 ## v0.3 — Knowledge
 
