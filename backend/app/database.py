@@ -166,6 +166,93 @@ class LlmProvider(Base):
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class EvalSuite(Base):
+    __tablename__ = "eval_suites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False)
+    description = Column(String(500), default="")
+    assistant_id = Column(String(32), ForeignKey("assistants.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    cases = relationship(
+        "EvalCase",
+        back_populates="suite",
+        cascade="all, delete-orphan",
+        order_by="EvalCase.sort_order",
+    )
+    runs = relationship("EvalRun", back_populates="suite", cascade="all, delete-orphan")
+
+
+class EvalCase(Base):
+    __tablename__ = "eval_cases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suite_id = Column(Integer, ForeignKey("eval_suites.id"), nullable=False)
+    input_text = Column(Text, nullable=False)
+    expected_text = Column(Text, default="")
+    match_type = Column(String(16), default="contains")  # contains | exact
+    sort_order = Column(Integer, default=0)
+
+    suite = relationship("EvalSuite", back_populates="cases")
+
+
+class EvalRun(Base):
+    __tablename__ = "eval_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suite_id = Column(Integer, ForeignKey("eval_suites.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True)
+    status = Column(String(16), default="completed")
+    pass_count = Column(Integer, default=0)
+    fail_count = Column(Integer, default=0)
+    total_count = Column(Integer, default=0)
+    avg_latency_ms = Column(Integer, default=0)
+    results_json = Column(Text, default="[]")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+    suite = relationship("EvalSuite", back_populates="runs")
+
+
+class FineTuneDataset(Base):
+    __tablename__ = "finetune_datasets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False)
+    description = Column(String(500), default="")
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    rows_json = Column(Text, default="[]")
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    jobs = relationship("FineTuneJob", back_populates="dataset", cascade="all, delete-orphan")
+
+
+class FineTuneJob(Base):
+    __tablename__ = "finetune_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dataset_id = Column(Integer, ForeignKey("finetune_datasets.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True)
+    provider_id = Column(Integer, ForeignKey("llm_providers.id"), nullable=True)
+    base_model = Column(String(120), default="gpt-4o-mini-2024-07-18")
+    status = Column(String(24), default="pending")
+    openai_file_id = Column(String(64), default="")
+    job_id = Column(String(64), default="")
+    fine_tuned_model = Column(String(120), default="")
+    error_message = Column(Text, default="")
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    dataset = relationship("FineTuneDataset", back_populates="jobs")
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
 

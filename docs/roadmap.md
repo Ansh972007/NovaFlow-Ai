@@ -1,20 +1,18 @@
 # Roadmap
 
-## v1.5 — Multiple model providers + key vault (current)
+## v1.6 — Evaluation & fine-tune (current)
 
-- [x] Provider vault with Fernet-encrypted API keys (derived from `JWT_SECRET`)
-- [x] Provider types: OpenAI, Anthropic, Azure OpenAI, OpenAI-compatible
-- [x] Add / activate / delete providers in Settings
-- [x] Active provider drives chat, workflows, and embeddings
-- [x] Anthropic streaming support for chat and workflows
+- [x] Benchmark suites — test cases against assistants with RAG, pass/fail scoring
+- [x] Eval runs — latency, pass rate, per-case results
+- [x] Fine-tune datasets — user/assistant training rows (JSONL export)
+- [x] OpenAI fine-tuning jobs — upload, start, status refresh
+- [x] Evaluation UI at `/evaluation` (Benchmarks + Fine-tune tabs)
+
+## v1.5 — Multiple model providers + key vault (done)
 
 ## v1.4 — Advanced workflow nodes (done)
 
-- [x] Transform, condition, HTTP nodes · zoom/pan builder · node delete & manual connect
-
 ## v1.3 — Multi-tenant workspaces (done)
-
-- [x] Workspace model with members and resource scoping
 
 ## v1.2 — SSO / OAuth (done)
 
@@ -22,10 +20,12 @@
 
 ## v1.0 — Launch (done)
 
-## Remaining for full enterprise product
+## Future enhancements
 
-| Feature | Est. effort |
-|---------|-------------|
-| Fine-tune & evaluation | 2–3 weeks |
+| Feature | Notes |
+|---------|--------|
+| LLM-as-judge eval scoring | Subjective quality metrics |
+| Bulk CSV import for eval/finetune | Larger datasets |
+| Auto-apply fine-tuned model to provider | One-click activation |
 
-**~2–3 weeks part-time** for full Bisheng-class parity from v1.5.
+**NovaFlow v1.6** reaches core enterprise parity for assistant quality and customization.

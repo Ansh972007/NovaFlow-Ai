@@ -16,6 +16,7 @@ export default function AppHeader({ user, links = [] }) {
     { href: "/knowledge", label: "Knowledge" },
     { href: "/apps", label: "Apps" },
     { href: "/workflows", label: "Workflows" },
+    { href: "/evaluation", label: "Evaluation" },
   ];
 
   const navLinks = links.length ? links : defaultLinks;
