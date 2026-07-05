@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Logo from "@/components/Logo";
 import Magnetic from "@/components/Magnetic";
@@ -65,6 +66,7 @@ function AuthInput({ id, label, type, value, onChange, onFocus, onBlur, focused,
           onFocus={onFocus}
           onBlur={onBlur}
           placeholder={placeholder}
+          suppressHydrationWarning
           className={`input-field input-field-glow relative w-full transition-all ${
             focused ? "border-foreground bg-white shadow-[0_8px_30px_rgba(0,0,0,0.06)]" : ""
           } ${trailing ? "pr-14" : ""}`}
@@ -97,6 +99,33 @@ export default function AuthFormPanel({
   handleSubmit,
   oauthProviders = [],
 }) {
+  const [clientReady, setClientReady] = useState(false);
+
+  useEffect(() => {
+    setClientReady(true);
+  }, []);
+
+  if (!clientReady) {
+    return (
+      <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10 sm:px-8">
+        <div className="relative z-10 w-full max-w-[460px]">
+          <div className="gradient-border shadow-[0_40px_100px_rgba(0,0,0,0.1)]">
+            <div className="relative min-h-[520px] overflow-hidden rounded-[1.35rem] bg-white/90 p-8 backdrop-blur-xl sm:p-10">
+              <div className="animate-pulse space-y-6" aria-hidden>
+                <div className="h-1 rounded-full bg-surface" />
+                <div className="h-11 rounded-full bg-surface" />
+                <div className="h-8 w-2/3 rounded-lg bg-surface" />
+                <div className="h-12 rounded-xl bg-surface" />
+                <div className="h-12 rounded-xl bg-surface" />
+                <div className="h-14 rounded-full bg-surface" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10 sm:px-8">
       <div className="relative z-10 mb-8 w-full max-w-[460px] lg:hidden">

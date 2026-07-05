@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export default function Logo({ size = "md", variant = "light" }) {
+export default function Logo({ size = "md", variant = "light", href = "/", className = "" }) {
   const sizes = {
     sm: { icon: "h-8 w-8 text-xs", text: "text-base" },
     md: { icon: "h-9 w-9 text-sm", text: "text-lg" },
@@ -10,7 +10,7 @@ export default function Logo({ size = "md", variant = "light" }) {
   const isDark = variant === "dark";
 
   return (
-    <Link href="/" className="group flex items-center gap-3">
+    <Link href={href} className={`group flex items-center gap-3 ${className}`.trim()}>
       <span
         className={`${s.icon} flex items-center justify-center rounded-full font-bold transition-transform duration-300 group-hover:scale-105 ${
           isDark
