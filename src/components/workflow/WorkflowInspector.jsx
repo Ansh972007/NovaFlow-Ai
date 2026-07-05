@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { NODE_META } from "./WorkflowCanvas";
 
@@ -9,8 +10,13 @@ export default function WorkflowInspector({
   tab,
   onTabChange,
   selected,
+  nodes = [],
+  edges = [],
   knowledgeBases,
   onUpdateNode,
+  onConnect,
+  onDisconnect,
+  onDeleteNode,
   runInput,
   onRunInputChange,
   onRun,
@@ -19,6 +25,22 @@ export default function WorkflowInspector({
   recentRuns,
   readOnly = false,
 }) {
+  const [connectTarget, setConnectTarget] = useState("");
+  const [connectSource, setConnectSource] = useState("");
+
+  const outgoing = selected
+    ? edges.filter((e) => e.from === selected.id)
+    : [];
+  const incoming = selected
+    ? edges.filter((e) => e.to === selected.id)
+    : [];
+  const otherNodes = selected
+    ? nodes.filter((n) => n.id !== selected.id)
+    : [];
+
+  function nodeLabel(n) {
+    return n.data?.label || n.data?.prompt?.slice(0, 24) || n.type;
+  }
   const tabs = [
     { id: "configure", label: "Configure" },
     { id: "test", label: "Test run" },
@@ -69,16 +91,29 @@ export default function WorkflowInspector({
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-3 rounded-2xl border border-white/70 bg-white/60 p-3 backdrop-blur-sm">
-                    <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 workflow-node-${selected.type}`}>
-                      <span className="text-[10px] font-bold uppercase text-neutral-500">{selected.type.slice(0, 2)}</span>
+                  <div className="flex items-start gap-3 rounded-2xl border border-white/70 bg-white/60 p-3 backdrop-blur-sm">
+                    <div
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 workflow-node-${selected.type}`}
+                    >
+                      <span className="text-[10px] font-bold uppercase text-neutral-500">
+                        {selected.type.slice(0, 2)}
+                      </span>
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="workspace-section-label">Selected</p>
                       <h3 className="text-base font-semibold capitalize tracking-tight">
                         {NODE_META[selected.type]?.label || selected.type}
                       </h3>
                     </div>
+                    {!readOnly && onDeleteNode && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteNode(selected.id)}
+                        className="workspace-btn-ghost workspace-btn-danger shrink-0 !px-2.5 !py-1.5 text-xs"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
 
                   {selected.type === "retrieve" && (
@@ -237,6 +272,141 @@ export default function WorkflowInspector({
                         />
                       </label>
                     </>
+                  )}
+
+                  {!readOnly && onConnect && otherNodes.length > 0 && (
+                    <div className="mt-6 rounded-xl border border-black/[0.06] bg-white/50 p-3">
+                      <p className="text-xs font-semibold text-neutral-600">Connections</p>
+                      <p className="mt-1 text-[11px] text-neutral-400">
+                        New nodes stay unconnected — use Connect from / Connect to below.
+                      </p>
+
+                      {incoming.length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">
+                            Incoming
+                          </p>
+                          <ul className="mt-1.5 space-y-1.5">
+                            {incoming.map((e) => {
+                              const source = nodes.find((n) => n.id === e.from);
+                              return (
+                                <li
+                                  key={`in-${e.from}-${e.to}`}
+                                  className="flex items-center justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-1.5 text-xs"
+                                >
+                                  <span className="truncate text-neutral-700">
+                                    ← {source ? nodeLabel(source) : e.from}
+                                    {source ? ` (${source.type})` : ""}
+                                  </span>
+                                  {onDisconnect && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onDisconnect(e.from, e.to)}
+                                      className="shrink-0 text-[10px] font-semibold text-red-600 hover:text-red-700"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      )}
+
+                      {selected.type !== "trigger" && (
+                        <div className="mt-3 flex gap-2">
+                          <select
+                            value={connectSource}
+                            onChange={(e) => setConnectSource(e.target.value)}
+                            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white/90 px-2 py-2 text-xs"
+                          >
+                            <option value="">Connect from…</option>
+                            {otherNodes.map((n) => (
+                              <option key={n.id} value={n.id}>
+                                {nodeLabel(n)} ({n.type})
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!connectSource}
+                            onClick={() => {
+                              if (connectSource) {
+                                onConnect(connectSource, selected.id);
+                                setConnectSource("");
+                              }
+                            }}
+                            className="shrink-0 rounded-lg bg-neutral-900 px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-40"
+                          >
+                            Link
+                          </button>
+                        </div>
+                      )}
+
+                      {outgoing.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">
+                            Outgoing
+                          </p>
+                          <ul className="mt-1.5 space-y-1.5">
+                            {outgoing.map((e) => {
+                              const target = nodes.find((n) => n.id === e.to);
+                              return (
+                                <li
+                                  key={`out-${e.from}-${e.to}`}
+                                  className="flex items-center justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-1.5 text-xs"
+                                >
+                                  <span className="truncate text-neutral-700">
+                                    → {target ? nodeLabel(target) : e.to}
+                                    {target ? ` (${target.type})` : ""}
+                                  </span>
+                                  {onDisconnect && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onDisconnect(e.from, e.to)}
+                                      className="shrink-0 text-[10px] font-semibold text-red-600 hover:text-red-700"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      )}
+
+                      {selected.type !== "output" && (
+                        <div className="mt-3 flex gap-2">
+                          <select
+                            value={connectTarget}
+                            onChange={(e) => setConnectTarget(e.target.value)}
+                            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white/90 px-2 py-2 text-xs"
+                          >
+                            <option value="">Connect to…</option>
+                            {otherNodes.map((n) => (
+                              <option key={n.id} value={n.id}>
+                                {nodeLabel(n)} ({n.type})
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!connectTarget}
+                            onClick={() => {
+                              if (connectTarget) {
+                                onConnect(selected.id, connectTarget);
+                                setConnectTarget("");
+                              }
+                            }}
+                            className="shrink-0 rounded-lg bg-neutral-900 px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-40"
+                          >
+                            Link
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </>
               )}

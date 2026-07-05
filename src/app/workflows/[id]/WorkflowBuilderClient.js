@@ -104,8 +104,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
     const newNode = {
       id,
       type,
-      x: maxX + 180,
-      y: 140 + ((graph.nodes?.length || 0) % 3) * 40,
+      x: maxX + 200,
+      y: 120 + ((graph.nodes?.length || 0) % 4) * 80,
       data: { ...(ADD_NODE_DEFAULTS[type] || {}) },
     };
     setGraph((prev) => ({
@@ -114,6 +114,36 @@ export default function WorkflowBuilderClient({ workflowId }) {
     }));
     setSelectedId(id);
     setInspectorTab("configure");
+    setSaved(false);
+  }
+
+  function connectNodes(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    setGraph((prev) => {
+      const exists = (prev.edges || []).some((e) => e.from === fromId && e.to === toId);
+      if (exists) return prev;
+      return { ...prev, edges: [...(prev.edges || []), { from: fromId, to: toId }] };
+    });
+    setSaved(false);
+  }
+
+  function disconnectEdge(fromId, toId) {
+    setGraph((prev) => ({
+      ...prev,
+      edges: (prev.edges || []).filter((e) => !(e.from === fromId && e.to === toId)),
+    }));
+    setSaved(false);
+  }
+
+  function deleteNode(nodeId) {
+    if (user?.role === "viewer") return;
+    const remaining = (graph.nodes || []).filter((n) => n.id !== nodeId);
+    setGraph((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).filter((n) => n.id !== nodeId),
+      edges: (prev.edges || []).filter((e) => e.from !== nodeId && e.to !== nodeId),
+    }));
+    setSelectedId((id) => (id === nodeId ? remaining[0]?.id ?? null : id));
     setSaved(false);
   }
 
@@ -324,8 +354,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
         <aside className="workflow-studio-rail hidden w-[240px] shrink-0 flex-col border-r border-white/60 lg:flex">
           <div className="border-b border-black/[0.04] p-4">
             <p className="workspace-section-label">Pipeline</p>
-            <p className="mt-1 text-xs text-neutral-500">
-              {graph.nodes?.length || 0} nodes · drag on canvas
+              <p className="mt-1 text-xs text-neutral-500">
+              {graph.nodes?.length || 0} nodes · connect in Configure panel
             </p>
           </div>
           <ul className="min-h-0 flex-1 space-y-0 overflow-y-auto p-3">
@@ -336,38 +366,60 @@ export default function WorkflowBuilderClient({ workflowId }) {
               const isLast = i === (graph.nodes?.length || 0) - 1;
               return (
                 <li key={node.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(node.id);
-                      setInspectorTab("configure");
-                    }}
-                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-all ${
-                      active
-                        ? "bg-neutral-900 text-white shadow-lg shadow-neutral-900/15"
-                        : "bg-white/50 hover:bg-white/85"
-                    }`}
-                  >
-                    <span
-                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 ${
-                        active ? "border-white/30 bg-white/10 wf-rail-active-ring" : `border-transparent ${meta?.accent || ""} bg-white/90`
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedId(node.id);
+                        setInspectorTab("configure");
+                      }}
+                      className={`flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-all ${
+                        active
+                          ? "bg-neutral-900 text-white shadow-lg shadow-neutral-900/15"
+                          : "bg-white/50 hover:bg-white/85"
                       }`}
                     >
-                      <Icon size={16} />
-                      {active && (
-                        <span className="absolute -inset-1 rounded-full border border-dashed border-white/40 animate-spin" style={{ animationDuration: "8s" }} />
-                      )}
-                      {running && (
-                        <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white animate-pulse" />
-                      )}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[9px] font-bold uppercase tracking-[0.14em] opacity-60">
-                        Step {String(i + 1).padStart(2, "0")}
+                      <span
+                        className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 ${
+                          active
+                            ? "border-white/30 bg-white/10 wf-rail-active-ring"
+                            : `border-transparent ${meta?.accent || ""} bg-white/90`
+                        }`}
+                      >
+                        <Icon size={16} />
+                        {active && (
+                          <span
+                            className="absolute -inset-1 rounded-full border border-dashed border-white/40 animate-spin"
+                            style={{ animationDuration: "8s" }}
+                          />
+                        )}
+                        {running && (
+                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white animate-pulse" />
+                        )}
                       </span>
-                      <span className="block truncate text-xs font-semibold">{nodeSubtitle(node)}</span>
-                    </span>
-                  </button>
+                      <span className="min-w-0">
+                        <span className="block text-[9px] font-bold uppercase tracking-[0.14em] opacity-60">
+                          Step {String(i + 1).padStart(2, "0")}
+                        </span>
+                        <span className="block truncate text-xs font-semibold">{nodeSubtitle(node)}</span>
+                      </span>
+                    </button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => deleteNode(node.id)}
+                        className={`shrink-0 rounded-xl px-2 py-2 text-xs font-semibold transition-colors ${
+                          active
+                            ? "text-white/70 hover:bg-white/10 hover:text-white"
+                            : "text-neutral-400 hover:bg-red-50 hover:text-red-600"
+                        }`}
+                        title="Delete node"
+                        aria-label={`Delete ${nodeSubtitle(node)}`}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                   {!isLast && <div className="wf-rail-connector" aria-hidden />}
                 </li>
               );
@@ -406,6 +458,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
               </div>
             ) : (
               <WorkflowCanvas
+                key={workflowId}
                 graph={graph}
                 onChange={
                   readOnly
@@ -418,6 +471,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 flowing={running}
+                readOnly={readOnly}
               />
             )}
           </motion.div>
@@ -427,8 +481,13 @@ export default function WorkflowBuilderClient({ workflowId }) {
           tab={inspectorTab}
           onTabChange={setInspectorTab}
           selected={selected}
+          nodes={graph.nodes || []}
+          edges={graph.edges || []}
           knowledgeBases={libraries}
           onUpdateNode={readOnly ? () => {} : updateNode}
+          onConnect={readOnly ? undefined : connectNodes}
+          onDisconnect={readOnly ? undefined : disconnectEdge}
+          onDeleteNode={readOnly ? undefined : deleteNode}
           runInput={runInput}
           onRunInputChange={setRunInput}
           onRun={handleRun}

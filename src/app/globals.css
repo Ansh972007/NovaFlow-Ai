@@ -1147,6 +1147,57 @@ body {
   animation: wf-port-dot-pulse 2.2s ease-in-out infinite;
 }
 
+.workflow-node-port-interactive {
+  width: 12px;
+  height: 12px;
+  cursor: crosshair;
+  pointer-events: auto;
+  opacity: 0.85;
+}
+
+.workflow-node-port-interactive:hover {
+  opacity: 1;
+  transform: scale(1.35);
+}
+
+.workflow-node-port-connecting {
+  animation: wf-port-connecting 0.8s ease-in-out infinite;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.25);
+}
+
+.workflow-node-port-target {
+  animation: wf-port-target 1s ease-in-out infinite;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+}
+
+@keyframes wf-port-connecting {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.45); }
+}
+
+@keyframes wf-port-target {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+
+.workflow-canvas-toolbar-btn {
+  display: flex;
+  height: 2rem;
+  width: 2rem;
+  min-width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(64 64 64);
+  transition: background-color 0.15s ease;
+}
+
+.workflow-canvas-toolbar-btn:hover {
+  background-color: rgb(245 245 245);
+}
+
 @keyframes wf-port-dot-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.2); }
