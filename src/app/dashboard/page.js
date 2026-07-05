@@ -6,10 +6,11 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import AnalyticsCharts from "@/components/dashboard/AnalyticsCharts";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
 import { getOnlineApps, getAssistants } from "@/lib/api/apps";
-import { getAnalyticsSummary } from "@/lib/api/analytics";
+import { getAnalyticsSummary, getAnalyticsTimeseries, getAnalyticsAssistants } from "@/lib/api/analytics";
 import { checkBackendHealth } from "@/lib/api/health";
 import { listKnowledge } from "@/lib/api/knowledge";
 import { loadSessions } from "@/lib/chat/storage";
@@ -107,6 +108,8 @@ export default function DashboardPage() {
   const [healthOk, setHealthOk] = useState(null);
   const [recentSessions, setRecentSessions] = useState([]);
   const [recentRuns, setRecentRuns] = useState([]);
+  const [chartSeries, setChartSeries] = useState([]);
+  const [topAssistants, setTopAssistants] = useState([]);
   const [stats, setStats] = useState([
     { value: "0", label: "Chat sessions", hint: "Local history" },
     { value: "0", label: "Assistants", hint: "Published & draft" },
@@ -150,8 +153,15 @@ export default function DashboardPage() {
         }
 
         try {
-          analytics = await getAnalyticsSummary();
-          setRecentRuns(analytics?.recent_runs || []);
+          const [summary, ts, usage] = await Promise.all([
+            getAnalyticsSummary(),
+            getAnalyticsTimeseries(7).catch(() => null),
+            getAnalyticsAssistants(7).catch(() => null),
+          ]);
+          analytics = summary;
+          setRecentRuns(summary?.recent_runs || []);
+          setChartSeries(ts?.series || []);
+          setTopAssistants(usage?.items || []);
         } catch {
           analytics = null;
         }
@@ -264,6 +274,17 @@ export default function DashboardPage() {
               </div>
             )}
           </motion.section>
+
+          {user && (
+            <motion.section
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.28, ease }}
+              className="mt-8"
+            >
+              <AnalyticsCharts series={chartSeries} assistants={topAssistants} />
+            </motion.section>
+          )}
 
           <div className="mt-10 grid gap-8 lg:grid-cols-[1fr_320px]">
             {/* Modules */}

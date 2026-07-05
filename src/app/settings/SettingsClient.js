@@ -11,6 +11,7 @@ import { getUserInfo } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
 import { getAllLlm, getAssistantLlmConfig, getKnowledgeLlmConfig } from "@/lib/api/llm";
 import { getApiBaseUrl } from "@/lib/api/config";
+import { getTeamMembers, updateMemberRole } from "@/lib/api/analytics";
 import { resetSetup } from "@/lib/setup/storage";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -23,6 +24,8 @@ export default function SettingsClient() {
   const [assistantCfg, setAssistantCfg] = useState(null);
   const [knowledgeCfg, setKnowledgeCfg] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [team, setTeam] = useState([]);
+  const [teamBusy, setTeamBusy] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +54,25 @@ export default function SettingsClient() {
   useEffect(() => {
     if (user) load();
   }, [user, load]);
+
+  useEffect(() => {
+    if (user?.role === "admin") {
+      getTeamMembers()
+        .then((m) => setTeam(Array.isArray(m) ? m : m?.data || []))
+        .catch(() => setTeam([]));
+    }
+  }, [user]);
+
+  async function handleRoleChange(memberId, role) {
+    setTeamBusy(memberId);
+    try {
+      await updateMemberRole(memberId, role);
+      const m = await getTeamMembers();
+      setTeam(Array.isArray(m) ? m : m?.data || []);
+    } finally {
+      setTeamBusy(null);
+    }
+  }
 
   function handleRerunSetup() {
     resetSetup();
@@ -167,6 +189,41 @@ export default function SettingsClient() {
                 )}
               </div>
             </motion.div>
+
+            {user.role === "admin" && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2, ease }}
+                className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+              >
+                <h2 className="text-lg font-semibold tracking-tight">Team & roles</h2>
+                <p className="mt-1 text-sm text-neutral-500">Manage workspace access for your team.</p>
+                <ul className="mt-5 space-y-2">
+                  {team.map((member) => (
+                    <li
+                      key={member.user_id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/60 bg-white/55 px-4 py-2.5 backdrop-blur-sm"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{member.user_name}</p>
+                        <p className="text-[11px] text-neutral-400">ID {member.user_id}</p>
+                      </div>
+                      <select
+                        value={member.role || "editor"}
+                        disabled={teamBusy === member.user_id}
+                        onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
+                        className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs font-semibold"
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="editor">Editor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            )}
 
             <motion.div
               initial={{ opacity: 0, y: 12 }}

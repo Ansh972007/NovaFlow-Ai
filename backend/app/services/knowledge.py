@@ -1,11 +1,13 @@
+import json
 import re
 from pathlib import Path
 
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
-from app.config import UPLOAD_DIR
+from app.config import OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL, UPLOAD_DIR
 from app.database import KnowledgeBase, KnowledgeChunk, KnowledgeFile
+from app.services.embeddings import embed_texts_sync, parse_embedding, rank_by_embedding
 
 
 def extract_text(path: Path) -> str:
@@ -36,6 +38,20 @@ def chunk_text(text: str, size: int = 1000, overlap: int = 100) -> list[str]:
     return chunks
 
 
+def _embed_chunks(db: Session, kb: KnowledgeBase, chunk_rows: list[KnowledgeChunk]):
+    if not OPENAI_API_KEY or not chunk_rows:
+        return
+    model = kb.model or OPENAI_EMBEDDING_MODEL
+    batch_size = 32
+    for i in range(0, len(chunk_rows), batch_size):
+        batch = chunk_rows[i : i + batch_size]
+        texts = [(c.text or "")[:8000] for c in batch]
+        vectors = embed_texts_sync(texts, model)
+        for chunk, vec in zip(batch, vectors):
+            chunk.embedding_json = json.dumps(vec)
+    db.commit()
+
+
 def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 1000, chunk_overlap: int = 100):
     record.status = 1
     db.commit()
@@ -44,22 +60,27 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
         text = extract_text(path)
         pieces = chunk_text(text, chunk_size, chunk_overlap)
         db.query(KnowledgeChunk).filter(KnowledgeChunk.file_id == record.id).delete()
+        chunk_rows: list[KnowledgeChunk] = []
         for i, piece in enumerate(pieces):
-            db.add(
-                KnowledgeChunk(
-                    knowledge_id=record.knowledge_id,
-                    file_id=record.id,
-                    chunk_index=i,
-                    text=piece,
-                )
+            row = KnowledgeChunk(
+                knowledge_id=record.knowledge_id,
+                file_id=record.id,
+                chunk_index=i,
+                text=piece,
             )
+            db.add(row)
+            chunk_rows.append(row)
+        db.commit()
+        kb = db.get(KnowledgeBase, record.knowledge_id)
+        if kb and chunk_rows:
+            _embed_chunks(db, kb, chunk_rows)
         record.status = 2 if pieces else 3
     except Exception:
         record.status = 3
     db.commit()
 
 
-def search_chunks_semantic(db: Session, knowledge_id: int, query: str, limit: int = 5) -> list[dict]:
+def _token_search(db: Session, knowledge_id: int, query: str, limit: int) -> list[dict]:
     q_tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
     if not q_tokens:
         return []
@@ -94,9 +115,54 @@ def search_chunks_semantic(db: Session, knowledge_id: int, query: str, limit: in
                 "file_id": file.id,
                 "file_name": file.file_name,
                 "score": round(score, 3),
+                "method": "keyword",
             }
         )
     return data
+
+
+def _vector_search(db: Session, knowledge_id: int, query: str, limit: int, model: str) -> list[dict]:
+    if not OPENAI_API_KEY:
+        return []
+    vectors = embed_texts_sync([query[:8000]], model)
+    if not vectors:
+        return []
+    query_vec = vectors[0]
+
+    rows = (
+        db.query(KnowledgeChunk, KnowledgeFile)
+        .join(KnowledgeFile, KnowledgeChunk.file_id == KnowledgeFile.id)
+        .filter(KnowledgeChunk.knowledge_id == knowledge_id, KnowledgeFile.status == 2)
+        .all()
+    )
+    prepared = [(chunk, file, parse_embedding(chunk.embedding_json)) for chunk, file in rows]
+    ranked = rank_by_embedding(prepared, query_vec, limit)
+    data = []
+    for score, chunk, file in ranked:
+        data.append(
+            {
+                "text": chunk.text,
+                "chunk_index": chunk.chunk_index,
+                "file_id": file.id,
+                "file_name": file.file_name,
+                "score": round(score, 4),
+                "method": "vector",
+            }
+        )
+    return data
+
+
+def search_chunks_semantic(db: Session, knowledge_id: int, query: str, limit: int = 5) -> list[dict]:
+    if not query.strip():
+        return []
+
+    kb = db.get(KnowledgeBase, knowledge_id)
+    model = (kb.model if kb else None) or OPENAI_EMBEDDING_MODEL
+
+    vector_hits = _vector_search(db, knowledge_id, query.strip(), limit, model)
+    if vector_hits:
+        return vector_hits
+    return _token_search(db, knowledge_id, query.strip(), limit)
 
 
 def search_chunks(db: Session, knowledge_id: int, keyword: str, page: int, limit: int):
@@ -154,6 +220,7 @@ def rag_context_for_assistant(db: Session, assistant_id: str, query: str, limit:
     if not hits:
         return ""
 
+    hits.sort(key=lambda h: h.get("score", 0), reverse=True)
     parts = []
     for i, hit in enumerate(hits[:limit], 1):
         source = hit.get("file_name") or "document"

@@ -22,6 +22,7 @@ async def lifespan(_app: FastAPI):
             admin = User(
                 user_name=ADMIN_USER,
                 password=md5_hash(ADMIN_PASSWORD),
+                role="admin",
             )
             db.add(admin)
             db.commit()
@@ -31,7 +32,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="NovaFlow API", version="0.6.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="0.7.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,4 +58,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "0.6.0"})
+    return ok({"name": "NovaFlow API", "version": "0.7.0"})

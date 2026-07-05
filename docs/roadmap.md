@@ -1,6 +1,14 @@
 # Roadmap
 
-## v0.6 — Workflow builder + analytics (current)
+## v0.7 — Embeddings, workflow chat, analytics charts, team roles (current)
+
+- [x] OpenAI vector embeddings on knowledge ingest (cosine search + keyword fallback)
+- [x] Workflow WebSocket chat for published workflows (`/workflow/chat/{id}`)
+- [x] Analytics timeseries + top apps charts on dashboard
+- [x] Team roles (admin / editor / viewer) + settings UI for admins
+- [x] DB migrations for `embedding_json` and `user.role`
+
+## v0.6 — Workflow builder + analytics (done)
 
 - [x] Workflow CRUD API + DB models
 - [x] Visual workflow builder (`/workflows/[id]`)
@@ -49,12 +57,12 @@
 - [x] API client + auth encryption
 - [x] Dashboard shell
 
-## v0.7 — Next
+## v0.8 — Next
 
-- [ ] Vector embeddings (OpenAI / Milvus)
-- [ ] Workflow WebSocket chat for published workflows
-- [ ] Team roles & permissions
-- [ ] Assistant analytics charts
+- [ ] Milvus vector store (production scale)
+- [ ] Viewer role enforcement on mutating APIs
+- [ ] Per-assistant analytics detail page
+- [ ] Workflow run WebSocket progress events
 
 ## v1.0 — Launch
 

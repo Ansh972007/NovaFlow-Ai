@@ -132,8 +132,38 @@ async def run_workflow(db: Session, workflow: Workflow, user_id: int, user_input
     except json.JSONDecodeError:
         graph = {"nodes": [], "edges": []}
 
-    context = {"input": user_input.strip(), "retrieved": "", "output": ""}
+    context, steps = await _execute_graph(db, user_id, graph, user_input.strip())
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    final_output = context["output"] or context["input"]
+
+    run = WorkflowRun(
+        workflow_id=workflow.id,
+        user_id=user_id,
+        input_text=user_input[:4000],
+        output_text=final_output[:8000],
+        status=1,
+        duration_ms=duration_ms,
+        steps_json=json.dumps(steps),
+    )
+    db.add(run)
+    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms})
+    db.commit()
+
+    return {
+        "workflow_id": workflow.id,
+        "output": final_output,
+        "steps": steps,
+        "duration_ms": duration_ms,
+        "run_id": run.id,
+    }
+
+
+async def _execute_graph(
+    db: Session, user_id: int, graph: dict, user_input: str, *, skip_llm: bool = False
+) -> tuple[dict, list[dict]]:
+    context = {"input": user_input, "retrieved": "", "output": ""}
     steps: list[dict] = []
+    llm_messages: tuple[str, str] | None = None
 
     for node in _topo_order(graph):
         ntype = node.get("type")
@@ -166,9 +196,13 @@ async def run_workflow(db: Session, workflow: Workflow, user_id: int, user_input
                     f"Question: {context['input']}\n\n"
                     f"--- Retrieved context ---\n{context['retrieved']}\n--- End context ---"
                 )
-            reply = await stream_chat_sync(prompt, user_msg)
-            context["output"] = reply
-            step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
+            llm_messages = (prompt, user_msg)
+            if skip_llm:
+                step["output"] = "(streaming)"
+            else:
+                reply = await stream_chat_sync(prompt, user_msg)
+                context["output"] = reply
+                step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
         elif ntype == "output":
             step["output"] = context["output"] or context["input"]
         else:
@@ -176,26 +210,21 @@ async def run_workflow(db: Session, workflow: Workflow, user_id: int, user_input
 
         steps.append(step)
 
-    duration_ms = int((time.perf_counter() - start) * 1000)
-    final_output = context["output"] or context["input"]
+    if skip_llm and llm_messages:
+        context["_llm_system"] = llm_messages[0]
+        context["_llm_user"] = llm_messages[1]
 
-    run = WorkflowRun(
-        workflow_id=workflow.id,
-        user_id=user_id,
-        input_text=user_input[:4000],
-        output_text=final_output[:8000],
-        status=1,
-        duration_ms=duration_ms,
-        steps_json=json.dumps(steps),
-    )
-    db.add(run)
-    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms})
-    db.commit()
+    return context, steps
 
-    return {
-        "workflow_id": workflow.id,
-        "output": final_output,
-        "steps": steps,
-        "duration_ms": duration_ms,
-        "run_id": run.id,
-    }
+
+async def resolve_workflow_llm_messages(
+    db: Session, workflow: Workflow, user_id: int, user_input: str
+) -> tuple[str, str]:
+    try:
+        graph = json.loads(workflow.graph_json or "{}")
+    except json.JSONDecodeError:
+        graph = {"nodes": [], "edges": []}
+    context, _ = await _execute_graph(db, user_id, graph, user_input.strip(), skip_llm=True)
+    system = context.get("_llm_system") or "You are a helpful assistant."
+    user_msg = context.get("_llm_user") or user_input.strip()
+    return system, user_msg

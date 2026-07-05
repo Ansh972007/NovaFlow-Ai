@@ -25,6 +25,7 @@ class User(Base):
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     user_name = Column(String(64), unique=True, nullable=False, index=True)
     password = Column(String(128), nullable=False)
+    role = Column(String(16), default="editor")  # admin | editor | viewer
     delete = Column(Integer, default=0)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -81,6 +82,7 @@ class KnowledgeChunk(Base):
     file_id = Column(Integer, ForeignKey("knowledge_files.id"), nullable=False)
     chunk_index = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
+    embedding_json = Column(Text, default="")
 
     file = relationship("KnowledgeFile", back_populates="chunks")
 
@@ -135,8 +137,27 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_ar
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
+def migrate_schema():
+    """Lightweight SQLite/MySQL column migrations for dev upgrades."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "knowledge_chunks" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("knowledge_chunks")}
+        if "embedding_json" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN embedding_json TEXT DEFAULT ''"))
+    if "users" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("users")}
+        if "role" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(16) DEFAULT 'editor'"))
+                conn.execute(text("UPDATE users SET role = 'admin' WHERE user_id = 1"))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    migrate_schema()
 
 
 def get_db():

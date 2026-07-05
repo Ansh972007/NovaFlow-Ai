@@ -17,7 +17,7 @@ def user_read(user: User, access_token: str | None = None) -> dict:
         "user_name": user.user_name,
         "email": None,
         "delete": user.delete,
-        "role": "admin" if user.user_id == 1 else "user",
+        "role": user.role or ("admin" if user.user_id == 1 else "editor"),
         "access_token": access_token,
         "create_time": user.create_time.isoformat() if user.create_time else None,
         "update_time": user.update_time.isoformat() if user.update_time else None,

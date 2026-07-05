@@ -5,10 +5,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app.crypto import decode_token
-from app.database import Assistant, SessionLocal
+from app.database import Assistant, SessionLocal, Workflow
 from app.services.knowledge import rag_context_for_assistant
 from app.services.llm import stream_chat
-from app.services.workflow import log_usage
+from app.services.workflow import log_usage, resolve_workflow_llm_messages
 
 router = APIRouter(tags=["Chat"])
 
@@ -21,6 +21,29 @@ def get_user_id_from_ws(websocket: WebSocket) -> int | None:
     if not payload:
         return None
     return int(payload["sub"])
+
+
+def _parse_user_message(payload: dict) -> str:
+    return (
+        payload.get("inputs", {}).get("input")
+        or payload.get("data", {}).get("dialog_input", {}).get("message")
+        or payload.get("data", {}).get("dialog_input", {}).get("data", {}).get("user_input")
+        or ""
+    )
+
+
+async def _stream_reply(websocket: WebSocket, db: Session, user_id: int, resource_id: str, event_type: str, system: str, user_msg: str):
+    await websocket.send_json({"type": "start"})
+    buffer = ""
+    async for token in stream_chat(system, user_msg):
+        buffer += token
+        await websocket.send_json(
+            {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
+        )
+        await asyncio.sleep(0)
+    await websocket.send_json({"type": "end", "message": {"content": buffer}})
+    await websocket.send_json({"type": "close"})
+    log_usage(db, user_id, event_type, resource_id, {"chars": len(buffer)})
 
 
 @router.websocket("/assistant/chat/{assistant_id}")
@@ -64,16 +87,10 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
             if payload.get("action") == "stop":
                 continue
 
-            user_msg = (
-                payload.get("inputs", {}).get("input")
-                or payload.get("data", {}).get("dialog_input", {}).get("message")
-                or ""
-            )
+            user_msg = _parse_user_message(payload)
             if not str(user_msg).strip():
                 continue
 
-            await websocket.send_json({"type": "start"})
-            buffer = ""
             rag = rag_context_for_assistant(db, assistant_id, str(user_msg).strip())
             system_prompt = assistant.prompt
             if rag:
@@ -83,15 +100,70 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     "If context does not help, answer from general knowledge.\n\n"
                     f"--- Context ---\n{rag}\n--- End context ---"
                 )
-            async for token in stream_chat(system_prompt, str(user_msg).strip()):
-                buffer += token
-                await websocket.send_json(
-                    {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
-                )
-                await asyncio.sleep(0)
-            await websocket.send_json({"type": "end", "message": {"content": buffer}})
-            await websocket.send_json({"type": "close"})
-            log_usage(db, user_id, "chat", assistant_id, {"chars": len(buffer)})
+            await _stream_reply(
+                websocket, db, user_id, assistant_id, "chat", system_prompt, str(user_msg).strip()
+            )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        db.close()
+
+
+@router.websocket("/workflow/chat/{workflow_id}")
+async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
+    await websocket.accept()
+    user_id = get_user_id_from_ws(websocket)
+    if not user_id:
+        await websocket.send_json({"type": "error", "category": "error", "message": "Unauthorized"})
+        await websocket.close()
+        return
+
+    db: Session = SessionLocal()
+    try:
+        workflow = db.get(Workflow, workflow_id)
+        if not workflow or workflow.user_id != user_id:
+            await websocket.send_json({"type": "error", "category": "error", "message": "Workflow not found"})
+            await websocket.close()
+            return
+        if workflow.status != 1:
+            await websocket.send_json({"type": "error", "category": "error", "message": "Workflow is not published"})
+            await websocket.close()
+            return
+
+        init_raw = await websocket.receive_text()
+        try:
+            json.loads(init_raw)
+        except json.JSONDecodeError:
+            pass
+
+        if workflow.desc:
+            await websocket.send_json(
+                {
+                    "category": "guide_word",
+                    "message": {"guide_word": workflow.desc, "msg": workflow.desc},
+                }
+            )
+
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            if payload.get("action") == "stop":
+                continue
+
+            user_msg = _parse_user_message(payload)
+            if not str(user_msg).strip():
+                continue
+
+            system, llm_user = await resolve_workflow_llm_messages(
+                db, workflow, user_id, str(user_msg).strip()
+            )
+            await _stream_reply(
+                websocket, db, user_id, workflow.id, "workflow_chat", system, llm_user
+            )
     except WebSocketDisconnect:
         pass
     finally:
