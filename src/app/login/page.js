@@ -8,6 +8,7 @@ import LiveBackground from "@/components/LiveBackground";
 import CursorGlow from "@/components/CursorGlow";
 import { login, register } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
+import { getOAuthProviders } from "@/lib/api/oauth";
 
 function LoginForm() {
   const router = useRouter();
@@ -24,6 +25,7 @@ function LoginForm() {
   const [checkingBackend, setCheckingBackend] = useState(false);
   const [focused, setFocused] = useState(null);
   const [greeting, setGreeting] = useState(0);
+  const [oauthProviders, setOauthProviders] = useState([]);
 
   async function probeBackend() {
     setCheckingBackend(true);
@@ -39,6 +41,9 @@ function LoginForm() {
 
   useEffect(() => {
     probeBackend();
+    getOAuthProviders()
+      .then((list) => setOauthProviders(Array.isArray(list) ? list : []))
+      .catch(() => setOauthProviders([]));
   }, []);
 
   const formProgress = useMemo(() => {
@@ -114,6 +119,7 @@ function LoginForm() {
           formProgress={formProgress}
           switchMode={switchMode}
           handleSubmit={handleSubmit}
+          oauthProviders={oauthProviders}
         />
       </div>
     </div>

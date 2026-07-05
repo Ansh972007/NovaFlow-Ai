@@ -15,7 +15,7 @@ def user_read(user: User, access_token: str | None = None) -> dict:
     return {
         "user_id": user.user_id,
         "user_name": user.user_name,
-        "email": None,
+        "email": user.email,
         "delete": user.delete,
         "role": user.role or ("admin" if user.user_id == 1 else "editor"),
         "access_token": access_token,
@@ -75,6 +75,8 @@ def change_password(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if user.oauth_provider:
+        return fail(400, "This account uses SSO sign-in. Set a password via your identity provider or contact an admin.")
     try:
         current_hash = decrypt_password(body.current_password)
     except Exception:

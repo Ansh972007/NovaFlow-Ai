@@ -12,6 +12,7 @@ import { checkBackendHealth } from "@/lib/api/health";
 import { getAllLlm, getAssistantLlmConfig, getKnowledgeLlmConfig, getLlmSettings, updateLlmSettings } from "@/lib/api/llm";
 import { getApiBaseUrl } from "@/lib/api/config";
 import { getTeamMembers, updateMemberRole, downloadAuditExport } from "@/lib/api/analytics";
+import { getOAuthProviders } from "@/lib/api/oauth";
 import { resetSetup } from "@/lib/setup/storage";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -35,6 +36,7 @@ export default function SettingsClient() {
   const [pwdConfirm, setPwdConfirm] = useState("");
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwdMsg, setPwdMsg] = useState("");
+  const [ssoProviders, setSsoProviders] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,6 +74,9 @@ export default function SettingsClient() {
       getLlmSettings()
         .then(setProvider)
         .catch(() => setProvider(null));
+      getOAuthProviders()
+        .then((list) => setSsoProviders(Array.isArray(list) ? list : []))
+        .catch(() => setSsoProviders([]));
     }
   }, [user]);
 
@@ -258,6 +263,38 @@ export default function SettingsClient() {
                 )}
               </div>
             </motion.div>
+
+            {user.role === "admin" && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15, ease }}
+                className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+              >
+                <h2 className="text-lg font-semibold tracking-tight">Single sign-on</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  OAuth providers enabled on the server appear on the login page.
+                </p>
+                {ssoProviders.length === 0 ? (
+                  <p className="mt-4 text-sm text-neutral-500">
+                    None configured. Set <code className="text-xs">GOOGLE_CLIENT_ID</code> /{" "}
+                    <code className="text-xs">MICROSOFT_CLIENT_ID</code> in backend env.
+                  </p>
+                ) : (
+                  <ul className="mt-4 space-y-2">
+                    {ssoProviders.map((p) => (
+                      <li
+                        key={p.id}
+                        className="flex items-center justify-between rounded-xl border border-white/60 bg-white/55 px-4 py-2.5 text-sm"
+                      >
+                        <span className="font-medium">{p.label}</span>
+                        <span className="text-[10px] font-bold uppercase text-emerald-600">Active</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </motion.div>
+            )}
 
             {user.role === "admin" && provider && (
               <motion.form

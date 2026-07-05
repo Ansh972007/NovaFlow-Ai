@@ -25,6 +25,9 @@ class User(Base):
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     user_name = Column(String(64), unique=True, nullable=False, index=True)
     password = Column(String(128), nullable=False)
+    email = Column(String(255), nullable=True, index=True)
+    oauth_provider = Column(String(32), nullable=True)
+    oauth_subject = Column(String(128), nullable=True, index=True)
     role = Column(String(16), default="editor")  # admin | editor | viewer
     delete = Column(Integer, default=0)
     create_time = Column(DateTime, default=datetime.utcnow)
@@ -163,6 +166,14 @@ def migrate_schema():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(16) DEFAULT 'editor'"))
                 conn.execute(text("UPDATE users SET role = 'admin' WHERE user_id = 1"))
+        for col, ddl in [
+            ("email", "ALTER TABLE users ADD COLUMN email VARCHAR(255)"),
+            ("oauth_provider", "ALTER TABLE users ADD COLUMN oauth_provider VARCHAR(32)"),
+            ("oauth_subject", "ALTER TABLE users ADD COLUMN oauth_subject VARCHAR(128)"),
+        ]:
+            if col not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
 
 
 def init_db():

@@ -1,33 +1,28 @@
 # Roadmap
 
-## v1.1 — Admin operations (current)
+## v1.2 — SSO / OAuth (current)
 
-- [x] Model provider admin UI (chat model, embedding model, base URL in Settings)
-- [x] Audit log CSV export (`/analytics/export`)
-- [x] Password change in Settings
-- [x] Login fix — username field for admin sign-in
+- [x] Google OAuth sign-in
+- [x] Microsoft (Azure AD) OAuth sign-in
+- [x] OAuth callback page + login buttons when configured
+- [x] User model: email, oauth_provider, oauth_subject
+- [x] Settings → SSO status for admins
+
+## v1.1 — Admin operations (done)
+
+- [x] Model provider admin, audit export, password change, login username fix
 
 ## v1.0 — Launch (done)
 
-- [x] Production deploy guide, English docs, demo environment, Docker stack, v1.0 tag
-
-## v0.8 — Milvus, roles, analytics, run progress (done)
-
-- [x] Milvus vector store, viewer enforcement, per-assistant analytics, workflow run WS
-
-## Earlier versions
-
-v0.1–v0.7: foundation, chat, knowledge, onboarding, workflow builder, embeddings, team roles.
+- [x] Production Docker, docs, demo environment
 
 ## Remaining for full enterprise product
 
-| Feature | Est. effort at current pace |
-|---------|----------------------------|
-| SSO / OAuth (Google, Azure AD) | 2–4 days |
+| Feature | Est. effort |
+|---------|-------------|
 | Multi-tenant workspaces | 1–2 weeks |
-| Advanced workflow nodes (API, code, branch) | 1 week |
-| Model provider UI (multiple providers, keys in vault) | 3–5 days |
-| Fine-tune & evaluation module | 2–3 weeks |
-| Mobile-responsive polish + i18n | 3–5 days |
+| Advanced workflow nodes | 1 week |
+| Multiple model providers + key vault | 3–5 days |
+| Fine-tune & evaluation | 2–3 weeks |
 
-**Total to “full” Bisheng-class parity:** ~4–6 weeks part-time (with AI-assisted dev), or ~2–3 weeks full-time.
+**~3–5 weeks part-time** to full Bisheng-class parity from v1.2.

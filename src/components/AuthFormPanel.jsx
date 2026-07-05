@@ -4,6 +4,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import Logo from "@/components/Logo";
 import Magnetic from "@/components/Magnetic";
+import { startOAuthLogin } from "@/lib/api/oauth";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -94,6 +95,7 @@ export default function AuthFormPanel({
   formProgress,
   switchMode,
   handleSubmit,
+  oauthProviders = [],
 }) {
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10 sm:px-8">
@@ -309,6 +311,32 @@ export default function AuthFormPanel({
                     </button>
                   </Magnetic>
                 </form>
+
+                {!isRegister && oauthProviders.length > 0 && (
+                  <div className="mt-6">
+                    <div className="relative mb-4">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-border" />
+                      </div>
+                      <div className="relative flex justify-center text-[11px] uppercase tracking-wide">
+                        <span className="bg-white/90 px-3 text-muted">Or continue with</span>
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {oauthProviders.map((provider) => (
+                        <button
+                          key={provider.id}
+                          type="button"
+                          disabled={loading || backendOk === false}
+                          onClick={() => startOAuthLogin(provider.id)}
+                          className="flex items-center justify-center gap-2 rounded-full border border-border bg-white py-3 text-sm font-semibold transition hover:bg-surface disabled:opacity-50"
+                        >
+                          {provider.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-6 flex flex-wrap gap-2">
                   {["Encrypted", "Free beta"].map((tag) => (
