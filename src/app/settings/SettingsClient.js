@@ -22,6 +22,7 @@ import {
 import { getApiBaseUrl } from "@/lib/api/config";
 import { getTeamMembers, updateMemberRole, downloadAuditExport } from "@/lib/api/analytics";
 import { getOAuthProviders } from "@/lib/api/oauth";
+import { createApiKey, deleteApiKey, listApiKeys } from "@/lib/api/apiKeys";
 import { resetSetup } from "@/lib/setup/storage";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -56,6 +57,11 @@ export default function SettingsClient() {
     embedding_model: "text-embedding-3-small",
   });
   const [providerBusy, setProviderBusy] = useState(null);
+  const [apiKeys, setApiKeys] = useState([]);
+  const [apiKeyName, setApiKeyName] = useState("");
+  const [apiKeyBusy, setApiKeyBusy] = useState(false);
+  const [newApiKey, setNewApiKey] = useState("");
+  const [apiKeyMsg, setApiKeyMsg] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,6 +102,9 @@ export default function SettingsClient() {
       getOAuthProviders()
         .then((list) => setSsoProviders(Array.isArray(list) ? list : []))
         .catch(() => setSsoProviders([]));
+      listApiKeys()
+        .then((rows) => setApiKeys(Array.isArray(rows) ? rows : rows?.data || []))
+        .catch(() => setApiKeys([]));
     }
   }, [user]);
 
@@ -113,6 +122,41 @@ export default function SettingsClient() {
   function handleRerunSetup() {
     resetSetup();
     router.push("/setup");
+  }
+
+  async function handleCreateApiKey(e) {
+    e.preventDefault();
+    setApiKeyBusy(true);
+    setApiKeyMsg("");
+    setNewApiKey("");
+    try {
+      const res = await createApiKey(apiKeyName.trim() || "API key");
+      setNewApiKey(res?.key || "");
+      setApiKeyName("");
+      const rows = await listApiKeys();
+      setApiKeys(Array.isArray(rows) ? rows : rows?.data || []);
+      setApiKeyMsg("Copy your key now — it won't be shown again.");
+    } catch (err) {
+      setApiKeyMsg(err.message || "Failed to create key");
+    } finally {
+      setApiKeyBusy(false);
+    }
+  }
+
+  async function handleDeleteApiKey(id) {
+    if (!window.confirm("Revoke this API key? Integrations using it will stop working.")) return;
+    setApiKeyBusy(true);
+    setApiKeyMsg("");
+    try {
+      await deleteApiKey(id);
+      const rows = await listApiKeys();
+      setApiKeys(Array.isArray(rows) ? rows : rows?.data || []);
+      setApiKeyMsg("API key revoked.");
+    } catch (err) {
+      setApiKeyMsg(err.message || "Delete failed");
+    } finally {
+      setApiKeyBusy(false);
+    }
   }
 
   async function handleSaveProvider(e) {
@@ -645,6 +689,79 @@ export default function SettingsClient() {
                 {pwdBusy ? "Updating…" : "Update password"}
               </button>
             </motion.form>
+
+            {user.role === "admin" && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.14, ease }}
+                className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+              >
+                <h2 className="text-lg font-semibold tracking-tight">API keys</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  Programmatic access for scripts and integrations. Send{" "}
+                  <code className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs">X-Api-Key: nf_…</code> on requests.
+                </p>
+
+                {newApiKey && (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">New key — copy now</p>
+                    <code className="mt-2 block break-all rounded-lg bg-white px-3 py-2 text-xs font-mono text-neutral-800">
+                      {newApiKey}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(newApiKey)}
+                      className="workspace-btn-ghost mt-3 !py-1.5 text-xs"
+                    >
+                      Copy to clipboard
+                    </button>
+                  </div>
+                )}
+
+                {apiKeyMsg && <p className="mt-3 text-sm text-neutral-600">{apiKeyMsg}</p>}
+
+                <form onSubmit={handleCreateApiKey} className="mt-5 flex flex-wrap gap-2">
+                  <input
+                    value={apiKeyName}
+                    onChange={(e) => setApiKeyName(e.target.value)}
+                    placeholder="Key label (e.g. CI pipeline)"
+                    className="input-field min-w-[200px] flex-1"
+                  />
+                  <button type="submit" disabled={apiKeyBusy} className="btn-primary disabled:opacity-50">
+                    {apiKeyBusy ? "Creating…" : "Create key"}
+                  </button>
+                </form>
+
+                <ul className="mt-5 space-y-2">
+                  {apiKeys.length === 0 ? (
+                    <li className="text-sm text-neutral-500">No API keys yet.</li>
+                  ) : (
+                    apiKeys.map((k) => (
+                      <li
+                        key={k.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/60 bg-white/55 px-4 py-2.5"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{k.name}</p>
+                          <p className="font-mono text-[11px] text-neutral-400">
+                            {k.key_prefix}… · {k.create_time ? new Date(k.create_time).toLocaleDateString() : "—"}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={apiKeyBusy}
+                          onClick={() => handleDeleteApiKey(k.id)}
+                          className="workspace-btn-ghost workspace-btn-danger !px-2.5 !py-1.5 text-xs"
+                        >
+                          Revoke
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </motion.div>
+            )}
 
             {user.role === "admin" && (
               <motion.div

@@ -14,6 +14,8 @@ import { listKnowledge } from "@/lib/api/knowledge";
 import {
   deleteWorkflow,
   getWorkflowInfo,
+  getWorkflowVersions,
+  restoreWorkflowVersion,
   resumeWorkflow,
   runWorkflowWs,
   setWorkflowStatus,
@@ -50,6 +52,10 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [status, setStatus] = useState(0);
+  const [webhookToken, setWebhookToken] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
+  const [versions, setVersions] = useState([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState(null);
   const [libraries, setLibraries] = useState([]);
@@ -74,6 +80,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
       setName(info?.name || "");
       setDesc(info?.desc || "");
       setStatus(info?.status ?? 0);
+      setWebhookToken(info?.webhook_token || "");
+      setIsPublic(!!info?.is_public);
       setGraph(info?.graph || { nodes: [], edges: [] });
       setRecentRuns(info?.recent_runs || []);
       setLibraries(kbRes?.data || []);
@@ -94,6 +102,22 @@ export default function WorkflowBuilderClient({ workflowId }) {
   useEffect(() => {
     if (user) load();
   }, [user, load]);
+
+  const loadVersions = useCallback(async () => {
+    setVersionsLoading(true);
+    try {
+      const rows = await getWorkflowVersions(workflowId);
+      setVersions(Array.isArray(rows) ? rows : rows?.data || []);
+    } catch {
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  }, [workflowId]);
+
+  useEffect(() => {
+    if (inspectorTab === "history" && user) loadVersions();
+  }, [inspectorTab, user, loadVersions]);
 
   function updateNode(id, patch) {
     setGraph((prev) => ({
@@ -185,11 +209,41 @@ export default function WorkflowBuilderClient({ workflowId }) {
   }
 
   async function handleTogglePublic() {
-    try {
-      await setWorkflowPublic(workflowId, status === 1);
-    } catch {
-      /* optional */
+    if (status !== 1) {
+      setError("Publish the workflow before sharing to marketplace.");
+      return;
     }
+    try {
+      const next = !isPublic;
+      await setWorkflowPublic(workflowId, next);
+      setIsPublic(next);
+    } catch (err) {
+      setError(err.message || "Share update failed");
+    }
+  }
+
+  async function handleRestoreVersion(versionId) {
+    if (!confirm("Restore this version? Current draft will be snapshotted first.")) return;
+    setSaving(true);
+    setError("");
+    try {
+      const info = await restoreWorkflowVersion(workflowId, versionId);
+      setName(info?.name || "");
+      setDesc(info?.desc || "");
+      setGraph(info?.graph || { nodes: [], edges: [] });
+      await loadVersions();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err.message || "Restore failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function webhookUrl() {
+    if (!webhookToken || typeof window === "undefined") return "";
+    return `${window.location.origin}/api/v1/workflow/webhook/${webhookToken}`;
   }
 
   async function handleRun() {
@@ -250,8 +304,11 @@ export default function WorkflowBuilderClient({ workflowId }) {
 
   async function togglePublish() {
     try {
-      await setWorkflowStatus(workflowId, status === 1 ? 0 : 1);
-      setStatus(status === 1 ? 0 : 1);
+      const res = await setWorkflowStatus(workflowId, status === 1 ? 0 : 1);
+      const next = status === 1 ? 0 : 1;
+      setStatus(next);
+      if (res?.webhook_token) setWebhookToken(res.webhook_token);
+      if (next === 0) setIsPublic(false);
     } catch (err) {
       setError(err.message || "Status update failed");
     }
@@ -363,6 +420,17 @@ export default function WorkflowBuilderClient({ workflowId }) {
               >
                 {status === 1 ? "Unpub" : "Publish"}
               </button>
+              {status === 1 && (
+                <button
+                  type="button"
+                  onClick={handleTogglePublic}
+                  className={`workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs xl:inline-flex ${
+                    isPublic ? "!bg-violet-100 !text-violet-800" : ""
+                  }`}
+                >
+                  {isPublic ? "Listed" : "Share"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleDelete}
@@ -533,6 +601,13 @@ export default function WorkflowBuilderClient({ workflowId }) {
           pendingReview={pendingReview}
           onResume={handleResume}
           recentRuns={recentRuns}
+          versions={versions}
+          versionsLoading={versionsLoading}
+          onRestoreVersion={readOnly ? undefined : handleRestoreVersion}
+          workflowStatus={status}
+          webhookUrl={webhookUrl()}
+          isPublic={isPublic}
+          onTogglePublic={readOnly ? undefined : handleTogglePublic}
           readOnly={readOnly}
         />
       </div>

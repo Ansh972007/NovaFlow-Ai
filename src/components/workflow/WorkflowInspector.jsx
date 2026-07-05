@@ -25,6 +25,13 @@ export default function WorkflowInspector({
   pendingReview,
   onResume,
   recentRuns,
+  versions = [],
+  versionsLoading = false,
+  onRestoreVersion,
+  workflowStatus = 0,
+  webhookUrl = "",
+  isPublic = false,
+  onTogglePublic,
   readOnly = false,
 }) {
   const [connectTarget, setConnectTarget] = useState("");
@@ -80,6 +87,45 @@ export default function WorkflowInspector({
               exit={{ opacity: 0, x: -8 }}
               transition={{ duration: 0.25, ease }}
             >
+              {(workflowStatus === 1 || onTogglePublic) && (
+                <div className="mb-6 rounded-2xl border border-black/[0.06] bg-white/55 p-4">
+                  <p className="workspace-section-label">Deploy</p>
+                  {workflowStatus === 1 ? (
+                    <>
+                      {webhookUrl && (
+                        <div className="mt-3">
+                          <p className="text-[11px] font-medium text-neutral-500">Webhook trigger</p>
+                          <code className="mt-1 block break-all rounded-lg bg-neutral-50 px-2 py-1.5 text-[10px] font-mono text-neutral-700">
+                            POST {webhookUrl}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => navigator.clipboard?.writeText(webhookUrl)}
+                            className="mt-2 text-[11px] font-semibold text-neutral-600 hover:text-neutral-900"
+                          >
+                            Copy URL
+                          </button>
+                        </div>
+                      )}
+                      {onTogglePublic && (
+                        <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={isPublic}
+                            onChange={() => onTogglePublic()}
+                            disabled={readOnly}
+                            className="rounded border-neutral-300"
+                          />
+                          <span>List on marketplace</span>
+                        </label>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-2 text-xs text-neutral-500">Publish to enable webhooks and marketplace sharing.</p>
+                  )}
+                </div>
+              )}
+
               {!selected ? (
                 <div className="workspace-empty flex flex-col items-center rounded-2xl px-6 py-12 text-center">
                   <div className="relative flex h-20 w-20 items-center justify-center">
@@ -636,7 +682,37 @@ export default function WorkflowInspector({
               exit={{ opacity: 0, x: -8 }}
               transition={{ duration: 0.25, ease }}
             >
-              <p className="workspace-section-label">Recent runs</p>
+              <p className="workspace-section-label">Version snapshots</p>
+              {versionsLoading ? (
+                <p className="mt-3 text-sm text-neutral-500">Loading versions…</p>
+              ) : versions.length === 0 ? (
+                <p className="mt-3 text-sm text-neutral-500">Saved automatically when you edit the workflow.</p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {versions.map((v) => (
+                    <li key={v.id} className="workspace-list-row flex items-center justify-between gap-2 rounded-xl px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">v{v.version_no}</p>
+                        <p className="truncate text-xs text-neutral-500">{v.name}</p>
+                        <p className="text-[10px] text-neutral-400">
+                          {v.create_time ? new Date(v.create_time).toLocaleString() : "—"}
+                        </p>
+                      </div>
+                      {onRestoreVersion && (
+                        <button
+                          type="button"
+                          onClick={() => onRestoreVersion(v.id)}
+                          className="shrink-0 rounded-lg bg-neutral-900 px-2.5 py-1.5 text-[10px] font-semibold text-white"
+                        >
+                          Restore
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <p className="workspace-section-label mt-8">Recent runs</p>
               {recentRuns.length === 0 ? (
                 <p className="mt-4 text-sm text-neutral-500">No runs yet. Use Test run to execute the pipeline.</p>
               ) : (

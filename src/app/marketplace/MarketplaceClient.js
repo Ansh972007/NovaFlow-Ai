@@ -9,7 +9,7 @@ import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
-import { cloneMarketplaceWorkflow, listMarketplaceWorkflows } from "@/lib/api/marketplace";
+import { cloneMarketplaceWorkflow, listMarketplaceWorkflows, rateMarketplaceWorkflow } from "@/lib/api/marketplace";
 import { createWorkflow } from "@/lib/api/workflows";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -25,6 +25,28 @@ const TEMPLATE_ICONS = {
 
 function nodeCount(graph) {
   return graph?.nodes?.length || 0;
+}
+
+function StarRating({ value = 0, count = 0, onRate, disabled }) {
+  return (
+    <div className="flex items-center gap-1">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          disabled={disabled || !onRate}
+          onClick={() => onRate?.(star)}
+          className={`text-base leading-none transition ${
+            star <= Math.round(value) ? "text-amber-400" : "text-neutral-200"
+          } ${onRate ? "hover:scale-110" : ""} disabled:cursor-default`}
+          aria-label={`Rate ${star} stars`}
+        >
+          ★
+        </button>
+      ))}
+      {count > 0 && <span className="ml-1 text-[11px] text-neutral-400">({count})</span>}
+    </div>
+  );
 }
 
 export default function MarketplaceClient() {
@@ -71,6 +93,27 @@ export default function MarketplaceClient() {
       (t) => t.name?.toLowerCase().includes(q) || t.desc?.toLowerCase().includes(q)
     );
   }, [templates, query]);
+
+  async function handleRate(workflowId, score) {
+    setBusy(true);
+    try {
+      const res = await rateMarketplaceWorkflow(workflowId, { score });
+      setItems((prev) =>
+        prev.map((w) =>
+          w.id === workflowId
+            ? {
+                ...w,
+                avg_rating: res?.avg_rating ?? score,
+                rating_count: res?.rating_count ?? w.rating_count,
+                user_rating: score,
+              }
+            : w
+        )
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleClone(id) {
     setBusy(true);
@@ -273,6 +316,14 @@ export default function MarketplaceClient() {
                           <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-neutral-500">
                             {w.desc || "No description provided."}
                           </p>
+                          <div className="mt-3">
+                            <StarRating
+                              value={w.user_rating || w.avg_rating || 0}
+                              count={w.rating_count || 0}
+                              onRate={(score) => handleRate(w.id, score)}
+                              disabled={busy}
+                            />
+                          </div>
                           <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-neutral-400">
                             <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium">
                               {nodeCount(w.graph)} nodes

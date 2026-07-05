@@ -1,6 +1,13 @@
 # Roadmap
 
-## v2.5 — Platform sprint (current)
+## v3.0 — Governance & community (current)
+
+- [x] Workflow versioning — auto snapshots on save, restore from History tab
+- [x] Marketplace ratings — 1–5 stars with community averages
+- [x] API keys UI — create/revoke keys in Settings (admin)
+- [x] Deploy panel — webhook URL copy + marketplace toggle in workflow builder
+
+## v2.5 — Platform sprint (done)
 
 - [x] Human-in-the-loop resume — approve/reject paused workflow runs
 - [x] Webhook triggers — POST `/workflow/webhook/{token}` on publish
@@ -19,7 +26,6 @@
 |---------|--------|
 | LDAP / enterprise SSO | Directory login |
 | OCR document pipeline | Image text extraction |
-| Workflow versioning | Draft history |
-| Marketplace ratings | Community feedback |
+| Marketplace comments | Threaded feedback on listings |
 
-**NovaFlow v2.5** adds platform primitives: webhooks, API keys, HITL resume, marketplace, subgraphs.
+**NovaFlow v3.0** adds draft history, community ratings, and a complete API keys management UI.

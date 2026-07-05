@@ -110,6 +110,14 @@ export function runWorkflowWs(workflowId, input, handlers = {}) {
   });
 }
 
+export async function getWorkflowVersions(workflowId) {
+  return client.get(`/workflow/${workflowId}/versions`);
+}
+
+export async function restoreWorkflowVersion(workflowId, versionId) {
+  return client.post(`/workflow/${workflowId}/versions/${versionId}/restore`);
+}
+
 export async function getOnlineWorkflows() {
   return client.get("/workflow/online");
 }

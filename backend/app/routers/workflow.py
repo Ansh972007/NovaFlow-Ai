@@ -5,13 +5,16 @@ from datetime import datetime
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.database import Workflow, WorkflowRun, get_db
+from app.database import Workflow, WorkflowRun, WorkflowVersion, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
 from app.services.workflow import (
     TEMPLATES,
+    list_workflow_versions,
+    restore_workflow_version,
     resume_workflow_pending,
     run_workflow,
+    snapshot_workflow_version,
     workflow_dict,
 )
 
@@ -97,7 +100,10 @@ def update_workflow(body: WorkflowUpdate, db: Session = Depends(get_db), ctx=Dep
     if body.desc is not None:
         w.desc = body.desc
     if body.graph is not None:
+        snapshot_workflow_version(db, w, ctx.user.user_id)
         w.graph_json = json.dumps(body.graph)
+    elif body.name is not None or body.desc is not None:
+        snapshot_workflow_version(db, w, ctx.user.user_id)
     w.update_time = datetime.utcnow()
     db.commit()
     db.refresh(w)
@@ -192,3 +198,27 @@ async def resume_workflow(body: dict, db: Session = Depends(get_db), ctx=Depends
         workspace_id=ctx.workspace_id,
     )
     return ok(result)
+
+
+@router.get("/workflow/{workflow_id}/versions")
+def workflow_versions(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    return ok(list_workflow_versions(db, workflow_id))
+
+
+@router.post("/workflow/{workflow_id}/versions/{version_id}/restore")
+def restore_version(
+    workflow_id: str,
+    version_id: int,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    data = restore_workflow_version(db, w, version_id, ctx.user.user_id)
+    if not data:
+        return fail(404, "Version not found")
+    return ok(data)

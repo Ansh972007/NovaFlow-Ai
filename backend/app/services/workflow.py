@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 from sqlalchemy.orm import Session
 
-from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowPendingRun, WorkflowRun
+from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowPendingRun, WorkflowRun, WorkflowVersion
 from app.services.knowledge import search_chunks_semantic
 from app.services.llm import stream_chat, stream_chat_sync
 
@@ -130,6 +130,74 @@ def workflow_dict(w: Workflow) -> dict:
         "webhook_token": getattr(w, "webhook_token", "") or "",
         "is_public": int(getattr(w, "is_public", 0) or 0),
     }
+
+
+MAX_WORKFLOW_VERSIONS = 25
+
+
+def snapshot_workflow_version(db: Session, w: Workflow, user_id: int) -> None:
+    last = (
+        db.query(WorkflowVersion)
+        .filter(WorkflowVersion.workflow_id == w.id)
+        .order_by(WorkflowVersion.version_no.desc())
+        .first()
+    )
+    version_no = (last.version_no + 1) if last else 1
+    row = WorkflowVersion(
+        workflow_id=w.id,
+        version_no=version_no,
+        name=w.name,
+        desc=w.desc or "",
+        graph_json=w.graph_json or "{}",
+        user_id=user_id,
+    )
+    db.add(row)
+    db.flush()
+    excess = (
+        db.query(WorkflowVersion)
+        .filter(WorkflowVersion.workflow_id == w.id)
+        .order_by(WorkflowVersion.version_no.desc())
+        .offset(MAX_WORKFLOW_VERSIONS)
+        .all()
+    )
+    for old in excess:
+        db.delete(old)
+
+
+def list_workflow_versions(db: Session, workflow_id: str) -> list[dict]:
+    rows = (
+        db.query(WorkflowVersion)
+        .filter(WorkflowVersion.workflow_id == workflow_id)
+        .order_by(WorkflowVersion.version_no.desc())
+        .limit(MAX_WORKFLOW_VERSIONS)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "version_no": r.version_no,
+            "name": r.name,
+            "desc": r.desc or "",
+            "create_time": r.create_time.isoformat() if r.create_time else None,
+        }
+        for r in rows
+    ]
+
+
+def restore_workflow_version(db: Session, w: Workflow, version_id: int, user_id: int) -> dict | None:
+    row = db.get(WorkflowVersion, version_id)
+    if not row or row.workflow_id != w.id:
+        return None
+    snapshot_workflow_version(db, w, user_id)
+    w.name = row.name
+    w.desc = row.desc or ""
+    w.graph_json = row.graph_json or "{}"
+    from datetime import datetime
+
+    w.update_time = datetime.utcnow()
+    db.commit()
+    db.refresh(w)
+    return workflow_dict(w)
 
 
 def _node_map(graph: dict) -> dict[str, dict]:

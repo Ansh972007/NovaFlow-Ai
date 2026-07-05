@@ -130,6 +130,31 @@ class WorkflowPendingRun(Base):
     create_time = Column(DateTime, default=datetime.utcnow)
 
 
+class WorkflowVersion(Base):
+    __tablename__ = "workflow_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False, index=True)
+    version_no = Column(Integer, nullable=False)
+    name = Column(String(80), default="")
+    desc = Column(String(500), default="")
+    graph_json = Column(Text, default="{}")
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkflowRating(Base):
+    __tablename__ = "workflow_ratings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    score = Column(Integer, nullable=False)
+    comment = Column(String(500), default="")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
 class ApiKey(Base):
     __tablename__ = "api_keys"
 
@@ -465,6 +490,10 @@ def migrate_schema():
             if col not in cols:
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
+
+    for table in ("workflow_versions", "workflow_ratings"):
+        if table not in insp.get_table_names():
+            Base.metadata.tables[table].create(bind=engine, checkfirst=True)
 
 
 def init_db():

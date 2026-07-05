@@ -11,3 +11,7 @@ export async function cloneMarketplaceWorkflow(workflowId) {
 export async function setWorkflowPublic(workflowId, isPublic) {
   return client.post(`/workflow/${workflowId}/share`, { is_public: isPublic });
 }
+
+export async function rateMarketplaceWorkflow(workflowId, { score, comment = "" }) {
+  return client.post(`/marketplace/workflows/${workflowId}/rate`, { score, comment });
+}
