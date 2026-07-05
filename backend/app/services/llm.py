@@ -3,11 +3,13 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+from app.config import OPENAI_API_KEY
+from app.services.workspace_settings import get_chat_config
 
 
 async def stream_chat(system_prompt: str, user_message: str) -> AsyncIterator[str]:
-    if not OPENAI_API_KEY:
+    cfg = get_chat_config()
+    if not cfg["api_key"]:
         reply = (
             f"I'm {system_prompt[:40]}… (NovaFlow demo mode — set OPENAI_API_KEY for real replies.)\n\n"
             f"You asked: {user_message}"
@@ -17,10 +19,10 @@ async def stream_chat(system_prompt: str, user_message: str) -> AsyncIterator[st
             yield (" " if i else "") + w
         return
 
-    url = f"{OPENAI_BASE_URL.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    url = f"{cfg['base_url']}/chat/completions"
+    headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
     payload = {
-        "model": OPENAI_MODEL,
+        "model": cfg["model"],
         "stream": True,
         "messages": [
             {"role": "system", "content": system_prompt},

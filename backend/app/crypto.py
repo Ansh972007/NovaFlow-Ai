@@ -29,9 +29,12 @@ def get_public_key_pem() -> str:
 
 
 def decrypt_password(encrypted_b64: str) -> str:
+    return md5_hash(decrypt_password_plain(encrypted_b64))
+
+
+def decrypt_password_plain(encrypted_b64: str) -> str:
     _, priv = get_rsa_keys()
-    plain = rsa.decrypt(b64decode(encrypted_b64), priv).decode("utf-8")
-    return md5_hash(plain)
+    return rsa.decrypt(b64decode(encrypted_b64), priv).decode("utf-8")
 
 
 def create_token(user_id: int, user_name: str) -> str:

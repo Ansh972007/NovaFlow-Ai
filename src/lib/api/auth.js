@@ -42,6 +42,14 @@ export async function getUserInfo() {
   return client.get("/user/info");
 }
 
+export async function changePassword(currentPassword, newPassword) {
+  const [current_password, new_password] = await Promise.all([
+    encryptPassword(currentPassword),
+    encryptPassword(newPassword),
+  ]);
+  return client.post("/user/password", { current_password, new_password });
+}
+
 export async function logout() {
   return client.post("/user/logout");
 }

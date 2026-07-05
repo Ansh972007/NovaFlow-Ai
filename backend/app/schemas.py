@@ -29,6 +29,11 @@ class UserCreate(BaseModel):
     password: str
 
 
+class UserPasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class AssistantCreate(BaseModel):
     name: str = Field(max_length=50)
     prompt: str = Field(min_length=20, max_length=4000)

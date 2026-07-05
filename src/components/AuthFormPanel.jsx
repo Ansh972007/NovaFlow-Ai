@@ -203,17 +203,23 @@ export default function AuthFormPanel({
 
                 <form onSubmit={handleSubmit} className="mt-8 space-y-6">
                   <AuthInput
-                    id="email"
-                    label="Email address"
-                    type="email"
+                    id={isRegister ? "email" : "username"}
+                    label={isRegister ? "Email address" : "Username"}
+                    type={isRegister ? "email" : "text"}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     onFocus={() => setFocused("email")}
                     onBlur={() => setFocused(null)}
                     focused={focused === "email"}
-                    placeholder="you@company.com"
-                    autoComplete="email"
+                    placeholder={isRegister ? "you@company.com" : "admin"}
+                    autoComplete={isRegister ? "email" : "username"}
                   />
+                  {!isRegister && (
+                    <p className="-mt-4 text-xs text-muted">
+                      Default workspace login: <strong className="text-foreground">admin</strong> /{" "}
+                      <strong className="text-foreground">admin123</strong>
+                    </p>
+                  )}
 
                   <div>
                     <AuthInput

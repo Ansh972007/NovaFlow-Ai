@@ -4,7 +4,8 @@ from typing import Any
 
 import httpx
 
-from app.config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_EMBEDDING_MODEL
+from app.config import OPENAI_API_KEY
+from app.services.workspace_settings import get_chat_config, get_embedding_model
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -21,8 +22,8 @@ def _cosine(a: list[float], b: list[float]) -> float:
 async def embed_texts(texts: list[str], model: str | None = None) -> list[list[float]]:
     if not OPENAI_API_KEY or not texts:
         return []
-    model = model or OPENAI_EMBEDDING_MODEL
-    url = f"{OPENAI_BASE_URL.rstrip('/')}/embeddings"
+    model = model or get_embedding_model()
+    url = f"{get_chat_config()['base_url']}/embeddings"
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     payload = {"model": model, "input": texts}
     async with httpx.AsyncClient(timeout=120) as client:

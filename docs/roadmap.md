@@ -1,45 +1,33 @@
 # Roadmap
 
-## v1.0 — Launch (current)
+## v1.1 — Admin operations (current)
 
-- [x] Production deploy guide ([deployment.md](./deployment.md))
-- [x] English docs ([user-guide.md](./user-guide.md), updated README)
-- [x] Demo environment (`start-demo.ps1` + demo seed)
-- [x] Production Docker stack (web + API + data services)
-- [x] v1.0 release
+- [x] Model provider admin UI (chat model, embedding model, base URL in Settings)
+- [x] Audit log CSV export (`/analytics/export`)
+- [x] Password change in Settings
+- [x] Login fix — username field for admin sign-in
 
-## v0.8 — Milvus, role enforcement, assistant analytics, run progress (done)
+## v1.0 — Launch (done)
 
-- [x] Optional Milvus vector store (Docker + SQLite fallback)
-- [x] Viewer role enforcement on mutating APIs
-- [x] Per-assistant analytics detail page
-- [x] Workflow run WebSocket progress events
+- [x] Production deploy guide, English docs, demo environment, Docker stack, v1.0 tag
 
-## v0.7 — Embeddings, workflow chat, analytics charts, team roles (done)
+## v0.8 — Milvus, roles, analytics, run progress (done)
 
-- [x] OpenAI vector embeddings on knowledge ingest
-- [x] Workflow WebSocket chat for published workflows
-- [x] Analytics timeseries + top apps charts on dashboard
-- [x] Team roles (admin / editor / viewer) + settings UI
-
-## v0.6 — Workflow builder + analytics (done)
-
-- [x] Workflow CRUD API + visual builder
-- [x] Workflow runtime + usage analytics
-
-## v0.5 — Assistant Studio + RAG (done)
-
-- [x] Assistant detail / studio page
-- [x] Link knowledge bases to assistants
-- [x] Unified frosted workspace UI
+- [x] Milvus vector store, viewer enforcement, per-assistant analytics, workflow run WS
 
 ## Earlier versions
 
-See git history for v0.1–v0.4 (foundation, chat, knowledge, onboarding).
+v0.1–v0.7: foundation, chat, knowledge, onboarding, workflow builder, embeddings, team roles.
 
-## Future ideas
+## Remaining for full enterprise product
 
-- SSO / OAuth login
-- Model provider admin UI
-- Audit logs export
-- Multi-tenant workspaces
+| Feature | Est. effort at current pace |
+|---------|----------------------------|
+| SSO / OAuth (Google, Azure AD) | 2–4 days |
+| Multi-tenant workspaces | 1–2 weeks |
+| Advanced workflow nodes (API, code, branch) | 1 week |
+| Model provider UI (multiple providers, keys in vault) | 3–5 days |
+| Fine-tune & evaluation module | 2–3 weeks |
+| Mobile-responsive polish + i18n | 3–5 days |
+
+**Total to “full” Bisheng-class parity:** ~4–6 weeks part-time (with AI-assisted dev), or ~2–3 weeks full-time.

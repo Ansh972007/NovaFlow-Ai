@@ -14,3 +14,12 @@ export async function getAssistantLlmConfig() {
 export async function getKnowledgeLlmConfig() {
   return client.get("/llm/knowledge");
 }
+
+/** Admin: workspace model provider settings */
+export async function getLlmSettings() {
+  return client.get("/llm/settings");
+}
+
+export async function updateLlmSettings(payload) {
+  return client.patch("/llm/settings", payload);
+}

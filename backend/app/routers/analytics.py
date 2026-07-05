@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
 from collections import defaultdict
+import csv
+import io
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import Assistant, KnowledgeBase, UsageEvent, Workflow, WorkflowRun, User, get_db
@@ -233,3 +236,43 @@ def update_member_role(
     member.role = role
     db.commit()
     return ok({"user_id": member.user_id, "role": member.role})
+
+
+@router.get("/analytics/export")
+def export_audit_log(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    user=Depends(require_admin),
+):
+    days = max(1, min(days, 90))
+    since = datetime.utcnow() - timedelta(days=days)
+
+    events = (
+        db.query(UsageEvent, User)
+        .join(User, UsageEvent.user_id == User.user_id)
+        .filter(UsageEvent.create_time >= since)
+        .order_by(UsageEvent.create_time.desc())
+        .all()
+    )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["timestamp", "user", "event_type", "resource_id", "meta"])
+    for ev, u in events:
+        writer.writerow(
+            [
+                ev.create_time.isoformat() if ev.create_time else "",
+                u.user_name,
+                ev.event_type,
+                ev.resource_id or "",
+                ev.meta or "",
+            ]
+        )
+
+    buf.seek(0)
+    filename = f"novaflow-audit-{datetime.utcnow().date().isoformat()}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

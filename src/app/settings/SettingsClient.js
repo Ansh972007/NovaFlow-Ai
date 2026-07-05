@@ -7,11 +7,11 @@ import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
-import { getUserInfo } from "@/lib/api/auth";
+import { getUserInfo, changePassword } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
-import { getAllLlm, getAssistantLlmConfig, getKnowledgeLlmConfig } from "@/lib/api/llm";
+import { getAllLlm, getAssistantLlmConfig, getKnowledgeLlmConfig, getLlmSettings, updateLlmSettings } from "@/lib/api/llm";
 import { getApiBaseUrl } from "@/lib/api/config";
-import { getTeamMembers, updateMemberRole } from "@/lib/api/analytics";
+import { getTeamMembers, updateMemberRole, downloadAuditExport } from "@/lib/api/analytics";
 import { resetSetup } from "@/lib/setup/storage";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -26,6 +26,15 @@ export default function SettingsClient() {
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState([]);
   const [teamBusy, setTeamBusy] = useState(null);
+  const [provider, setProvider] = useState(null);
+  const [providerSaving, setProviderSaving] = useState(false);
+  const [providerMsg, setProviderMsg] = useState("");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [pwdCurrent, setPwdCurrent] = useState("");
+  const [pwdNew, setPwdNew] = useState("");
+  const [pwdConfirm, setPwdConfirm] = useState("");
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdMsg, setPwdMsg] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,6 +69,9 @@ export default function SettingsClient() {
       getTeamMembers()
         .then((m) => setTeam(Array.isArray(m) ? m : m?.data || []))
         .catch(() => setTeam([]));
+      getLlmSettings()
+        .then(setProvider)
+        .catch(() => setProvider(null));
     }
   }, [user]);
 
@@ -77,6 +89,63 @@ export default function SettingsClient() {
   function handleRerunSetup() {
     resetSetup();
     router.push("/setup");
+  }
+
+  async function handleSaveProvider(e) {
+    e.preventDefault();
+    if (!provider) return;
+    setProviderSaving(true);
+    setProviderMsg("");
+    try {
+      const updated = await updateLlmSettings({
+        chat_model: provider.chat_model,
+        embedding_model: provider.embedding_model,
+        openai_base_url: provider.openai_base_url,
+      });
+      setProvider(updated);
+      setProviderMsg("Model settings saved — new chats use these defaults.");
+      await load();
+    } catch (err) {
+      setProviderMsg(err.message || "Save failed");
+    } finally {
+      setProviderSaving(false);
+    }
+  }
+
+  async function handleExportAudit() {
+    setExportBusy(true);
+    try {
+      await downloadAuditExport(30);
+    } catch (err) {
+      setProviderMsg(err.message || "Export failed");
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    setPwdMsg("");
+    if (pwdNew !== pwdConfirm) {
+      setPwdMsg("New passwords do not match");
+      return;
+    }
+    if (pwdNew.length < 6) {
+      setPwdMsg("New password must be at least 6 characters");
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      await changePassword(pwdCurrent, pwdNew);
+      setPwdCurrent("");
+      setPwdNew("");
+      setPwdConfirm("");
+      setPwdMsg("Password updated successfully.");
+    } catch (err) {
+      setPwdMsg(err.message || "Password change failed");
+    } finally {
+      setPwdBusy(false);
+    }
   }
 
   if (!user) {
@@ -189,6 +258,151 @@ export default function SettingsClient() {
                 )}
               </div>
             </motion.div>
+
+            {user.role === "admin" && provider && (
+              <motion.form
+                onSubmit={handleSaveProvider}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.16, ease }}
+                className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+              >
+                <h2 className="text-lg font-semibold tracking-tight">Model provider</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  Configure chat and embedding models. API key stays in server environment (
+                  <code className="text-xs">OPENAI_API_KEY</code>).
+                </p>
+                <div className="mt-2">
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${
+                      provider.api_key_configured
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {provider.api_key_configured ? "API key configured" : "Demo mode (no API key)"}
+                  </span>
+                </div>
+                <div className="mt-5 space-y-4">
+                  <label className="block text-sm font-medium">
+                    Base URL
+                    <input
+                      value={provider.openai_base_url || ""}
+                      onChange={(e) => setProvider((p) => ({ ...p, openai_base_url: e.target.value }))}
+                      className="input-field mt-1.5 w-full font-mono text-xs"
+                      placeholder="https://api.openai.com/v1"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Chat model
+                    <select
+                      value={provider.chat_model || ""}
+                      onChange={(e) => setProvider((p) => ({ ...p, chat_model: e.target.value }))}
+                      className="input-field mt-1.5 w-full"
+                    >
+                      {(provider.chat_models || []).map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Embedding model
+                    <select
+                      value={provider.embedding_model || ""}
+                      onChange={(e) => setProvider((p) => ({ ...p, embedding_model: e.target.value }))}
+                      className="input-field mt-1.5 w-full"
+                    >
+                      {(provider.embedding_models || []).map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {providerMsg && (
+                  <p className="mt-4 text-sm text-neutral-600">{providerMsg}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={providerSaving}
+                  className="btn-primary mt-5 disabled:opacity-50"
+                >
+                  {providerSaving ? "Saving…" : "Save model settings"}
+                </button>
+              </motion.form>
+            )}
+
+            {user.role === "admin" && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.17, ease }}
+                className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+              >
+                <h2 className="text-lg font-semibold tracking-tight">Audit log</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  Export workspace usage events (chat, workflow runs) as CSV for the last 30 days.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleExportAudit}
+                  disabled={exportBusy}
+                  className="workspace-btn-ghost mt-5 disabled:opacity-50"
+                >
+                  {exportBusy ? "Exporting…" : "Download audit CSV"}
+                </button>
+              </motion.div>
+            )}
+
+            <motion.form
+              onSubmit={handleChangePassword}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.19, ease }}
+              className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+            >
+              <h2 className="text-lg font-semibold tracking-tight">Password</h2>
+              <p className="mt-1 text-sm text-neutral-500">Change your account password.</p>
+              <div className="mt-5 space-y-4">
+                <label className="block text-sm font-medium">
+                  Current password
+                  <input
+                    type="password"
+                    value={pwdCurrent}
+                    onChange={(e) => setPwdCurrent(e.target.value)}
+                    className="input-field mt-1.5 w-full"
+                    autoComplete="current-password"
+                  />
+                </label>
+                <label className="block text-sm font-medium">
+                  New password
+                  <input
+                    type="password"
+                    value={pwdNew}
+                    onChange={(e) => setPwdNew(e.target.value)}
+                    className="input-field mt-1.5 w-full"
+                    autoComplete="new-password"
+                  />
+                </label>
+                <label className="block text-sm font-medium">
+                  Confirm new password
+                  <input
+                    type="password"
+                    value={pwdConfirm}
+                    onChange={(e) => setPwdConfirm(e.target.value)}
+                    className="input-field mt-1.5 w-full"
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
+              {pwdMsg && <p className="mt-4 text-sm text-neutral-600">{pwdMsg}</p>}
+              <button type="submit" disabled={pwdBusy} className="btn-primary mt-5 disabled:opacity-50">
+                {pwdBusy ? "Updating…" : "Update password"}
+              </button>
+            </motion.form>
 
             {user.role === "admin" && (
               <motion.div

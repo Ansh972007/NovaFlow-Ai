@@ -132,6 +132,16 @@ class UsageEvent(Base):
     create_time = Column(DateTime, default=datetime.utcnow)
 
 
+class WorkspaceSetting(Base):
+    __tablename__ = "workspace_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    chat_model = Column(String(120), default="")
+    embedding_model = Column(String(120), default="")
+    openai_base_url = Column(String(255), default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

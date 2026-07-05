@@ -3,10 +3,10 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.crypto import create_token, decrypt_password, get_public_key_pem, md5_hash
+from app.crypto import create_token, decrypt_password, decrypt_password_plain, get_public_key_pem, md5_hash
 from app.database import User, get_db
 from app.deps import get_current_user
-from app.schemas import UserCreate, UserLogin, fail, ok
+from app.schemas import UserCreate, UserLogin, UserPasswordChange, fail, ok
 
 router = APIRouter(tags=["User"])
 
@@ -66,4 +66,28 @@ def user_info(user: User = Depends(get_current_user)):
 
 @router.post("/user/logout")
 def logout():
+    return ok(None)
+
+
+@router.post("/user/password")
+def change_password(
+    body: UserPasswordChange,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    try:
+        current_hash = decrypt_password(body.current_password)
+    except Exception:
+        return fail(403, "Current password is incorrect")
+    if user.password != current_hash:
+        return fail(403, "Current password is incorrect")
+    try:
+        plain_new = decrypt_password_plain(body.new_password)
+    except Exception:
+        return fail(400, "Invalid new password")
+    if len(plain_new.strip()) < 6:
+        return fail(400, "New password must be at least 6 characters")
+    user.password = md5_hash(plain_new.strip())
+    user.update_time = datetime.utcnow()
+    db.commit()
     return ok(None)

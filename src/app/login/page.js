@@ -43,7 +43,8 @@ function LoginForm() {
 
   const formProgress = useMemo(() => {
     let p = 0;
-    if (email.includes("@")) p += 34;
+    const idOk = isRegister ? email.includes("@") : email.trim().length >= 1;
+    if (idOk) p += 34;
     if (password.length >= 6) p += 33;
     if (!isRegister || (confirmPassword && confirmPassword === password)) p += 33;
     return Math.min(100, p);
@@ -69,9 +70,10 @@ function LoginForm() {
 
     setLoading(true);
     try {
+      const name = email.trim();
       const data = isRegister
-        ? await register(email, password)
-        : await login(email, password);
+        ? await register(name, password)
+        : await login(name, password);
       if (data?.access_token) {
         localStorage.setItem("nf_token", data.access_token);
       }
