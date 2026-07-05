@@ -65,6 +65,34 @@ const NODE_META = {
     ring: "http",
     port: "bg-cyan-500",
   },
+  loop: {
+    label: "Loop",
+    accent: "workflow-node-loop",
+    iconBg: "from-indigo-400/20 to-indigo-600/10 text-indigo-700",
+    ring: "loop",
+    port: "bg-indigo-500",
+  },
+  parallel: {
+    label: "Parallel",
+    accent: "workflow-node-parallel",
+    iconBg: "from-fuchsia-400/20 to-fuchsia-600/10 text-fuchsia-700",
+    ring: "parallel",
+    port: "bg-fuchsia-500",
+  },
+  human: {
+    label: "Human",
+    accent: "workflow-node-human",
+    iconBg: "from-orange-400/20 to-orange-600/10 text-orange-700",
+    ring: "human",
+    port: "bg-orange-500",
+  },
+  agent: {
+    label: "Agent",
+    accent: "workflow-node-agent",
+    iconBg: "from-lime-400/20 to-lime-600/10 text-lime-800",
+    ring: "agent",
+    port: "bg-lime-600",
+  },
 };
 
 function clamp(n, min, max) {
@@ -79,6 +107,10 @@ function nodeSubtitle(node) {
   if (node.type === "transform") return node.data?.template?.slice(0, 28) || "Template";
   if (node.type === "condition") return node.data?.keyword || "Keyword match";
   if (node.type === "http") return node.data?.url?.slice(0, 28) || "Request URL";
+  if (node.type === "loop") return `max ${node.data?.max || 5} items`;
+  if (node.type === "parallel") return `${(node.data?.branches || []).length || 3} branches`;
+  if (node.type === "human") return node.data?.require_approval ? "Approval gate" : "Review";
+  if (node.type === "agent") return (node.data?.tools || []).join(", ") || "Tools";
   return node.data?.label || node.type;
 }
 

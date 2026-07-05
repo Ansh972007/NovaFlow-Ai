@@ -10,7 +10,7 @@ import AnalyticsCharts from "@/components/dashboard/AnalyticsCharts";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
 import { getOnlineApps, getAssistants } from "@/lib/api/apps";
-import { getAnalyticsSummary, getAnalyticsTimeseries, getAnalyticsAssistants } from "@/lib/api/analytics";
+import { getAnalyticsSummary, getAnalyticsTimeseries, getAnalyticsAssistants, getAbRoutingAnalytics } from "@/lib/api/analytics";
 import { checkBackendHealth } from "@/lib/api/health";
 import { listKnowledge } from "@/lib/api/knowledge";
 import { loadSessions } from "@/lib/chat/storage";
@@ -72,6 +72,20 @@ const modules = [
     ),
   },
   {
+    href: "/agents",
+    label: "Agents",
+    desc: "Run tool-augmented agents standalone",
+    accent: "from-neutral-700 to-neutral-500",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+        <rect x="4" y="8" width="16" height="12" rx="2" />
+        <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+        <circle cx="9" cy="13" r="1" fill="currentColor" />
+        <circle cx="15" cy="13" r="1" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
     href: "/settings",
     label: "Settings",
     desc: "API health, models, and workspace config",
@@ -110,6 +124,7 @@ export default function DashboardPage() {
   const [recentRuns, setRecentRuns] = useState([]);
   const [chartSeries, setChartSeries] = useState([]);
   const [topAssistants, setTopAssistants] = useState([]);
+  const [abRouting, setAbRouting] = useState(null);
   const [stats, setStats] = useState([
     { value: "0", label: "Chat sessions", hint: "Local history" },
     { value: "0", label: "Assistants", hint: "Published & draft" },
@@ -153,15 +168,17 @@ export default function DashboardPage() {
         }
 
         try {
-          const [summary, ts, usage] = await Promise.all([
+          const [summary, ts, usage, ab] = await Promise.all([
             getAnalyticsSummary(),
             getAnalyticsTimeseries(7).catch(() => null),
             getAnalyticsAssistants(7).catch(() => null),
+            getAbRoutingAnalytics(30).catch(() => null),
           ]);
           analytics = summary;
           setRecentRuns(summary?.recent_runs || []);
           setChartSeries(ts?.series || []);
           setTopAssistants(usage?.items || []);
+          setAbRouting(ab);
         } catch {
           analytics = null;
         }
@@ -282,7 +299,7 @@ export default function DashboardPage() {
               transition={{ delay: 0.28, ease }}
               className="mt-8"
             >
-              <AnalyticsCharts series={chartSeries} assistants={topAssistants} />
+              <AnalyticsCharts series={chartSeries} assistants={topAssistants} abRouting={abRouting} />
             </motion.section>
           )}
 

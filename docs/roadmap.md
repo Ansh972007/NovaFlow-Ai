@@ -1,10 +1,17 @@
 # Roadmap
 
-## v1.11 — Templates, A/B routing, quotas (current)
+## v2.0 — Bisheng-lite sprint (done)
 
-- [x] Eval suite templates — industry benchmark packs (support, healthcare, finance, retail)
-- [x] Fine-tune A/B routing — split live chat traffic between base and fine-tuned models
-- [x] Workspace usage quotas — monthly caps on eval runs and fine-tune jobs
+- [x] Workflow loop node — batch-process lines of input
+- [x] Parallel node — multi-branch LLM fan-out
+- [x] Human review node — HITL gate with WebSocket pause event
+- [x] Agent node — built-in tools (calculator, KB search, summarize, translate)
+- [x] Document parsing — DOCX, HTML, JSON support in knowledge ingest
+- [x] A/B routing analytics — track base vs variant chat traffic
+- [x] Agent API — `POST /agents/run` for standalone tool runs
+- [x] New workflow templates — Agent + review, Batch loop
+
+## v1.11 — Templates, A/B routing, quotas (done)
 
 ## v1.10 — Diff view, on-call, cost estimates (done)
 
@@ -12,28 +19,15 @@
 
 ## v1.8 — Schedules, comparison, webhooks (done)
 
-## v1.7 — Eval judge, CSV import, model apply (done)
-
-## v1.6 — Evaluation & fine-tune (done)
-
-## v1.5 — Multiple model providers + key vault (done)
-
-## v1.4 — Advanced workflow nodes (done)
-
-## v1.3 — Multi-tenant workspaces (done)
-
-## v1.2 — SSO / OAuth (done)
-
-## v1.1 — Admin operations (done)
-
 ## v1.0 — Launch (done)
 
 ## Future enhancements
 
 | Feature | Notes |
 |---------|--------|
-| Template marketplace | Community-shared benchmark packs |
-| Quota billing tiers | Stripe integration for limits |
-| A/B experiment analytics | Conversion metrics per variant |
+| LDAP / enterprise SSO | Directory login |
+| OCR document pipeline | Bisheng-grade parsing |
+| Workflow subgraphs | Nested flows |
+| Marketplace | Share templates & agents |
 
-**NovaFlow v1.11** ships ready-made benchmarks, production A/B model tests, and workspace guardrails.
+**NovaFlow v2.0** closes the biggest gaps vs Bisheng for workflows, agents, and docs.

@@ -1,6 +1,15 @@
-/** NovaFlow API base URL (server + client) */
+/** NovaFlow API base URL (browser) */
 export function getApiBaseUrl() {
   return process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+}
+
+/** Server-side probe target — uses Docker internal hostname when set */
+export function getServerApiBaseUrl() {
+  return (
+    process.env.API_INTERNAL_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:3001"
+  );
 }
 
 export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || "NovaFlow AI";

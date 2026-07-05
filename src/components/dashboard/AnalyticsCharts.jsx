@@ -6,6 +6,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -18,7 +21,7 @@ function shortDate(iso) {
   return d.toLocaleDateString([], { weekday: "short" });
 }
 
-export default function AnalyticsCharts({ series = [], assistants = [] }) {
+export default function AnalyticsCharts({ series = [], assistants = [], abRouting = null }) {
   const chartData = (series || []).map((row) => ({
     ...row,
     label: shortDate(row.date),
@@ -26,6 +29,15 @@ export default function AnalyticsCharts({ series = [], assistants = [] }) {
   }));
 
   const topApps = (assistants || []).slice(0, 6);
+
+  const abData = abRouting
+    ? [
+        { name: "Base model", value: abRouting.base_count || 0, fill: "#171717" },
+        { name: "Variant", value: abRouting.variant_count || 0, fill: "#047857" },
+      ].filter((d) => d.value > 0)
+    : [];
+
+  const abTotal = (abRouting?.base_count || 0) + (abRouting?.variant_count || 0);
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -119,6 +131,64 @@ export default function AnalyticsCharts({ series = [], assistants = [] }) {
           )}
         </div>
       </div>
+
+      {abRouting && (
+        <div className="workspace-panel rounded-2xl p-5 sm:p-6 lg:col-span-2">
+          <p className="workspace-section-label">A/B routing</p>
+          <h3 className="mt-1 text-lg font-semibold tracking-tight">
+            Base vs variant traffic ({abRouting.days || 30} days)
+          </h3>
+          <div className="mt-5 flex flex-col gap-6 sm:flex-row sm:items-center">
+            <div className="h-44 w-full sm:w-56 shrink-0">
+              {abTotal === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-neutral-400">
+                  No A/B traffic yet — enable variant routing on an assistant
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={abData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={42}
+                      outerRadius={68}
+                      paddingAngle={2}
+                    >
+                      {abData.map((entry) => (
+                        <Cell key={entry.name} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid rgba(0,0,0,0.06)",
+                        fontSize: 12,
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div className="grid flex-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-black/[0.06] bg-white/50 px-4 py-3">
+                <p className="text-2xl font-semibold tabular-nums">{abRouting.base_count || 0}</p>
+                <p className="mt-0.5 text-xs font-medium text-neutral-500">Base chats</p>
+              </div>
+              <div className="rounded-xl border border-black/[0.06] bg-white/50 px-4 py-3">
+                <p className="text-2xl font-semibold tabular-nums text-emerald-700">{abRouting.variant_count || 0}</p>
+                <p className="mt-0.5 text-xs font-medium text-neutral-500">Variant chats</p>
+              </div>
+              <div className="rounded-xl border border-black/[0.06] bg-white/50 px-4 py-3">
+                <p className="text-2xl font-semibold tabular-nums">{abRouting.variant_pct ?? 0}%</p>
+                <p className="mt-0.5 text-xs font-medium text-neutral-500">Variant share</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

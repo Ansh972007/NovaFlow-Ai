@@ -64,6 +64,14 @@ async def _stream_reply(
     user_msg: str,
     workspace_id: int | None = None,
 ):
+    from app.services.ab_routing import pick_ab_model
+    from app.services.workspace_settings import get_chat_config
+
+    ab_meta = None
+    if workspace_id:
+        cfg = get_chat_config(db)
+        ab_meta = pick_ab_model(db, workspace_id, cfg.get("model") or "")
+
     await websocket.send_json({"type": "start"})
     buffer = ""
     async for token in stream_chat(system, user_msg, db=db, workspace_id=workspace_id):
@@ -74,7 +82,12 @@ async def _stream_reply(
         await asyncio.sleep(0)
     await websocket.send_json({"type": "end", "message": {"content": buffer}})
     await websocket.send_json({"type": "close"})
-    log_usage(db, user_id, event_type, resource_id, {"chars": len(buffer)}, workspace_id)
+    meta = {"chars": len(buffer)}
+    if ab_meta:
+        meta["ab_variant"] = ab_meta.get("variant")
+        meta["ab_model"] = ab_meta.get("model")
+        meta["ab_route_id"] = ab_meta.get("route_id")
+    log_usage(db, user_id, event_type, resource_id, meta, workspace_id)
 
 
 @router.websocket("/assistant/chat/{assistant_id}")

@@ -276,3 +276,45 @@ def export_audit_log(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/analytics/ab-routing")
+def analytics_ab_routing(days: int = 30, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    import json
+
+    wid = ctx.workspace_id
+    since = datetime.utcnow() - timedelta(days=max(1, min(days, 90)))
+    rows = (
+        db.query(UsageEvent)
+        .filter(
+            UsageEvent.workspace_id == wid,
+            UsageEvent.event_type == "chat",
+            UsageEvent.create_time >= since,
+        )
+        .all()
+    )
+    base = 0
+    variant = 0
+    unknown = 0
+    for ev in rows:
+        try:
+            meta = json.loads(ev.meta or "{}")
+        except json.JSONDecodeError:
+            meta = {}
+        v = meta.get("ab_variant")
+        if v == "variant":
+            variant += 1
+        elif v == "base":
+            base += 1
+        else:
+            unknown += 1
+    total = base + variant
+    return ok(
+        {
+            "days": days,
+            "base_count": base,
+            "variant_count": variant,
+            "untracked_count": unknown,
+            "variant_pct": round((variant / total) * 100, 1) if total else 0,
+        }
+    )

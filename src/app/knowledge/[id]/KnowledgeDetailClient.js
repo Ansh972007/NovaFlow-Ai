@@ -171,7 +171,7 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                     ref={fileInputRef}
                     type="file"
                     multiple
-                    accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.pptx"
+                    accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.pptx,.html,.htm,.json"
                     className="hidden"
                     onChange={handleUpload}
                   />
@@ -225,7 +225,7 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                 </div>
                 <p className="mt-5 font-semibold">No documents yet</p>
                 <p className="mt-2 text-sm text-neutral-500">
-                  Upload PDF, Word, or text files to index them for AI search.
+                  Upload PDF, Word, HTML, JSON, or text files to index them for AI search.
                 </p>
               </div>
             ) : (

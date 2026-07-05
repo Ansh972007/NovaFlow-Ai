@@ -17,6 +17,10 @@ export async function getAssistantAnalytics(assistantId, days = 7) {
   return client.get(`/analytics/assistants/${assistantId}?days=${days}`);
 }
 
+export async function getAbRoutingAnalytics(days = 30) {
+  return client.get(`/analytics/ab-routing?days=${days}`);
+}
+
 export async function getTeamMembers() {
   return client.get("/team/members");
 }

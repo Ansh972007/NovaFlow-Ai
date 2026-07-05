@@ -63,6 +63,50 @@ export function HttpIcon({ size = 18 }) {
   );
 }
 
+export function LoopIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M17 2l4 4-4 4" />
+      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+      <path d="M7 22l-4-4 4-4" />
+      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+}
+
+export function ParallelIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <path d="M8 6h8M7.5 7.5L10.5 16M16.5 7.5L13.5 16" />
+    </svg>
+  );
+}
+
+export function HumanIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+      <path d="M16 3l2 2-2 2" />
+    </svg>
+  );
+}
+
+export function AgentIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <rect x="4" y="8" width="16" height="12" rx="2" />
+      <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+      <circle cx="9" cy="13" r="1" fill="currentColor" />
+      <circle cx="15" cy="13" r="1" fill="currentColor" />
+      <path d="M9 17h6" />
+    </svg>
+  );
+}
+
 export const NODE_ICONS = {
   trigger: TriggerIcon,
   retrieve: RetrieveIcon,
@@ -71,4 +115,8 @@ export const NODE_ICONS = {
   transform: TransformIcon,
   condition: ConditionIcon,
   http: HttpIcon,
+  loop: LoopIcon,
+  parallel: ParallelIcon,
+  human: HumanIcon,
+  agent: AgentIcon,
 };

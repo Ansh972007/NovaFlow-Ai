@@ -28,6 +28,10 @@ const ADD_NODE_DEFAULTS = {
   retrieve: { knowledge_id: null, limit: 5 },
   llm: { prompt: "You are a helpful assistant." },
   output: { label: "Output" },
+  loop: { max: 5, prompt: "Process: {{item}}", separator: "\n" },
+  parallel: { branches: ["Summary", "Key points", "Actions"] },
+  human: { message: "Review:\n{{output}}", require_approval: false },
+  agent: { tools: ["summarize"], prompt: "You are a capable agent.", knowledge_id: null },
 };
 
 export default function WorkflowBuilderClient({ workflowId }) {
@@ -429,7 +433,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
             <div className="shrink-0 border-t border-black/[0.04] p-3">
               <p className="workspace-section-label mb-2">Add node</p>
               <div className="flex flex-wrap gap-1.5">
-                {["transform", "condition", "http", "retrieve", "llm", "output"].map((type) => (
+                {["loop", "parallel", "agent", "human", "transform", "condition", "http", "retrieve", "llm", "output"].map((type) => (
                   <button
                     key={type}
                     type="button"

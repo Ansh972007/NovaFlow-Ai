@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import asyncio
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -37,7 +38,7 @@ TEMPLATES = {
         "graph": {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 60, "y": 140, "data": {"label": "Ticket"}},
-                {"id": "llm", "type": "llm", "x": 320, "y": 140, "data": {"prompt": "Classify this support ticket (billing/technical/account) and draft a helpful reply."}},
+                {"id": "llm", "type": "llm", "x": 320, "y": 140, "data": {"prompt": "Classify this support ticket and draft a helpful reply."}},
                 {"id": "output", "type": "output", "x": 580, "y": 140, "data": {"label": "Draft"}},
             ],
             "edges": [{"from": "trigger", "to": "llm"}, {"from": "llm", "to": "output"}],
@@ -50,7 +51,7 @@ TEMPLATES = {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Topic"}},
                 {"id": "retrieve", "type": "retrieve", "x": 240, "y": 140, "data": {"knowledge_id": None, "limit": 8}},
-                {"id": "llm", "type": "llm", "x": 440, "y": 140, "data": {"prompt": "Synthesize a structured research brief with bullet points and key takeaways."}},
+                {"id": "llm", "type": "llm", "x": 440, "y": 140, "data": {"prompt": "Synthesize a structured research brief."}},
                 {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Brief"}},
             ],
             "edges": [
@@ -66,13 +67,7 @@ TEMPLATES = {
         "graph": {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Raw input"}},
-                {
-                    "id": "transform",
-                    "type": "transform",
-                    "x": 240,
-                    "y": 140,
-                    "data": {"template": "Customer message:\n{{input}}\n\nDraft a concise reply."},
-                },
+                {"id": "transform", "type": "transform", "x": 240, "y": 140, "data": {"template": "Message:\n{{input}}"}},
                 {"id": "llm", "type": "llm", "x": 440, "y": 140, "data": {"prompt": "You are a helpful assistant."}},
                 {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Reply"}},
             ],
@@ -81,6 +76,35 @@ TEMPLATES = {
                 {"from": "transform", "to": "llm"},
                 {"from": "llm", "to": "output"},
             ],
+        },
+    },
+    "agent_loop": {
+        "name": "Agent + review",
+        "desc": "Tool agent with human review gate",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Task"}},
+                {"id": "agent", "type": "agent", "x": 240, "y": 140, "data": {"tools": ["summarize", "kb_search"]}},
+                {"id": "human", "type": "human", "x": 440, "y": 140, "data": {"message": "Review output:\n{{output}}", "require_approval": False}},
+                {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Final"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "agent"},
+                {"from": "agent", "to": "human"},
+                {"from": "human", "to": "output"},
+            ],
+        },
+    },
+    "batch": {
+        "name": "Batch loop",
+        "desc": "Process each line of input in parallel tasks",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Lines"}},
+                {"id": "loop", "type": "loop", "x": 260, "y": 140, "data": {"max": 5, "prompt": "Process this item briefly: {{item}}"}},
+                {"id": "output", "type": "output", "x": 480, "y": 140, "data": {"label": "Results"}},
+            ],
+            "edges": [{"from": "trigger", "to": "loop"}, {"from": "loop", "to": "output"}],
         },
     },
 }
@@ -362,7 +386,7 @@ async def _execute_graph(
             elif stream_llm and emit:
                 await _emit({"type": "llm_start"})
                 reply = ""
-                async for token in stream_chat(prompt, user_msg):
+                async for token in stream_chat(prompt, user_msg, db=db, workspace_id=workspace_id):
                     reply += token
                     await _emit({"type": "stream", "message": {"content": token}})
                 context["output"] = reply
@@ -370,12 +394,78 @@ async def _execute_graph(
                 step["status"] = "ok"
                 await _emit({"type": "llm_end"})
             else:
-                reply = await stream_chat_sync(prompt, user_msg)
+                reply = await stream_chat_sync(prompt, user_msg, db=db, workspace_id=workspace_id)
                 context["output"] = reply
                 step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
                 step["status"] = "ok"
         elif ntype == "output":
             step["output"] = context["output"] or context["input"]
+            step["status"] = "ok"
+        elif ntype == "loop":
+            sep = data.get("separator") or "\n"
+            max_iter = int(data.get("max") or 5)
+            items = [x.strip() for x in (context.get("input") or "").split(sep) if x.strip()][:max_iter]
+            prompt_tpl = data.get("prompt") or "Process: {{item}}"
+            outputs = []
+            for item in items:
+                msg = prompt_tpl.replace("{{item}}", item)
+                reply = await stream_chat_sync(
+                    "You are a helpful assistant.",
+                    msg,
+                    db=db,
+                    workspace_id=workspace_id,
+                )
+                outputs.append(f"• {item}\n{reply}")
+            merged = "\n\n".join(outputs) if outputs else context.get("input", "")
+            context["output"] = merged
+            step["output"] = merged[:500] + ("…" if len(merged) > 500 else "")
+            step["iterations"] = len(items)
+            step["status"] = "ok"
+        elif ntype == "parallel":
+            branches = data.get("branches") or ["Summary", "Key points", "Action items"]
+            branches = [str(b) for b in branches][:5]
+            tasks = [
+                stream_chat_sync(
+                    f"Complete this subtask: {b}",
+                    context.get("input") or "",
+                    db=db,
+                    workspace_id=workspace_id,
+                )
+                for b in branches
+            ]
+            results = await asyncio.gather(*tasks)
+            merged = "\n\n".join(f"## {b}\n{r}" for b, r in zip(branches, results))
+            context["output"] = merged
+            step["output"] = merged[:500] + ("…" if len(merged) > 500 else "")
+            step["status"] = "ok"
+        elif ntype == "human":
+            message = _apply_template(data.get("message") or "Review: {{output}}", context)
+            if data.get("require_approval"):
+                await _emit({"type": "human_review", "message": message, "node_id": node.get("id")})
+                step["output"] = message
+                step["status"] = "pending_human"
+                steps.append(step)
+                await _emit({"type": "step", "phase": "done", "step": step})
+                context["human_pending"] = True
+                return context, steps
+            context["output"] = context.get("output") or context.get("input") or message
+            step["output"] = message[:500]
+            step["status"] = "ok"
+        elif ntype == "agent":
+            from app.services.agent_tools import run_agent
+
+            tools = data.get("tools") or ["summarize"]
+            kid = data.get("knowledge_id")
+            reply = await run_agent(
+                db,
+                context.get("input") or "",
+                tools if isinstance(tools, list) else [tools],
+                knowledge_id=kid,
+                workspace_id=workspace_id,
+                system=data.get("prompt") or "You are a capable agent.",
+            )
+            context["output"] = reply
+            step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
             step["status"] = "ok"
         else:
             step["status"] = "skipped"

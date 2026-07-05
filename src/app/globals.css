@@ -1015,6 +1015,10 @@ body {
 .workflow-node-transform { border-color: rgba(245, 158, 11, 0.5); }
 .workflow-node-condition { border-color: rgba(244, 63, 94, 0.45); }
 .workflow-node-http { border-color: rgba(6, 182, 212, 0.5); }
+.workflow-node-loop { border-color: rgba(99, 102, 241, 0.5); }
+.workflow-node-parallel { border-color: rgba(217, 70, 239, 0.45); }
+.workflow-node-human { border-color: rgba(249, 115, 22, 0.5); }
+.workflow-node-agent { border-color: rgba(132, 204, 22, 0.55); }
 
 /* Circular selection ring */
 .wf-selection-ring {

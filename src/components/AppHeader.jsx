@@ -16,6 +16,7 @@ export default function AppHeader({ user, links = [] }) {
     { href: "/knowledge", label: "Knowledge" },
     { href: "/apps", label: "Apps" },
     { href: "/workflows", label: "Workflows" },
+    { href: "/agents", label: "Agents" },
     { href: "/evaluation", label: "Evaluation" },
   ];
 

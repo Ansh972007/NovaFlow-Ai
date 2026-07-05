@@ -15,16 +15,25 @@ Development spanned **~29 hours** of active work across **2 calendar days** (Jul
 | Workflow nodes + builder UX | v1.4 | Jul 5, 11:34 |
 | LLM vault + eval + fine-tune | v1.5–v1.8 | Jul 5, 12:05–12:33 |
 | Alerts, trends, diff, templates | v1.9–v1.11 | Jul 5, 12:33+ |
+| Bisheng-lite sprint | v2.0 | Jul 5, 13:00+ |
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
 | **First commit** | Jul 4, 2026 07:40 IST |
-| **Latest shipped** | v1.11 (Jul 5, 2026) |
+| **Latest shipped** | v2.0 (Jul 5, 2026) |
 | **Calendar span** | ~2 days |
-| **Active dev time** | ~29 hours (first → last commit) |
-| **Version releases** | v0.1 → v1.11 (18 tagged milestones) |
-| **Major modules** | Assistants, RAG, workflows, workspaces, SSO, eval, fine-tune, ops |
+| **Active dev time** | ~30+ hours (first → last commit) |
+| **Version releases** | v0.1 → v2.0 (19 tagged milestones) |
+| **Major modules** | Assistants, RAG, workflows, workspaces, SSO, eval, fine-tune, ops, agents |
+
+## v2.0 highlights
+
+- Workflow nodes: **loop**, **parallel**, **human** (HITL), **agent** (tools)
+- Templates: Agent + review, Batch loop
+- Document parsing: DOCX, HTML, JSON in knowledge ingest
+- Agent API + playground UI (`/agents`)
+- A/B routing analytics on dashboard
 
 *Times derived from git commit timestamps on `main`.*

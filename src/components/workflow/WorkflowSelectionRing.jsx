@@ -5,6 +5,13 @@ const RING_COLORS = {
   retrieve: { stroke: "#0ea5e9", glow: "rgba(14,165,233,0.35)", dot: "#38bdf8" },
   llm: { stroke: "#8b5cf6", glow: "rgba(139,92,246,0.35)", dot: "#a78bfa" },
   output: { stroke: "#525252", glow: "rgba(82,82,82,0.28)", dot: "#737373" },
+  transform: { stroke: "#f59e0b", glow: "rgba(245,158,11,0.35)", dot: "#fbbf24" },
+  condition: { stroke: "#f43f5e", glow: "rgba(244,63,94,0.35)", dot: "#fb7185" },
+  http: { stroke: "#06b6d4", glow: "rgba(6,182,212,0.35)", dot: "#22d3ee" },
+  loop: { stroke: "#6366f1", glow: "rgba(99,102,241,0.35)", dot: "#818cf8" },
+  parallel: { stroke: "#d946ef", glow: "rgba(217,70,239,0.35)", dot: "#e879f9" },
+  human: { stroke: "#f97316", glow: "rgba(249,115,22,0.35)", dot: "#fb923c" },
+  agent: { stroke: "#84cc16", glow: "rgba(132,204,22,0.35)", dot: "#a3e635" },
 };
 
 export default function WorkflowSelectionRing({ type = "output", size = 148 }) {

@@ -274,6 +274,126 @@ export default function WorkflowInspector({
                     </>
                   )}
 
+                  {selected.type === "loop" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Max items</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={selected.data?.max || 5}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { max: Number(e.target.value) } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Per-item prompt</span>
+                        <textarea
+                          value={selected.data?.prompt || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { prompt: e.target.value } })}
+                          disabled={readOnly}
+                          rows={3}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          placeholder="Process: {{item}}"
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  {selected.type === "parallel" && (
+                    <label className="mt-6 block">
+                      <span className="text-xs font-semibold text-neutral-600">Branches (comma-separated)</span>
+                      <input
+                        value={(selected.data?.branches || []).join(", ")}
+                        onChange={(e) =>
+                          onUpdateNode(selected.id, {
+                            data: { branches: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) },
+                          })
+                        }
+                        disabled={readOnly}
+                        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        placeholder="Summary, Key points, Actions"
+                      />
+                    </label>
+                  )}
+
+                  {selected.type === "human" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Review message</span>
+                        <textarea
+                          value={selected.data?.message || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { message: e.target.value } })}
+                          disabled={readOnly}
+                          rows={3}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <label className="mt-4 flex items-center gap-2 text-sm text-neutral-600">
+                        <input
+                          type="checkbox"
+                          checked={!!selected.data?.require_approval}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { require_approval: e.target.checked } })}
+                          disabled={readOnly}
+                        />
+                        Require approval (pauses run)
+                      </label>
+                    </>
+                  )}
+
+                  {selected.type === "agent" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Tools (comma-separated)</span>
+                        <input
+                          value={(selected.data?.tools || []).join(", ")}
+                          onChange={(e) =>
+                            onUpdateNode(selected.id, {
+                              data: { tools: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) },
+                            })
+                          }
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          placeholder="summarize, calculator, kb_search"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">System prompt</span>
+                        <textarea
+                          value={selected.data?.prompt || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { prompt: e.target.value } })}
+                          disabled={readOnly}
+                          rows={3}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      {(selected.data?.tools || []).includes("kb_search") && (
+                        <label className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">Knowledge base (kb_search)</span>
+                          <select
+                            value={selected.data?.knowledge_id ?? ""}
+                            onChange={(e) =>
+                              onUpdateNode(selected.id, {
+                                data: { knowledge_id: e.target.value ? Number(e.target.value) : null },
+                              })
+                            }
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          >
+                            <option value="">Select knowledge base</option>
+                            {knowledgeBases.map((kb) => (
+                              <option key={kb.id} value={kb.id}>
+                                {kb.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                    </>
+                  )}
+
                   {!readOnly && onConnect && otherNodes.length > 0 && (
                     <div className="mt-6 rounded-xl border border-black/[0.06] bg-white/50 p-3">
                       <p className="text-xs font-semibold text-neutral-600">Connections</p>

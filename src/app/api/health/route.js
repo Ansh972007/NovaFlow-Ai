@@ -1,4 +1,4 @@
-import { getApiBaseUrl } from "@/lib/api/config";
+import { getApiBaseUrl, getServerApiBaseUrl } from "@/lib/api/config";
 
 const TIMEOUT_MS = 10_000;
 
@@ -14,7 +14,8 @@ async function probe(url) {
 
 /** Server-side check — NovaFlow API on port 3001 */
 export async function GET() {
-  const apiUrl = getApiBaseUrl().replace(/\/$/, "");
+  const apiUrl = getServerApiBaseUrl().replace(/\/$/, "");
+  const publicUrl = getApiBaseUrl().replace(/\/$/, "");
 
   const urls = [
     `${apiUrl}/health`,
@@ -24,7 +25,7 @@ export async function GET() {
   for (const url of urls) {
     try {
       if (await probe(url)) {
-        return Response.json({ ok: true, apiUrl, probe: url });
+        return Response.json({ ok: true, apiUrl: publicUrl, probe: url });
       }
     } catch {
       /* try next */
@@ -34,7 +35,7 @@ export async function GET() {
   return Response.json(
     {
       ok: false,
-      apiUrl,
+      apiUrl: publicUrl,
       hint: "Run .\\deploy\\start-backend.ps1 from novaflow-ai (NovaFlow stack, not Bisheng).",
     },
     { status: 503 }

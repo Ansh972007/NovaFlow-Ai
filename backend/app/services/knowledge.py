@@ -21,6 +21,12 @@ def extract_text(path: Path) -> str:
         for page in reader.pages:
             parts.append(page.extract_text() or "")
         return "\n".join(parts)
+    if suffix in {".docx", ".html", ".htm", ".json"}:
+        from app.services.doc_parse import extract_document
+
+        parsed = extract_document(path)
+        if parsed:
+            return parsed
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
