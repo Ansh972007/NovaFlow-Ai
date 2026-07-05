@@ -130,6 +130,20 @@ export async function updateWorkflowSchedule(scheduleId, payload) {
   return client.patch(`/workflow/schedules/${scheduleId}`, payload);
 }
 
+export async function getWorkflowVersionDiff(workflowId, fromId, toId = "current") {
+  return client.get(`/workflow/${workflowId}/versions/diff`, {
+    params: { from_id: fromId, to_id: toId },
+  });
+}
+
+export async function touchWorkflowPresence(workflowId) {
+  return client.post(`/workflow/${workflowId}/presence`);
+}
+
+export async function getWorkflowPresence(workflowId) {
+  return client.get(`/workflow/${workflowId}/presence`);
+}
+
 export async function deleteWorkflowSchedule(scheduleId) {
   return client.delete(`/workflow/schedules/${scheduleId}`);
 }

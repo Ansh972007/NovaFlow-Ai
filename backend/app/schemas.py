@@ -77,6 +77,7 @@ class WorkflowUpdate(BaseModel):
     name: Optional[str] = None
     desc: Optional[str] = None
     graph: Optional[dict] = None
+    run_webhook_url: Optional[str] = None
 
 
 class WorkflowRunRequest(BaseModel):

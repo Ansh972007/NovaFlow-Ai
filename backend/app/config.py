@@ -46,6 +46,11 @@ LDAP_USER_FILTER = os.getenv("LDAP_USER_FILTER", "(uid={username})")
 LDAP_BIND_DN = os.getenv("LDAP_BIND_DN", "")
 LDAP_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "")
 
+SAML_IDP_SSO_URL = os.getenv("SAML_IDP_SSO_URL", "")
+SAML_IDP_ENTITY_ID = os.getenv("SAML_IDP_ENTITY_ID", "")
+SAML_SP_ENTITY_ID = os.getenv("SAML_SP_ENTITY_ID", "novaflow-ai")
+SAML_IDP_CERT = os.getenv("SAML_IDP_CERT", "")
+
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")

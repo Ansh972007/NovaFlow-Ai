@@ -8,7 +8,7 @@ import LiveBackground from "@/components/LiveBackground";
 import CursorGlow from "@/components/CursorGlow";
 import { login, register, getLdapStatus } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
-import { getOAuthProviders } from "@/lib/api/oauth";
+import { getSamlStatus } from "@/lib/api/saml";
 
 function LoginForm() {
   const router = useRouter();
@@ -27,6 +27,7 @@ function LoginForm() {
   const [greeting, setGreeting] = useState(0);
   const [oauthProviders, setOauthProviders] = useState([]);
   const [ldapEnabled, setLdapEnabled] = useState(false);
+  const [samlEnabled, setSamlEnabled] = useState(false);
 
   async function probeBackend() {
     setCheckingBackend(true);
@@ -48,6 +49,9 @@ function LoginForm() {
     getLdapStatus()
       .then((s) => setLdapEnabled(!!s?.enabled))
       .catch(() => setLdapEnabled(false));
+    getSamlStatus()
+      .then((s) => setSamlEnabled(!!s?.enabled))
+      .catch(() => setSamlEnabled(false));
   }, []);
 
   const formProgress = useMemo(() => {
@@ -125,6 +129,7 @@ function LoginForm() {
           handleSubmit={handleSubmit}
           oauthProviders={oauthProviders}
           ldapEnabled={ldapEnabled}
+          samlEnabled={samlEnabled}
         />
       </div>
     </div>

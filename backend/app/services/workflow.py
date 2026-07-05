@@ -129,6 +129,7 @@ def workflow_dict(w: Workflow) -> dict:
         "update_time": w.update_time.isoformat() if w.update_time else None,
         "webhook_token": getattr(w, "webhook_token", "") or "",
         "is_public": int(getattr(w, "is_public", 0) or 0),
+        "run_webhook_url": getattr(w, "run_webhook_url", "") or "",
     }
 
 
@@ -162,6 +163,24 @@ def snapshot_workflow_version(db: Session, w: Workflow, user_id: int) -> None:
     )
     for old in excess:
         db.delete(old)
+
+
+def get_workflow_version(db: Session, workflow_id: str, version_id: int) -> dict | None:
+    row = db.get(WorkflowVersion, version_id)
+    if not row or row.workflow_id != workflow_id:
+        return None
+    try:
+        graph = json.loads(row.graph_json or "{}")
+    except json.JSONDecodeError:
+        graph = {"nodes": [], "edges": []}
+    return {
+        "id": row.id,
+        "version_no": row.version_no,
+        "name": row.name,
+        "desc": row.desc or "",
+        "graph": graph,
+        "create_time": row.create_time.isoformat() if row.create_time else None,
+    }
 
 
 def list_workflow_versions(db: Session, workflow_id: str) -> list[dict]:
@@ -325,6 +344,22 @@ async def run_workflow(
     db.add(run)
     log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms}, workspace_id or workflow.workspace_id)
     db.commit()
+
+    webhook_url = getattr(workflow, "run_webhook_url", "") or ""
+    if webhook_url.strip():
+        from app.services.webhooks import post_webhook
+
+        await post_webhook(
+            webhook_url,
+            {
+                "workflow_id": workflow.id,
+                "run_id": run.id,
+                "output": final_output[:2000],
+                "duration_ms": duration_ms,
+                "status": "completed",
+            },
+            event="workflow.run.completed",
+        )
 
     return {
         "workflow_id": workflow.id,

@@ -111,8 +111,18 @@ class Workflow(Base):
     status = Column(Integer, default=0)  # 0 draft, 1 published
     webhook_token = Column(String(64), default="")
     is_public = Column(Integer, default=0)  # marketplace listing
+    run_webhook_url = Column(String(500), default="")
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkflowPresence(Base):
+    __tablename__ = "workflow_presence"
+
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    user_name = Column(String(80), default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class WorkflowPendingRun(Base):
@@ -519,9 +529,15 @@ def migrate_schema():
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
 
-    for table in ("workflow_versions", "workflow_ratings", "workflow_comments", "workflow_schedules"):
+    for table in ("workflow_versions", "workflow_ratings", "workflow_comments", "workflow_schedules", "workflow_presence"):
         if table not in insp.get_table_names():
             Base.metadata.tables[table].create(bind=engine, checkfirst=True)
+
+    if "workflows" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("workflows")}
+        if "run_webhook_url" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE workflows ADD COLUMN run_webhook_url VARCHAR(500) DEFAULT ''"))
 
 
 def init_db():

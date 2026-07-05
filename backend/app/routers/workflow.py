@@ -5,12 +5,13 @@ from datetime import datetime
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.database import Workflow, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
+from app.database import Workflow, WorkflowPresence, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
 from app.services.cron_schedule import validate_cron
 from app.services.workflow import (
     TEMPLATES,
+    get_workflow_version,
     list_workflow_versions,
     restore_workflow_version,
     resume_workflow_pending,
@@ -18,6 +19,7 @@ from app.services.workflow import (
     snapshot_workflow_version,
     workflow_dict,
 )
+from app.services.workflow_diff import diff_workflow_graphs
 from app.services.workflow_scheduler import compute_schedule_next_run, schedule_dict
 
 router = APIRouter(tags=["Workflow"])
@@ -106,6 +108,8 @@ def update_workflow(body: WorkflowUpdate, db: Session = Depends(get_db), ctx=Dep
         w.graph_json = json.dumps(body.graph)
     elif body.name is not None or body.desc is not None:
         snapshot_workflow_version(db, w, ctx.user.user_id)
+    if hasattr(body, "run_webhook_url") and body.run_webhook_url is not None:
+        w.run_webhook_url = str(body.run_webhook_url or "").strip()[:500]
     w.update_time = datetime.utcnow()
     db.commit()
     db.refresh(w)
@@ -201,6 +205,104 @@ async def resume_workflow(body: dict, db: Session = Depends(get_db), ctx=Depends
         workspace_id=ctx.workspace_id,
     )
     return ok(result)
+
+
+@router.get("/workflow/{workflow_id}/versions/diff")
+def workflow_version_diff(
+    workflow_id: str,
+    from_id: int = Query(...),
+    to_id: str = Query("current"),
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    old_v = get_workflow_version(db, workflow_id, from_id)
+    if not old_v:
+        return fail(404, "From version not found")
+    if to_id == "current":
+        try:
+            new_graph = json.loads(w.graph_json or "{}")
+        except json.JSONDecodeError:
+            new_graph = {"nodes": [], "edges": []}
+        to_label = "current"
+    else:
+        new_v = get_workflow_version(db, workflow_id, int(to_id))
+        if not new_v:
+            return fail(404, "To version not found")
+        new_graph = new_v["graph"]
+        to_label = f"v{new_v['version_no']}"
+    diff = diff_workflow_graphs(old_v["graph"], new_graph)
+    return ok({"from": f"v{old_v['version_no']}", "to": to_label, **diff})
+
+
+@router.get("/workflow/{workflow_id}/versions/{version_id}")
+def workflow_version_detail(
+    workflow_id: str,
+    version_id: int,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    data = get_workflow_version(db, workflow_id, version_id)
+    if not data:
+        return fail(404, "Version not found")
+    return ok(data)
+
+
+@router.post("/workflow/{workflow_id}/presence")
+def touch_workflow_presence(
+    workflow_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    row = db.get(WorkflowPresence, workflow_id)
+    now = datetime.utcnow()
+    if row:
+        row.user_id = ctx.user.user_id
+        row.user_name = ctx.user.user_name
+        row.updated_at = now
+    else:
+        row = WorkflowPresence(
+            workflow_id=workflow_id,
+            user_id=ctx.user.user_id,
+            user_name=ctx.user.user_name,
+            updated_at=now,
+        )
+        db.add(row)
+    db.commit()
+    return ok({"workflow_id": workflow_id, "user_name": ctx.user.user_name})
+
+
+@router.get("/workflow/{workflow_id}/presence")
+def get_workflow_presence(
+    workflow_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    row = db.get(WorkflowPresence, workflow_id)
+    if not row:
+        return ok(None)
+    age = (datetime.utcnow() - row.updated_at).total_seconds() if row.updated_at else 9999
+    if age > 90:
+        return ok(None)
+    return ok(
+        {
+            "user_id": row.user_id,
+            "user_name": row.user_name,
+            "is_self": row.user_id == ctx.user.user_id,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    )
 
 
 @router.get("/workflow/{workflow_id}/versions")

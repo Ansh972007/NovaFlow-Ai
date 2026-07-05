@@ -41,6 +41,11 @@ export default function WorkflowInspector({
   onToggleSchedule,
   onDeleteSchedule,
   scheduleBusy = false,
+  runWebhookUrl = "",
+  onRunWebhookUrlChange,
+  versionDiff = null,
+  diffLoading = false,
+  onCompareVersion,
   readOnly = false,
 }) {
   const [connectTarget, setConnectTarget] = useState("");
@@ -127,6 +132,19 @@ export default function WorkflowInspector({
                           />
                           <span>List on marketplace</span>
                         </label>
+                      )}
+                      {onRunWebhookUrlChange && (
+                        <div className="mt-4">
+                          <p className="text-[11px] font-medium text-neutral-500">Run completion webhook</p>
+                          <input
+                            value={runWebhookUrl}
+                            onChange={(e) => onRunWebhookUrlChange(e.target.value)}
+                            disabled={readOnly}
+                            placeholder="https://hooks.example.com/workflow-done"
+                            className="input-field mt-1.5 w-full font-mono text-[10px]"
+                          />
+                          <p className="mt-1 text-[10px] text-neutral-400">POST JSON on each successful run</p>
+                        </div>
                       )}
                       {onCreateSchedule && (
                         <div className="mt-5 border-t border-black/[0.06] pt-4">
@@ -769,17 +787,51 @@ export default function WorkflowInspector({
                         </p>
                       </div>
                       {onRestoreVersion && (
-                        <button
-                          type="button"
-                          onClick={() => onRestoreVersion(v.id)}
-                          className="shrink-0 rounded-lg bg-neutral-900 px-2.5 py-1.5 text-[10px] font-semibold text-white"
-                        >
-                          Restore
-                        </button>
+                        <div className="flex shrink-0 gap-1">
+                          {onCompareVersion && (
+                            <button
+                              type="button"
+                              onClick={() => onCompareVersion(v.id)}
+                              className="rounded-lg border border-neutral-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-neutral-700"
+                            >
+                              Diff
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onRestoreVersion(v.id)}
+                            className="rounded-lg bg-neutral-900 px-2.5 py-1.5 text-[10px] font-semibold text-white"
+                          >
+                            Restore
+                          </button>
+                        </div>
                       )}
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {diffLoading && <p className="mt-3 text-xs text-neutral-500">Computing diff…</p>}
+              {versionDiff && (
+                <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50/60 p-4 text-xs">
+                  <p className="font-semibold text-violet-900">
+                    {versionDiff.from} → {versionDiff.to}
+                  </p>
+                  <ul className="mt-2 space-y-1 text-neutral-700">
+                    <li>+{versionDiff.summary?.nodes_added || 0} nodes · −{versionDiff.summary?.nodes_removed || 0} removed · ~{versionDiff.summary?.nodes_changed || 0} changed</li>
+                    <li>+{versionDiff.summary?.edges_added || 0} edges · −{versionDiff.summary?.edges_removed || 0} removed</li>
+                  </ul>
+                  {(versionDiff.nodes_added?.length > 0 || versionDiff.nodes_removed?.length > 0) && (
+                    <div className="mt-3 max-h-32 overflow-y-auto space-y-1">
+                      {versionDiff.nodes_added?.map((n) => (
+                        <p key={`a-${n.id}`} className="text-emerald-700">+ {n.type}: {n.label}</p>
+                      ))}
+                      {versionDiff.nodes_removed?.map((n) => (
+                        <p key={`r-${n.id}`} className="text-red-600">− {n.type}: {n.label}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               <p className="workspace-section-label mt-8">Recent runs</p>

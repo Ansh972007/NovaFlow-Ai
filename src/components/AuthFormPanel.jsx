@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Logo from "@/components/Logo";
 import Magnetic from "@/components/Magnetic";
 import { startOAuthLogin } from "@/lib/api/oauth";
+import { startSamlLogin } from "@/lib/api/saml";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -99,6 +100,7 @@ export default function AuthFormPanel({
   handleSubmit,
   oauthProviders = [],
   ldapEnabled = false,
+  samlEnabled = false,
 }) {
   const [clientReady, setClientReady] = useState(false);
 
@@ -347,7 +349,7 @@ export default function AuthFormPanel({
                   </Magnetic>
                 </form>
 
-                {!isRegister && oauthProviders.length > 0 && (
+                {!isRegister && (oauthProviders.length > 0 || samlEnabled) && (
                   <div className="mt-6">
                     <div className="relative mb-4">
                       <div className="absolute inset-0 flex items-center">
@@ -358,6 +360,16 @@ export default function AuthFormPanel({
                       </div>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
+                      {samlEnabled && (
+                        <button
+                          type="button"
+                          disabled={loading || backendOk === false}
+                          onClick={startSamlLogin}
+                          className="flex items-center justify-center gap-2 rounded-full border border-border bg-white py-3 text-sm font-semibold transition hover:bg-surface disabled:opacity-50 sm:col-span-2"
+                        >
+                          SAML SSO
+                        </button>
+                      )}
                       {oauthProviders.map((provider) => (
                         <button
                           key={provider.id}

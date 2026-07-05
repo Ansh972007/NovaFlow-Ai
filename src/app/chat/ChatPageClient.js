@@ -188,6 +188,18 @@ export default function ChatPageClient() {
 
   const headerTitle = useMemo(() => selectedApp?.name || "Chat", [selectedApp]);
 
+  function exportTranscript() {
+    if (!messages?.length) return;
+    const lines = messages.map((m) => `**${m.role === "user" ? "You" : "Assistant"}:** ${m.content || ""}`);
+    const md = `# ${headerTitle}\n\n${lines.join("\n\n")}\n`;
+    const blob = new Blob([md], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `novaflow-chat-${sessionId || "session"}.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   if (!authChecked) {
     return <ChatLoading />;
   }
@@ -253,6 +265,15 @@ export default function ChatPageClient() {
           </div>
 
           <div className="flex items-center gap-0.5">
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={exportTranscript}
+                className="chat-header-link hidden rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-500 hover:bg-neutral-100/80 hover:text-neutral-900 sm:inline"
+              >
+                Export
+              </button>
+            )}
             <Link
               href={selectedApp ? `/apps/${selectedApp.id}` : "/apps"}
               className="chat-header-link hidden rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-500 hover:bg-neutral-100/80 hover:text-neutral-900 sm:inline"

@@ -21,6 +21,7 @@ import {
 } from "@/lib/api/llm";
 import { getApiBaseUrl } from "@/lib/api/config";
 import { getTeamMembers, updateMemberRole, downloadAuditExport, getAuditEvents } from "@/lib/api/analytics";
+import { getWorkspaceQuotas, updateWorkspaceQuotas, getActiveWorkspaceId } from "@/lib/api/workspaces";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { createApiKey, deleteApiKey, listApiKeys } from "@/lib/api/apiKeys";
 import { resetSetup } from "@/lib/setup/storage";
@@ -64,6 +65,9 @@ export default function SettingsClient() {
   const [apiKeyMsg, setApiKeyMsg] = useState("");
   const [auditEvents, setAuditEvents] = useState([]);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [quotas, setQuotas] = useState(null);
+  const [quotaBusy, setQuotaBusy] = useState(false);
+  const [quotaMsg, setQuotaMsg] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,6 +116,10 @@ export default function SettingsClient() {
         .then((rows) => setAuditEvents(Array.isArray(rows) ? rows : []))
         .catch(() => setAuditEvents([]))
         .finally(() => setAuditLoading(false));
+      const wid = getActiveWorkspaceId();
+      if (wid) {
+        getWorkspaceQuotas(wid).then(setQuotas).catch(() => setQuotas(null));
+      }
     }
   }, [user]);
 
@@ -129,6 +137,26 @@ export default function SettingsClient() {
   function handleRerunSetup() {
     resetSetup();
     router.push("/setup");
+  }
+
+  async function handleSaveQuotas(e) {
+    e.preventDefault();
+    const wid = getActiveWorkspaceId();
+    if (!wid || !quotas) return;
+    setQuotaBusy(true);
+    setQuotaMsg("");
+    try {
+      const updated = await updateWorkspaceQuotas(wid, {
+        eval_runs_monthly_limit: Number(quotas.eval_runs_monthly_limit) || 0,
+        finetune_jobs_monthly_limit: Number(quotas.finetune_jobs_monthly_limit) || 0,
+      });
+      setQuotas(updated);
+      setQuotaMsg("Workspace quotas saved.");
+    } catch (err) {
+      setQuotaMsg(err.message || "Save failed");
+    } finally {
+      setQuotaBusy(false);
+    }
   }
 
   async function handleCreateApiKey(e) {
@@ -721,6 +749,48 @@ export default function SettingsClient() {
                 {pwdBusy ? "Updating…" : "Update password"}
               </button>
             </motion.form>
+
+            {user.role === "admin" && quotas && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.13, ease }}
+                className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+              >
+                <h2 className="text-lg font-semibold tracking-tight">Workspace quotas</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  Monthly limits for evaluation runs and fine-tune jobs (0 = unlimited).
+                </p>
+                <form onSubmit={handleSaveQuotas} className="mt-5 grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm font-medium">
+                    Eval runs / month
+                    <input
+                      type="number"
+                      min="0"
+                      value={quotas.eval_runs_monthly_limit || 0}
+                      onChange={(e) => setQuotas((q) => ({ ...q, eval_runs_monthly_limit: e.target.value }))}
+                      className="input-field mt-1.5 w-full"
+                    />
+                    <span className="mt-1 block text-xs text-neutral-400">Used: {quotas.eval_runs_this_month || 0}</span>
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Fine-tune jobs / month
+                    <input
+                      type="number"
+                      min="0"
+                      value={quotas.finetune_jobs_monthly_limit || 0}
+                      onChange={(e) => setQuotas((q) => ({ ...q, finetune_jobs_monthly_limit: e.target.value }))}
+                      className="input-field mt-1.5 w-full"
+                    />
+                    <span className="mt-1 block text-xs text-neutral-400">Used: {quotas.finetune_jobs_this_month || 0}</span>
+                  </label>
+                  {quotaMsg && <p className="sm:col-span-2 text-sm text-neutral-600">{quotaMsg}</p>}
+                  <button type="submit" disabled={quotaBusy} className="btn-primary sm:col-span-2 disabled:opacity-50">
+                    {quotaBusy ? "Saving…" : "Save quotas"}
+                  </button>
+                </form>
+              </motion.div>
+            )}
 
             {user.role === "admin" && (
               <motion.div

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR, DEMO_SEED
 from app.crypto import md5_hash
 from app.database import SessionLocal, User, init_db
-from app.routers import analytics, api_keys, assistant, auth_oauth, agents, chat_ws, evaluation, finetune, knowledge, llm, marketplace, user, workflow, workspace
+from app.routers import analytics, api_keys, assistant, auth_oauth, auth_saml, agents, chat_ws, evaluation, finetune, knowledge, llm, marketplace, user, workflow, workspace
 from app.services.demo_seed import seed_demo_data
 from app.services.llm_providers import ensure_default_provider
 from app.services.tenancy import ensure_personal_workspace
@@ -56,7 +56,7 @@ async def lifespan(_app: FastAPI):
         pass
 
 
-app = FastAPI(title="NovaFlow API", version="4.0.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="5.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,6 +68,7 @@ app.add_middleware(
 
 app.include_router(user.router, prefix=API_PREFIX)
 app.include_router(auth_oauth.router, prefix=API_PREFIX)
+app.include_router(auth_saml.router, prefix=API_PREFIX)
 app.include_router(assistant.router, prefix=API_PREFIX)
 app.include_router(agents.router, prefix=API_PREFIX)
 app.include_router(knowledge.router, prefix=API_PREFIX)
@@ -88,7 +89,7 @@ def health():
         {
             "service": "novaflow-api",
             "status": "ok",
-            "version": "4.0.0",
+            "version": "5.0.0",
             "vector_backend": vector_backend(),
         }
     )
@@ -96,4 +97,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "4.0.0"})
+    return ok({"name": "NovaFlow API", "version": "5.0.0"})

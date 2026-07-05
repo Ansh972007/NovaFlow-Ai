@@ -16,6 +16,9 @@ import {
   getWorkflowInfo,
   getWorkflowSchedules,
   getWorkflowVersions,
+  getWorkflowVersionDiff,
+  getWorkflowPresence,
+  touchWorkflowPresence,
   createWorkflowSchedule,
   updateWorkflowSchedule,
   deleteWorkflowSchedule,
@@ -64,6 +67,10 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [scheduleCron, setScheduleCron] = useState("0 9 * * *");
   const [scheduleInput, setScheduleInput] = useState("Scheduled run");
   const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [runWebhookUrl, setRunWebhookUrl] = useState("");
+  const [versionDiff, setVersionDiff] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [presence, setPresence] = useState(null);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState(null);
   const [libraries, setLibraries] = useState([]);
@@ -90,6 +97,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
       setStatus(info?.status ?? 0);
       setWebhookToken(info?.webhook_token || "");
       setIsPublic(!!info?.is_public);
+      setRunWebhookUrl(info?.run_webhook_url || "");
       setGraph(info?.graph || { nodes: [], edges: [] });
       setRecentRuns(info?.recent_runs || []);
       setLibraries(kbRes?.data || []);
@@ -139,6 +147,18 @@ export default function WorkflowBuilderClient({ workflowId }) {
   useEffect(() => {
     if (user && status === 1) loadSchedules();
   }, [user, status, loadSchedules]);
+
+  useEffect(() => {
+    if (!user || user.role === "viewer") return undefined;
+    touchWorkflowPresence(workflowId).catch(() => {});
+    const poll = setInterval(() => {
+      touchWorkflowPresence(workflowId).catch(() => {});
+      getWorkflowPresence(workflowId)
+        .then((p) => setPresence(p && !p.is_self ? p : null))
+        .catch(() => setPresence(null));
+    }, 30000);
+    return () => clearInterval(poll);
+  }, [user, workflowId]);
 
   function updateNode(id, patch) {
     setGraph((prev) => ({
@@ -204,7 +224,13 @@ export default function WorkflowBuilderClient({ workflowId }) {
     setSaving(true);
     setError("");
     try {
-      await updateWorkflow({ id: workflowId, name: name.trim(), desc, graph });
+      await updateWorkflow({
+        id: workflowId,
+        name: name.trim(),
+        desc,
+        graph,
+        run_webhook_url: runWebhookUrl.trim(),
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -267,6 +293,20 @@ export default function WorkflowBuilderClient({ workflowId }) {
     return `${window.location.origin}/api/v1/workflow/webhook/${webhookToken}`;
   }
 
+  async function handleCompareVersion(versionId) {
+    setDiffLoading(true);
+    setVersionDiff(null);
+    setInspectorTab("history");
+    try {
+      const diff = await getWorkflowVersionDiff(workflowId, versionId, "current");
+      setVersionDiff(diff);
+    } catch (err) {
+      setError(err.message || "Diff failed");
+    } finally {
+      setDiffLoading(false);
+    }
+  }
+
   async function handleCreateSchedule() {
     setScheduleBusy(true);
     setError("");
@@ -316,7 +356,13 @@ export default function WorkflowBuilderClient({ workflowId }) {
     const steps = [];
     let streamOutput = "";
     try {
-      await updateWorkflow({ id: workflowId, name: name.trim(), desc, graph });
+      await updateWorkflow({
+        id: workflowId,
+        name: name.trim(),
+        desc,
+        graph,
+        run_webhook_url: runWebhookUrl.trim(),
+      });
       await runWorkflowWs(workflowId, runInput.trim(), {
         onHumanReview: (data) => {
           setPendingReview({ id: data.pending_run_id, message: data.message });
@@ -516,6 +562,12 @@ export default function WorkflowBuilderClient({ workflowId }) {
         </div>
       )}
 
+      {presence && (
+        <div className="relative z-20 shrink-0 border-b border-sky-100 bg-sky-50/90 px-4 py-2 text-center text-sm text-sky-800">
+          {presence.user_name} is also viewing this workflow
+        </div>
+      )}
+
       <div className="relative z-10 flex min-h-0 flex-1">
         <aside className="workflow-studio-rail hidden w-[240px] shrink-0 flex-col border-r border-white/60 lg:flex">
           <div className="border-b border-black/[0.04] p-4">
@@ -678,6 +730,11 @@ export default function WorkflowBuilderClient({ workflowId }) {
           onToggleSchedule={readOnly ? undefined : handleToggleSchedule}
           onDeleteSchedule={readOnly ? undefined : handleDeleteSchedule}
           scheduleBusy={scheduleBusy}
+          runWebhookUrl={runWebhookUrl}
+          onRunWebhookUrlChange={readOnly ? undefined : setRunWebhookUrl}
+          versionDiff={versionDiff}
+          diffLoading={diffLoading}
+          onCompareVersion={readOnly ? undefined : handleCompareVersion}
           readOnly={readOnly}
         />
       </div>
