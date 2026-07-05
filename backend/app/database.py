@@ -109,8 +109,37 @@ class Workflow(Base):
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     status = Column(Integer, default=0)  # 0 draft, 1 published
+    webhook_token = Column(String(64), default="")
+    is_public = Column(Integer, default=0)  # marketplace listing
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkflowPendingRun(Base):
+    __tablename__ = "workflow_pending_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    context_json = Column(Text, default="{}")
+    graph_json = Column(Text, default="{}")
+    pause_after_node = Column(String(64), default="")
+    steps_json = Column(Text, default="[]")
+    status = Column(Integer, default=0)  # 0 pending, 1 resumed, 2 rejected
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(80), nullable=False)
+    key_prefix = Column(String(16), default="")
+    key_hash = Column(String(64), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
 
 
 class WorkflowRun(Base):
@@ -422,6 +451,16 @@ def migrate_schema():
         for col, ddl in [
             ("pagerduty_routing_key", "ALTER TABLE eval_regression_alerts ADD COLUMN pagerduty_routing_key VARCHAR(64) DEFAULT ''"),
             ("opsgenie_api_key", "ALTER TABLE eval_regression_alerts ADD COLUMN opsgenie_api_key VARCHAR(128) DEFAULT ''"),
+        ]:
+            if col not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+    if "workflows" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("workflows")}
+        for col, ddl in [
+            ("webhook_token", "ALTER TABLE workflows ADD COLUMN webhook_token VARCHAR(64) DEFAULT ''"),
+            ("is_public", "ALTER TABLE workflows ADD COLUMN is_public INTEGER DEFAULT 0"),
         ]:
             if col not in cols:
                 with engine.begin() as conn:

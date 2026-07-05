@@ -1019,6 +1019,7 @@ body {
 .workflow-node-parallel { border-color: rgba(217, 70, 239, 0.45); }
 .workflow-node-human { border-color: rgba(249, 115, 22, 0.5); }
 .workflow-node-agent { border-color: rgba(132, 204, 22, 0.55); }
+.workflow-node-subgraph { border-color: rgba(20, 184, 166, 0.5); }
 
 /* Circular selection ring */
 .wf-selection-ring {

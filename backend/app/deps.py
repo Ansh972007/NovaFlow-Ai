@@ -1,10 +1,12 @@
 from typing import Callable, Optional
 
+import hashlib
+
 from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.crypto import decode_token
-from app.database import User, Workspace, get_db
+from app.database import ApiKey, User, Workspace, get_db
 from app.services.tenancy import WorkspaceCtx, ensure_personal_workspace, get_membership
 
 ROLE_RANK = {"viewer": 0, "editor": 1, "admin": 2}
@@ -27,8 +29,19 @@ def _extract_token(
 
 def get_current_user(
     db: Session = Depends(get_db),
-    token: str = Depends(_extract_token),
+    authorization: Optional[str] = Header(None),
+    t: Optional[str] = Query(None),
+    x_api_key: Optional[str] = Header(None, alias="X-Api-Key"),
 ) -> User:
+    if x_api_key and x_api_key.startswith("nf_"):
+        key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
+        row = db.query(ApiKey).filter(ApiKey.key_hash == key_hash).first()
+        if row:
+            user = db.get(User, row.user_id)
+            if user and not user.delete:
+                return user
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    token = _extract_token(authorization, t)
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")

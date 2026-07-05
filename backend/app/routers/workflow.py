@@ -1,4 +1,5 @@
 import json
+import secrets
 from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, Query
@@ -9,6 +10,7 @@ from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
 from app.services.workflow import (
     TEMPLATES,
+    resume_workflow_pending,
     run_workflow,
     workflow_dict,
 )
@@ -114,8 +116,10 @@ def set_workflow_status(
         return fail(404, "Workflow not found")
     w.status = status
     w.update_time = datetime.utcnow()
+    if status == 1 and not getattr(w, "webhook_token", ""):
+        w.webhook_token = secrets.token_urlsafe(24)
     db.commit()
-    return ok(None)
+    return ok({"id": w.id, "status": status, "webhook_token": getattr(w, "webhook_token", "") or ""})
 
 
 @router.post("/workflow/delete")
@@ -160,3 +164,31 @@ def online_workflows(
         .all()
     )
     return ok([workflow_dict(w) for w in rows])
+
+
+@router.post("/workflow/webhook/{token}")
+async def workflow_webhook(token: str, body: dict, db: Session = Depends(get_db)):
+    w = db.query(Workflow).filter(Workflow.webhook_token == token, Workflow.status == 1).first()
+    if not w:
+        return fail(404, "Invalid webhook")
+    user_input = (body.get("input") or body.get("message") or body.get("text") or "").strip()
+    if not user_input:
+        return fail(400, "input required")
+    result = await run_workflow(db, w, w.user_id, user_input, w.workspace_id)
+    return ok(result)
+
+
+@router.post("/workflow/resume")
+async def resume_workflow(body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+    pending_id = body.get("pending_run_id")
+    if not pending_id:
+        return fail(400, "pending_run_id required")
+    result = await resume_workflow_pending(
+        db,
+        int(pending_id),
+        ctx.user.user_id,
+        approved=bool(body.get("approved", True)),
+        note=(body.get("note") or "").strip(),
+        workspace_id=ctx.workspace_id,
+    )
+    return ok(result)

@@ -22,6 +22,8 @@ export default function WorkflowInspector({
   onRun,
   running,
   runResult,
+  pendingReview,
+  onResume,
   recentRuns,
   readOnly = false,
 }) {
@@ -394,6 +396,19 @@ export default function WorkflowInspector({
                     </>
                   )}
 
+                  {selected.type === "subgraph" && (
+                    <label className="mt-6 block">
+                      <span className="text-xs font-semibold text-neutral-600">Workflow ID to run</span>
+                      <input
+                        value={selected.data?.workflow_id || ""}
+                        onChange={(e) => onUpdateNode(selected.id, { data: { workflow_id: e.target.value || null } })}
+                        disabled={readOnly}
+                        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm font-mono"
+                        placeholder="Paste published workflow id"
+                      />
+                    </label>
+                  )}
+
                   {!readOnly && onConnect && otherNodes.length > 0 && (
                     <div className="mt-6 rounded-xl border border-black/[0.06] bg-white/50 p-3">
                       <p className="text-xs font-semibold text-neutral-600">Connections</p>
@@ -558,6 +573,21 @@ export default function WorkflowInspector({
               >
                 {running ? "Running pipeline…" : "Run workflow"}
               </button>
+
+              {pendingReview && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-semibold text-amber-900">Human review required</p>
+                  <p className="mt-1 text-xs text-amber-800 whitespace-pre-wrap">{pendingReview.message}</p>
+                  <div className="mt-3 flex gap-2">
+                    <button type="button" onClick={() => onResume?.(true)} className="btn-primary flex-1 text-xs">
+                      Approve & continue
+                    </button>
+                    <button type="button" onClick={() => onResume?.(false)} className="btn-secondary flex-1 text-xs">
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {runResult && (
                 <div className="mt-5 space-y-3">

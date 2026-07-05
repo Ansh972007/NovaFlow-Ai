@@ -50,6 +50,14 @@ export async function runWorkflow(workflowId, input) {
   return client.post("/workflow/run", { workflow_id: workflowId, input });
 }
 
+export async function resumeWorkflow(pendingRunId, { approved = true, note = "" } = {}) {
+  return client.post("/workflow/resume", {
+    pending_run_id: pendingRunId,
+    approved,
+    note,
+  });
+}
+
 export function runWorkflowWs(workflowId, input, handlers = {}) {
   return new Promise((resolve, reject) => {
     const url = getWsUrl(`/api/v1/workflow/run/ws/${workflowId}`);
@@ -74,6 +82,8 @@ export function runWorkflowWs(workflowId, input, handlers = {}) {
         } else if (data.type === "stream") {
           const token = data.message?.content || "";
           handlers.onStream?.(token, data);
+        } else if (data.type === "human_review") {
+          handlers.onHumanReview?.(data);
         } else if (data.type === "complete") {
           result = data;
           handlers.onComplete?.(data);

@@ -14,10 +14,12 @@ import { listKnowledge } from "@/lib/api/knowledge";
 import {
   deleteWorkflow,
   getWorkflowInfo,
+  resumeWorkflow,
   runWorkflowWs,
   setWorkflowStatus,
   updateWorkflow,
 } from "@/lib/api/workflows";
+import { setWorkflowPublic } from "@/lib/api/marketplace";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -32,6 +34,7 @@ const ADD_NODE_DEFAULTS = {
   parallel: { branches: ["Summary", "Key points", "Actions"] },
   human: { message: "Review:\n{{output}}", require_approval: false },
   agent: { tools: ["summarize"], prompt: "You are a capable agent.", knowledge_id: null },
+  subgraph: { workflow_id: null, label: "Sub-workflow" },
 };
 
 export default function WorkflowBuilderClient({ workflowId }) {
@@ -52,6 +55,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [libraries, setLibraries] = useState([]);
   const [runInput, setRunInput] = useState("");
   const [runResult, setRunResult] = useState(null);
+  const [pendingReview, setPendingReview] = useState(null);
   const [recentRuns, setRecentRuns] = useState([]);
 
   const selected = useMemo(
@@ -165,6 +169,29 @@ export default function WorkflowBuilderClient({ workflowId }) {
     }
   }
 
+  async function handleResume(approved) {
+    if (!pendingReview?.id) return;
+    setRunning(true);
+    setError("");
+    try {
+      const res = await resumeWorkflow(pendingReview.id, { approved });
+      setPendingReview(null);
+      setRunResult({ output: res.output, steps: res.steps, duration_ms: res.duration_ms });
+    } catch (err) {
+      setError(err.message || "Resume failed");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function handleTogglePublic() {
+    try {
+      await setWorkflowPublic(workflowId, status === 1);
+    } catch {
+      /* optional */
+    }
+  }
+
   async function handleRun() {
     if (!runInput.trim() || readOnly) return;
     setRunning(true);
@@ -176,6 +203,9 @@ export default function WorkflowBuilderClient({ workflowId }) {
     try {
       await updateWorkflow({ id: workflowId, name: name.trim(), desc, graph });
       await runWorkflowWs(workflowId, runInput.trim(), {
+        onHumanReview: (data) => {
+          setPendingReview({ id: data.pending_run_id, message: data.message });
+        },
         onStep: (data) => {
           if (data.phase === "done" && data.step) {
             const idx = steps.findIndex((s) => s.node_id === data.step.node_id);
@@ -200,6 +230,9 @@ export default function WorkflowBuilderClient({ workflowId }) {
           }));
         },
         onComplete: (data) => {
+          if (data.status === "pending_human") {
+            setPendingReview({ id: data.pending_run_id, message: "Approval required" });
+          }
           setRunResult({
             output: data.output,
             steps: data.steps,
@@ -433,7 +466,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
             <div className="shrink-0 border-t border-black/[0.04] p-3">
               <p className="workspace-section-label mb-2">Add node</p>
               <div className="flex flex-wrap gap-1.5">
-                {["loop", "parallel", "agent", "human", "transform", "condition", "http", "retrieve", "llm", "output"].map((type) => (
+                {["loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "retrieve", "llm", "output"].map((type) => (
                   <button
                     key={type}
                     type="button"
@@ -497,6 +530,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
           onRun={handleRun}
           running={running}
           runResult={runResult}
+          pendingReview={pendingReview}
+          onResume={handleResume}
           recentRuns={recentRuns}
           readOnly={readOnly}
         />

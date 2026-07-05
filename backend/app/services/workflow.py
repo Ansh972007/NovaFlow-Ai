@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 from sqlalchemy.orm import Session
 
-from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowRun
+from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowPendingRun, WorkflowRun
 from app.services.knowledge import search_chunks_semantic
 from app.services.llm import stream_chat, stream_chat_sync
 
@@ -127,6 +127,8 @@ def workflow_dict(w: Workflow) -> dict:
         "write": True,
         "create_time": w.create_time.isoformat() if w.create_time else None,
         "update_time": w.update_time.isoformat() if w.update_time else None,
+        "webhook_token": getattr(w, "webhook_token", "") or "",
+        "is_public": int(getattr(w, "is_public", 0) or 0),
     }
 
 
@@ -215,7 +217,30 @@ async def run_workflow(
     except json.JSONDecodeError:
         graph = {"nodes": [], "edges": []}
 
-    context, steps = await _execute_graph(db, user_id, graph, user_input.strip(), workspace_id=workspace_id)
+    context, steps, pause_node = await _execute_graph(db, user_id, graph, user_input.strip(), workspace_id=workspace_id)
+    if pause_node:
+        pending = WorkflowPendingRun(
+            workflow_id=workflow.id,
+            user_id=user_id,
+            workspace_id=workspace_id or workflow.workspace_id,
+            context_json=json.dumps(context),
+            graph_json=json.dumps(graph),
+            pause_after_node=pause_node,
+            steps_json=json.dumps(steps),
+            status=0,
+        )
+        db.add(pending)
+        db.commit()
+        db.refresh(pending)
+        return {
+            "workflow_id": workflow.id,
+            "output": context.get("output") or "",
+            "steps": steps,
+            "duration_ms": int((time.perf_counter() - start) * 1000),
+            "pending_run_id": pending.id,
+            "status": "pending_human",
+        }
+
     duration_ms = int((time.perf_counter() - start) * 1000)
     final_output = context["output"] or context["input"]
 
@@ -260,9 +285,37 @@ async def run_workflow_with_progress(
         if emit:
             await emit(event)
 
-    context, steps = await _execute_graph(
+    context, steps, pause_node = await _execute_graph(
         db, user_id, graph, user_input.strip(), emit=_emit, stream_llm=bool(emit), workspace_id=workspace_id
     )
+
+    if pause_node:
+        pending = WorkflowPendingRun(
+            workflow_id=workflow.id,
+            user_id=user_id,
+            workspace_id=workspace_id or workflow.workspace_id,
+            context_json=json.dumps(context),
+            graph_json=json.dumps(graph),
+            pause_after_node=pause_node,
+            steps_json=json.dumps(steps),
+            status=0,
+        )
+        db.add(pending)
+        db.commit()
+        db.refresh(pending)
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        result = {
+            "workflow_id": workflow.id,
+            "output": context.get("output") or "",
+            "steps": steps,
+            "duration_ms": duration_ms,
+            "pending_run_id": pending.id,
+            "status": "pending_human",
+        }
+        await _emit({"type": "human_review", "pending_run_id": pending.id, "node_id": pause_node})
+        await _emit({"type": "complete", **result})
+        return result
+
     duration_ms = int((time.perf_counter() - start) * 1000)
     final_output = context["output"] or context["input"]
 
@@ -291,6 +344,89 @@ async def run_workflow_with_progress(
     return result
 
 
+async def resume_workflow_pending(
+    db: Session,
+    pending_id: int,
+    user_id: int,
+    *,
+    approved: bool = True,
+    note: str = "",
+    workspace_id: int | None = None,
+    emit: EmitFn = None,
+) -> dict[str, Any]:
+    pending = db.get(WorkflowPendingRun, pending_id)
+    if not pending or pending.user_id != user_id or pending.status != 0:
+        return {"status": "error", "message": "Pending run not found"}
+    workflow = db.get(Workflow, pending.workflow_id)
+    if not workflow:
+        return {"status": "error", "message": "Workflow not found"}
+
+    if not approved:
+        pending.status = 2
+        db.commit()
+        return {"status": "rejected", "pending_run_id": pending_id}
+
+    start = time.perf_counter()
+    context = json.loads(pending.context_json or "{}")
+    if note.strip():
+        context["output"] = note.strip()
+    graph = json.loads(pending.graph_json or "{}")
+    steps = json.loads(pending.steps_json or "[]")
+
+    async def _emit(event: dict):
+        if emit:
+            await emit(event)
+
+    context, steps, pause_node = await _execute_graph(
+        db,
+        user_id,
+        graph,
+        context.get("input") or "",
+        emit=_emit,
+        stream_llm=bool(emit),
+        workspace_id=workspace_id or pending.workspace_id,
+        initial_context=context,
+        skip_until_after=pending.pause_after_node,
+        initial_steps=steps,
+    )
+
+    if pause_node:
+        pending.context_json = json.dumps(context)
+        pending.steps_json = json.dumps(steps)
+        pending.pause_after_node = pause_node
+        db.commit()
+        return {
+            "status": "pending_human",
+            "pending_run_id": pending.id,
+            "steps": steps,
+            "output": context.get("output") or "",
+        }
+
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    final_output = context["output"] or context.get("input") or ""
+    pending.status = 1
+    run = WorkflowRun(
+        workflow_id=workflow.id,
+        user_id=user_id,
+        workspace_id=workspace_id or pending.workspace_id,
+        input_text=(context.get("input") or "")[:4000],
+        output_text=final_output[:8000],
+        status=1,
+        duration_ms=duration_ms,
+        steps_json=json.dumps(steps),
+    )
+    db.add(run)
+    db.commit()
+    return {
+        "status": "completed",
+        "workflow_id": workflow.id,
+        "output": final_output,
+        "steps": steps,
+        "duration_ms": duration_ms,
+        "run_id": run.id,
+    }
+
+
 async def _execute_graph(
     db: Session,
     user_id: int,
@@ -301,16 +437,26 @@ async def _execute_graph(
     stream_llm: bool = False,
     emit: EmitFn = None,
     workspace_id: int | None = None,
-) -> tuple[dict, list[dict]]:
-    context = {"input": user_input, "retrieved": "", "output": ""}
-    steps: list[dict] = []
+    initial_context: dict | None = None,
+    skip_until_after: str | None = None,
+    initial_steps: list | None = None,
+) -> tuple[dict, list[dict], str | None]:
+    context = dict(initial_context) if initial_context else {"input": user_input, "retrieved": "", "output": ""}
+    if not initial_context:
+        context["input"] = user_input
+    steps: list[dict] = list(initial_steps or [])
     llm_messages: tuple[str, str] | None = None
+    passed_pause = not skip_until_after
 
     async def _emit(event: dict):
         if emit:
             await emit(event)
 
     for node in _topo_order(graph):
+        if not passed_pause:
+            if node.get("id") == skip_until_after:
+                passed_pause = True
+            continue
         ntype = node.get("type")
         data = node.get("data") or {}
         step = {"node_id": node.get("id"), "type": ntype, "status": "running"}
@@ -447,7 +593,7 @@ async def _execute_graph(
                 steps.append(step)
                 await _emit({"type": "step", "phase": "done", "step": step})
                 context["human_pending"] = True
-                return context, steps
+                return context, steps, node.get("id")
             context["output"] = context.get("output") or context.get("input") or message
             step["output"] = message[:500]
             step["status"] = "ok"
@@ -467,6 +613,28 @@ async def _execute_graph(
             context["output"] = reply
             step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
             step["status"] = "ok"
+        elif ntype == "subgraph":
+            sub_id = data.get("workflow_id")
+            sub = db.get(Workflow, sub_id) if sub_id else None
+            if not sub or (workspace_id and sub.workspace_id != workspace_id):
+                step["output"] = "(subgraph not found)"
+                step["status"] = "error"
+            else:
+                try:
+                    sub_graph = json.loads(sub.graph_json or "{}")
+                except json.JSONDecodeError:
+                    sub_graph = {"nodes": [], "edges": []}
+                sub_ctx, sub_steps, _ = await _execute_graph(
+                    db,
+                    user_id,
+                    sub_graph,
+                    context.get("input") or "",
+                    workspace_id=workspace_id,
+                )
+                context["output"] = sub_ctx.get("output") or ""
+                step["output"] = (context["output"] or "")[:500]
+                step["sub_steps"] = len(sub_steps)
+                step["status"] = "ok"
         else:
             step["status"] = "skipped"
 
@@ -477,7 +645,7 @@ async def _execute_graph(
         context["_llm_system"] = llm_messages[0]
         context["_llm_user"] = llm_messages[1]
 
-    return context, steps
+    return context, steps, None
 
 
 async def resolve_workflow_llm_messages(
@@ -487,7 +655,7 @@ async def resolve_workflow_llm_messages(
         graph = json.loads(workflow.graph_json or "{}")
     except json.JSONDecodeError:
         graph = {"nodes": [], "edges": []}
-    context, _ = await _execute_graph(db, user_id, graph, user_input.strip(), skip_llm=True)
+    context, _, _ = await _execute_graph(db, user_id, graph, user_input.strip(), skip_llm=True)
     system = context.get("_llm_system") or "You are a helpful assistant."
     user_msg = context.get("_llm_user") or user_input.strip()
     return system, user_msg

@@ -1,8 +1,10 @@
 import json
 import math
 import re
+from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.services.knowledge import search_chunks_semantic
@@ -13,6 +15,8 @@ BUILTIN_TOOLS: dict[str, str] = {
     "kb_search": "Search linked knowledge bases",
     "summarize": "Summarize text in 3 bullet points",
     "translate_en": "Translate input to English",
+    "datetime": "Current date/time in UTC",
+    "web_fetch": "Fetch a URL and return text excerpt",
 }
 
 
@@ -60,6 +64,21 @@ async def _run_tool(
             db=db,
             workspace_id=workspace_id,
         )
+    if tool_id == "datetime":
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    if tool_id == "web_fetch":
+        url_match = re.search(r"https?://[^\s]+", user_input)
+        if not url_match:
+            return "No URL found in input"
+        url = url_match.group(0).rstrip(".,)")
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                res = await client.get(url)
+                text = re.sub(r"<[^>]+>", " ", res.text or "")
+                text = re.sub(r"\s+", " ", text).strip()
+                return text[:4000] or f"(empty response, status {res.status_code})"
+        except Exception as exc:
+            return f"Fetch error: {exc}"
     return f"Unknown tool: {tool_id}"
 
 
