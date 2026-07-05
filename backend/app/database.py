@@ -147,7 +147,23 @@ class WorkspaceSetting(Base):
     chat_model = Column(String(120), default="")
     embedding_model = Column(String(120), default="")
     openai_base_url = Column(String(255), default="")
+    active_provider_id = Column(Integer, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LlmProvider(Base):
+    __tablename__ = "llm_providers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False)
+    provider_type = Column(String(32), nullable=False, default="openai")
+    base_url = Column(String(512), default="")
+    api_key_enc = Column(Text, default="")
+    chat_model = Column(String(120), default="")
+    embedding_model = Column(String(120), default="")
+    is_active = Column(Integer, default=0)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Workspace(Base):

@@ -1,9 +1,10 @@
+import base64
 import hashlib
-from base64 import b64decode
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 import rsa
+from cryptography.fernet import Fernet, InvalidToken
 from jose import JWTError, jwt
 
 from app.config import JWT_EXPIRE_HOURS, JWT_SECRET
@@ -34,7 +35,27 @@ def decrypt_password(encrypted_b64: str) -> str:
 
 def decrypt_password_plain(encrypted_b64: str) -> str:
     _, priv = get_rsa_keys()
-    return rsa.decrypt(b64decode(encrypted_b64), priv).decode("utf-8")
+    return rsa.decrypt(base64.b64decode(encrypted_b64), priv).decode("utf-8")
+
+
+def _fernet() -> Fernet:
+    key = base64.urlsafe_b64encode(hashlib.sha256(JWT_SECRET.encode()).digest())
+    return Fernet(key)
+
+
+def encrypt_secret(plain: str) -> str:
+    if not plain:
+        return ""
+    return _fernet().encrypt(plain.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_secret(enc: str) -> str:
+    if not enc:
+        return ""
+    try:
+        return _fernet().decrypt(enc.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        return ""
 
 
 def create_token(user_id: int, user_name: str) -> str:

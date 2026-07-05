@@ -8,6 +8,7 @@ from app.crypto import md5_hash
 from app.database import SessionLocal, User, init_db
 from app.routers import analytics, assistant, auth_oauth, chat_ws, knowledge, llm, user, workflow, workspace
 from app.services.demo_seed import seed_demo_data
+from app.services.llm_providers import ensure_default_provider
 from app.services.tenancy import ensure_personal_workspace
 from app.services.workspace_settings import load_settings
 from app.services.vector_store import init_vector_store, vector_backend
@@ -36,13 +37,14 @@ async def lifespan(_app: FastAPI):
         if DEMO_SEED:
             seed_demo_data(db)
         load_settings(db)
+        ensure_default_provider(db)
     finally:
         db.close()
     init_vector_store()
     yield
 
 
-app = FastAPI(title="NovaFlow API", version="1.4.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="1.5.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,7 +71,7 @@ def health():
         {
             "service": "novaflow-api",
             "status": "ok",
-            "version": "1.4.0",
+            "version": "1.5.0",
             "vector_backend": vector_backend(),
         }
     )
@@ -77,4 +79,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "1.4.0"})
+    return ok({"name": "NovaFlow API", "version": "1.5.0"})
