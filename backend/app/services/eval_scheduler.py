@@ -87,6 +87,12 @@ async def background_scheduler_loop(stop_event: asyncio.Event) -> None:
     finetune_counter = 0
     while not stop_event.is_set():
         await tick_eval_schedules()
+        try:
+            from app.services.workflow_scheduler import tick_workflow_schedules
+
+            await tick_workflow_schedules()
+        except Exception as exc:
+            logger.warning("Workflow scheduler tick failed: %s", exc)
         finetune_counter += 1
         if finetune_counter >= 5:
             finetune_counter = 0

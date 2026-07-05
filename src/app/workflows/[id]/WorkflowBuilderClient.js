@@ -14,7 +14,11 @@ import { listKnowledge } from "@/lib/api/knowledge";
 import {
   deleteWorkflow,
   getWorkflowInfo,
+  getWorkflowSchedules,
   getWorkflowVersions,
+  createWorkflowSchedule,
+  updateWorkflowSchedule,
+  deleteWorkflowSchedule,
   restoreWorkflowVersion,
   resumeWorkflow,
   runWorkflowWs,
@@ -56,6 +60,10 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [isPublic, setIsPublic] = useState(false);
   const [versions, setVersions] = useState([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
+  const [schedules, setSchedules] = useState([]);
+  const [scheduleCron, setScheduleCron] = useState("0 9 * * *");
+  const [scheduleInput, setScheduleInput] = useState("Scheduled run");
+  const [scheduleBusy, setScheduleBusy] = useState(false);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState(null);
   const [libraries, setLibraries] = useState([]);
@@ -118,6 +126,19 @@ export default function WorkflowBuilderClient({ workflowId }) {
   useEffect(() => {
     if (inspectorTab === "history" && user) loadVersions();
   }, [inspectorTab, user, loadVersions]);
+
+  const loadSchedules = useCallback(async () => {
+    try {
+      const rows = await getWorkflowSchedules(workflowId);
+      setSchedules(Array.isArray(rows) ? rows : rows?.data || []);
+    } catch {
+      setSchedules([]);
+    }
+  }, [workflowId]);
+
+  useEffect(() => {
+    if (user && status === 1) loadSchedules();
+  }, [user, status, loadSchedules]);
 
   function updateNode(id, patch) {
     setGraph((prev) => ({
@@ -244,6 +265,46 @@ export default function WorkflowBuilderClient({ workflowId }) {
   function webhookUrl() {
     if (!webhookToken || typeof window === "undefined") return "";
     return `${window.location.origin}/api/v1/workflow/webhook/${webhookToken}`;
+  }
+
+  async function handleCreateSchedule() {
+    setScheduleBusy(true);
+    setError("");
+    try {
+      await createWorkflowSchedule(workflowId, {
+        cron_expression: scheduleCron.trim(),
+        input_text: scheduleInput.trim(),
+      });
+      await loadSchedules();
+    } catch (err) {
+      setError(err.message || "Schedule failed");
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
+  async function handleToggleSchedule(sched) {
+    setScheduleBusy(true);
+    try {
+      await updateWorkflowSchedule(sched.id, { enabled: !sched.enabled });
+      await loadSchedules();
+    } catch (err) {
+      setError(err.message || "Schedule update failed");
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
+  async function handleDeleteSchedule(id) {
+    setScheduleBusy(true);
+    try {
+      await deleteWorkflowSchedule(id);
+      await loadSchedules();
+    } catch (err) {
+      setError(err.message || "Delete failed");
+    } finally {
+      setScheduleBusy(false);
+    }
   }
 
   async function handleRun() {
@@ -608,6 +669,15 @@ export default function WorkflowBuilderClient({ workflowId }) {
           webhookUrl={webhookUrl()}
           isPublic={isPublic}
           onTogglePublic={readOnly ? undefined : handleTogglePublic}
+          schedules={schedules}
+          scheduleCron={scheduleCron}
+          scheduleInput={scheduleInput}
+          onScheduleCronChange={setScheduleCron}
+          onScheduleInputChange={setScheduleInput}
+          onCreateSchedule={readOnly || status !== 1 ? undefined : handleCreateSchedule}
+          onToggleSchedule={readOnly ? undefined : handleToggleSchedule}
+          onDeleteSchedule={readOnly ? undefined : handleDeleteSchedule}
+          scheduleBusy={scheduleBusy}
           readOnly={readOnly}
         />
       </div>

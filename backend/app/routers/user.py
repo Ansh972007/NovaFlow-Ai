@@ -7,6 +7,7 @@ from app.crypto import create_token, decrypt_password, decrypt_password_plain, g
 from app.database import User, get_db
 from app.deps import get_current_user
 from app.schemas import UserCreate, UserLogin, UserPasswordChange, fail, ok
+from app.services.ldap_auth import authenticate_ldap, find_or_create_ldap_user, ldap_status
 
 router = APIRouter(tags=["User"])
 
@@ -29,6 +30,11 @@ def public_key():
     return ok({"public_key": get_public_key_pem()})
 
 
+@router.get("/auth/ldap/status")
+def ldap_auth_status():
+    return ok(ldap_status())
+
+
 @router.post("/user/regist")
 def register(body: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.user_name == body.user_name).first():
@@ -46,6 +52,22 @@ def register(body: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/user/login")
 def login(body: UserLogin, db: Session = Depends(get_db)):
+    plain_pwd = None
+    try:
+        plain_pwd = decrypt_password_plain(body.password)
+    except Exception:
+        pass
+
+    if ldap_status().get("enabled") and plain_pwd:
+        try:
+            profile = authenticate_ldap(body.user_name, plain_pwd)
+        except RuntimeError as exc:
+            return fail(503, str(exc))
+        if profile:
+            user = find_or_create_ldap_user(db, body.user_name, profile)
+            token = create_token(user.user_id, user.user_name)
+            return ok(user_read(user, token))
+
     user = db.query(User).filter(User.user_name == body.user_name).first()
     if not user:
         return {"status_code": 403, "status_message": "Invalid username or password", "data": None}

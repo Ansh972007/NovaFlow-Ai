@@ -118,6 +118,22 @@ export async function restoreWorkflowVersion(workflowId, versionId) {
   return client.post(`/workflow/${workflowId}/versions/${versionId}/restore`);
 }
 
+export async function getWorkflowSchedules(workflowId) {
+  return client.get(`/workflow/${workflowId}/schedules`);
+}
+
+export async function createWorkflowSchedule(workflowId, payload) {
+  return client.post(`/workflow/${workflowId}/schedules`, payload);
+}
+
+export async function updateWorkflowSchedule(scheduleId, payload) {
+  return client.patch(`/workflow/schedules/${scheduleId}`, payload);
+}
+
+export async function deleteWorkflowSchedule(scheduleId) {
+  return client.delete(`/workflow/schedules/${scheduleId}`);
+}
+
 export async function getOnlineWorkflows() {
   return client.get("/workflow/online");
 }

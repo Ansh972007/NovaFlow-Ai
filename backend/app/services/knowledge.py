@@ -11,7 +11,7 @@ from app.services.embeddings import embed_texts_sync, parse_embedding, rank_by_e
 from app.services.vector_store import delete_by_file, milvus_enabled, search_vectors, upsert_vectors
 
 
-def extract_text(path: Path) -> str:
+def extract_text(path: Path, db: Session | None = None) -> str:
     suffix = path.suffix.lower()
     if suffix in {".txt", ".md", ".csv"}:
         return path.read_text(encoding="utf-8", errors="ignore")
@@ -27,6 +27,18 @@ def extract_text(path: Path) -> str:
         parsed = extract_document(path)
         if parsed:
             return parsed
+    from app.services.ocr import extract_image_text, is_image_path
+
+    if is_image_path(path):
+        api_key = OPENAI_API_KEY
+        if db is not None:
+            try:
+                from app.services.llm_providers import resolve_api_key
+
+                api_key = resolve_api_key(db) or api_key
+            except Exception:
+                pass
+        return extract_image_text(path, api_key=api_key)
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
@@ -69,7 +81,7 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
     db.commit()
     try:
         path = UPLOAD_DIR / record.file_path
-        text = extract_text(path)
+        text = extract_text(path, db)
         pieces = chunk_text(text, chunk_size, chunk_overlap)
         delete_by_file(record.id)
         db.query(KnowledgeChunk).filter(KnowledgeChunk.file_id == record.id).delete()

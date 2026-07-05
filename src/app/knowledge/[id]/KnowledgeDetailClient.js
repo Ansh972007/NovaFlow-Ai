@@ -161,6 +161,9 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                       <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200/60">
                         {readyCount} ready
                       </span>
+                      <span className="rounded-full bg-violet-50 px-3 py-1 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200/60">
+                        OCR: PNG, JPG, WebP
+                      </span>
                     </div>
                   )}
                 </div>
@@ -171,7 +174,7 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                     ref={fileInputRef}
                     type="file"
                     multiple
-                    accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.pptx,.html,.htm,.json"
+                    accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.pptx,.html,.htm,.json,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff"
                     className="hidden"
                     onChange={handleUpload}
                   />

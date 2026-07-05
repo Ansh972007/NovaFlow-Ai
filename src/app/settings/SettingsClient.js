@@ -20,7 +20,7 @@ import {
   activateLlmProvider,
 } from "@/lib/api/llm";
 import { getApiBaseUrl } from "@/lib/api/config";
-import { getTeamMembers, updateMemberRole, downloadAuditExport } from "@/lib/api/analytics";
+import { getTeamMembers, updateMemberRole, downloadAuditExport, getAuditEvents } from "@/lib/api/analytics";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { createApiKey, deleteApiKey, listApiKeys } from "@/lib/api/apiKeys";
 import { resetSetup } from "@/lib/setup/storage";
@@ -62,6 +62,8 @@ export default function SettingsClient() {
   const [apiKeyBusy, setApiKeyBusy] = useState(false);
   const [newApiKey, setNewApiKey] = useState("");
   const [apiKeyMsg, setApiKeyMsg] = useState("");
+  const [auditEvents, setAuditEvents] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,6 +107,11 @@ export default function SettingsClient() {
       listApiKeys()
         .then((rows) => setApiKeys(Array.isArray(rows) ? rows : rows?.data || []))
         .catch(() => setApiKeys([]));
+      setAuditLoading(true);
+      getAuditEvents(14, 80)
+        .then((rows) => setAuditEvents(Array.isArray(rows) ? rows : []))
+        .catch(() => setAuditEvents([]))
+        .finally(() => setAuditLoading(false));
     }
   }, [user]);
 
@@ -640,6 +647,31 @@ export default function SettingsClient() {
                 >
                   {exportBusy ? "Exporting…" : "Download audit CSV"}
                 </button>
+                <div className="mt-6">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">Recent activity</p>
+                  {auditLoading ? (
+                    <p className="mt-3 text-sm text-neutral-500">Loading events…</p>
+                  ) : auditEvents.length === 0 ? (
+                    <p className="mt-3 text-sm text-neutral-500">No events in the last 14 days.</p>
+                  ) : (
+                    <ul className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+                      {auditEvents.map((ev, i) => (
+                        <li key={`${ev.timestamp}-${i}`} className="rounded-lg border border-black/[0.05] bg-white/50 px-3 py-2 text-xs">
+                          <div className="flex justify-between gap-2">
+                            <span className="font-semibold text-neutral-800">{ev.event_type}</span>
+                            <span className="shrink-0 text-neutral-400">
+                              {ev.timestamp ? new Date(ev.timestamp).toLocaleString() : "—"}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-neutral-500">
+                            {ev.user}
+                            {ev.resource_id ? ` · ${ev.resource_id}` : ""}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </motion.div>
             )}
 

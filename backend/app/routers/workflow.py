@@ -5,9 +5,10 @@ from datetime import datetime
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.database import Workflow, WorkflowRun, WorkflowVersion, get_db
+from app.database import Workflow, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
+from app.services.cron_schedule import validate_cron
 from app.services.workflow import (
     TEMPLATES,
     list_workflow_versions,
@@ -17,6 +18,7 @@ from app.services.workflow import (
     snapshot_workflow_version,
     workflow_dict,
 )
+from app.services.workflow_scheduler import compute_schedule_next_run, schedule_dict
 
 router = APIRouter(tags=["Workflow"])
 
@@ -138,6 +140,7 @@ def delete_workflow(
     if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
     db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).delete()
+    db.query(WorkflowSchedule).filter(WorkflowSchedule.workflow_id == workflow_id).delete()
     db.delete(w)
     db.commit()
     return ok(None)
@@ -222,3 +225,94 @@ def restore_version(
     if not data:
         return fail(404, "Version not found")
     return ok(data)
+
+
+@router.get("/workflow/{workflow_id}/schedules")
+def list_workflow_schedules(
+    workflow_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    rows = (
+        db.query(WorkflowSchedule)
+        .filter(WorkflowSchedule.workflow_id == workflow_id, WorkflowSchedule.workspace_id == ctx.workspace_id)
+        .order_by(WorkflowSchedule.create_time.desc())
+        .all()
+    )
+    return ok([schedule_dict(r) for r in rows])
+
+
+@router.post("/workflow/{workflow_id}/schedules")
+def create_workflow_schedule(
+    workflow_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    if w.status != 1:
+        return fail(400, "Publish workflow before scheduling")
+    try:
+        cron_expr = validate_cron((body.get("cron_expression") or "").strip())
+    except ValueError as exc:
+        return fail(400, str(exc))
+    now = datetime.utcnow()
+    row = WorkflowSchedule(
+        workflow_id=workflow_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.user_id,
+        cron_expression=cron_expr,
+        input_text=(body.get("input_text") or "Scheduled run").strip()[:2000],
+        enabled=1 if body.get("enabled", True) else 0,
+    )
+    db.add(row)
+    db.flush()
+    row.next_run_at = compute_schedule_next_run(row, now)
+    db.commit()
+    db.refresh(row)
+    return ok(schedule_dict(row))
+
+
+@router.patch("/workflow/schedules/{schedule_id}")
+def update_workflow_schedule(
+    schedule_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    row = db.get(WorkflowSchedule, schedule_id)
+    if not row or row.workspace_id != ctx.workspace_id:
+        return fail(404, "Schedule not found")
+    if "cron_expression" in body and body["cron_expression"]:
+        try:
+            row.cron_expression = validate_cron(str(body["cron_expression"]).strip())
+        except ValueError as exc:
+            return fail(400, str(exc))
+    if "input_text" in body:
+        row.input_text = str(body["input_text"] or "").strip()[:2000]
+    if "enabled" in body:
+        row.enabled = 1 if body["enabled"] else 0
+    row.next_run_at = compute_schedule_next_run(row)
+    row.update_time = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return ok(schedule_dict(row))
+
+
+@router.delete("/workflow/schedules/{schedule_id}")
+def delete_workflow_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    row = db.get(WorkflowSchedule, schedule_id)
+    if not row or row.workspace_id != ctx.workspace_id:
+        return fail(404, "Schedule not found")
+    db.delete(row)
+    db.commit()
+    return ok({"deleted": schedule_id})

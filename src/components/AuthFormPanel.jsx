@@ -98,6 +98,7 @@ export default function AuthFormPanel({
   switchMode,
   handleSubmit,
   oauthProviders = [],
+  ldapEnabled = false,
 }) {
   const [clientReady, setClientReady] = useState(false);
 
@@ -229,6 +230,11 @@ export default function AuthFormPanel({
                     <p className="text-xs text-muted">
                       {isRegister ? "Free during beta · No card needed" : "Access your AI workspace"}
                     </p>
+                    {ldapEnabled && !isRegister && (
+                      <span className="mt-2 inline-flex rounded-full bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700">
+                        LDAP sign-in enabled
+                      </span>
+                    )}
                   </div>
                 </div>
 

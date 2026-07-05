@@ -32,6 +32,15 @@ export default function WorkflowInspector({
   webhookUrl = "",
   isPublic = false,
   onTogglePublic,
+  schedules = [],
+  scheduleCron = "",
+  scheduleInput = "",
+  onScheduleCronChange,
+  onScheduleInputChange,
+  onCreateSchedule,
+  onToggleSchedule,
+  onDeleteSchedule,
+  scheduleBusy = false,
   readOnly = false,
 }) {
   const [connectTarget, setConnectTarget] = useState("");
@@ -118,6 +127,67 @@ export default function WorkflowInspector({
                           />
                           <span>List on marketplace</span>
                         </label>
+                      )}
+                      {onCreateSchedule && (
+                        <div className="mt-5 border-t border-black/[0.06] pt-4">
+                          <p className="text-[11px] font-medium text-neutral-500">Cron schedules</p>
+                          <p className="mt-1 text-[10px] text-neutral-400">e.g. <code>0 9 * * *</code> daily at 09:00 UTC</p>
+                          <input
+                            value={scheduleCron}
+                            onChange={(e) => onScheduleCronChange?.(e.target.value)}
+                            disabled={readOnly || scheduleBusy}
+                            placeholder="0 9 * * 1-5"
+                            className="input-field mt-2 w-full font-mono text-xs"
+                          />
+                          <input
+                            value={scheduleInput}
+                            onChange={(e) => onScheduleInputChange?.(e.target.value)}
+                            disabled={readOnly || scheduleBusy}
+                            placeholder="Scheduled input text"
+                            className="input-field mt-2 w-full text-xs"
+                          />
+                          <button
+                            type="button"
+                            disabled={readOnly || scheduleBusy || !scheduleCron.trim()}
+                            onClick={onCreateSchedule}
+                            className="mt-2 w-full rounded-lg bg-neutral-900 py-2 text-[11px] font-semibold text-white disabled:opacity-50"
+                          >
+                            {scheduleBusy ? "Saving…" : "Add schedule"}
+                          </button>
+                          {schedules.length > 0 && (
+                            <ul className="mt-3 space-y-2">
+                              {schedules.map((s) => (
+                                <li key={s.id} className="rounded-lg bg-neutral-50 px-3 py-2 text-[10px]">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <code className="font-mono text-neutral-700">{s.cron_expression}</code>
+                                    <button
+                                      type="button"
+                                      disabled={readOnly || scheduleBusy}
+                                      onClick={() => onToggleSchedule?.(s)}
+                                      className={`font-semibold ${s.enabled ? "text-emerald-600" : "text-neutral-400"}`}
+                                    >
+                                      {s.enabled ? "On" : "Off"}
+                                    </button>
+                                  </div>
+                                  <p className="mt-1 truncate text-neutral-500">{s.input_text || "Scheduled run"}</p>
+                                  {s.next_run_at && (
+                                    <p className="mt-0.5 text-neutral-400">Next: {new Date(s.next_run_at).toLocaleString()}</p>
+                                  )}
+                                  {!readOnly && (
+                                    <button
+                                      type="button"
+                                      disabled={scheduleBusy}
+                                      onClick={() => onDeleteSchedule?.(s.id)}
+                                      className="mt-1 text-red-600 hover:underline"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       )}
                     </>
                   ) : (

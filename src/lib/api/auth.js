@@ -50,6 +50,10 @@ export async function changePassword(currentPassword, newPassword) {
   return client.post("/user/password", { current_password, new_password });
 }
 
+export async function getLdapStatus() {
+  return client.get("/auth/ldap/status");
+}
+
 export async function logout() {
   return client.post("/user/logout");
 }

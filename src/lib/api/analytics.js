@@ -29,6 +29,10 @@ export async function updateMemberRole(userId, role) {
   return client.patch(`/team/members/${userId}/role`, { role });
 }
 
+export async function getAuditEvents(days = 7, limit = 100) {
+  return client.get(`/analytics/audit?days=${days}&limit=${limit}`);
+}
+
 export async function downloadAuditExport(days = 30) {
   const token = typeof window !== "undefined" ? localStorage.getItem("nf_token") : null;
   const url = `${getApiBaseUrl().replace(/\/$/, "")}/api/v1/analytics/export?days=${days}`;

@@ -238,6 +238,38 @@ def update_member_role(
     return ok({"user_id": member.user_id, "role": member.role})
 
 
+@router.get("/analytics/audit")
+def list_audit_events(
+    days: int = 7,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    user=Depends(require_admin),
+):
+    days = max(1, min(days, 90))
+    limit = max(1, min(limit, 500))
+    since = datetime.utcnow() - timedelta(days=days)
+    events = (
+        db.query(UsageEvent, User)
+        .join(User, UsageEvent.user_id == User.user_id)
+        .filter(UsageEvent.create_time >= since)
+        .order_by(UsageEvent.create_time.desc())
+        .limit(limit)
+        .all()
+    )
+    return ok(
+        [
+            {
+                "timestamp": ev.create_time.isoformat() if ev.create_time else None,
+                "user": u.user_name,
+                "event_type": ev.event_type,
+                "resource_id": ev.resource_id or "",
+                "meta": ev.meta or "",
+            }
+            for ev, u in events
+        ]
+    )
+
+
 @router.get("/analytics/export")
 def export_audit_log(
     days: int = 30,

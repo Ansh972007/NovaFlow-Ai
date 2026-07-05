@@ -155,6 +155,34 @@ class WorkflowRating(Base):
     create_time = Column(DateTime, default=datetime.utcnow)
 
 
+class WorkflowComment(Base):
+    __tablename__ = "workflow_comments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    user_name = Column(String(80), default="")
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    body = Column(String(1000), nullable=False)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkflowSchedule(Base):
+    __tablename__ = "workflow_schedules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    cron_expression = Column(String(64), nullable=False)
+    input_text = Column(String(2000), default="")
+    enabled = Column(Integer, default=1)
+    last_run_at = Column(DateTime, nullable=True)
+    next_run_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ApiKey(Base):
     __tablename__ = "api_keys"
 
@@ -491,7 +519,7 @@ def migrate_schema():
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
 
-    for table in ("workflow_versions", "workflow_ratings"):
+    for table in ("workflow_versions", "workflow_ratings", "workflow_comments", "workflow_schedules"):
         if table not in insp.get_table_names():
             Base.metadata.tables[table].create(bind=engine, checkfirst=True)
 

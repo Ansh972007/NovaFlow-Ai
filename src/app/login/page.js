@@ -6,7 +6,7 @@ import AuthShowcasePanel from "@/components/AuthShowcasePanel";
 import AuthFormPanel from "@/components/AuthFormPanel";
 import LiveBackground from "@/components/LiveBackground";
 import CursorGlow from "@/components/CursorGlow";
-import { login, register } from "@/lib/api/auth";
+import { login, register, getLdapStatus } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
 import { getOAuthProviders } from "@/lib/api/oauth";
 
@@ -26,6 +26,7 @@ function LoginForm() {
   const [focused, setFocused] = useState(null);
   const [greeting, setGreeting] = useState(0);
   const [oauthProviders, setOauthProviders] = useState([]);
+  const [ldapEnabled, setLdapEnabled] = useState(false);
 
   async function probeBackend() {
     setCheckingBackend(true);
@@ -44,6 +45,9 @@ function LoginForm() {
     getOAuthProviders()
       .then((list) => setOauthProviders(Array.isArray(list) ? list : []))
       .catch(() => setOauthProviders([]));
+    getLdapStatus()
+      .then((s) => setLdapEnabled(!!s?.enabled))
+      .catch(() => setLdapEnabled(false));
   }, []);
 
   const formProgress = useMemo(() => {
@@ -120,6 +124,7 @@ function LoginForm() {
           switchMode={switchMode}
           handleSubmit={handleSubmit}
           oauthProviders={oauthProviders}
+          ldapEnabled={ldapEnabled}
         />
       </div>
     </div>

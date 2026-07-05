@@ -17,6 +17,9 @@ BUILTIN_TOOLS: dict[str, str] = {
     "translate_en": "Translate input to English",
     "datetime": "Current date/time in UTC",
     "web_fetch": "Fetch a URL and return text excerpt",
+    "regex_extract": "Extract text with a regex pattern",
+    "json_parse": "Parse JSON and return formatted keys",
+    "word_count": "Count words and characters in text",
 }
 
 
@@ -79,6 +82,33 @@ async def _run_tool(
                 return text[:4000] or f"(empty response, status {res.status_code})"
         except Exception as exc:
             return f"Fetch error: {exc}"
+    if tool_id == "regex_extract":
+        pattern = re.search(r"pattern[:\s]+(.+)", user_input, re.I)
+        pat = pattern.group(1).strip() if pattern else r"\b[A-Z][a-z]+\b"
+        try:
+            matches = re.findall(pat, user_input, re.MULTILINE)[:50]
+            return "\n".join(matches) if matches else "(no matches)"
+        except re.error as exc:
+            return f"Regex error: {exc}"
+    if tool_id == "json_parse":
+        blob = user_input
+        start = user_input.find("{")
+        if start < 0:
+            start = user_input.find("[")
+        if start >= 0:
+            blob = user_input[start:]
+        try:
+            data = json.loads(blob)
+            if isinstance(data, dict):
+                return "\n".join(f"{k}: {type(v).__name__}" for k, v in list(data.items())[:40])
+            return f"Array with {len(data)} items" if isinstance(data, list) else str(data)
+        except json.JSONDecodeError as exc:
+            return f"JSON error: {exc}"
+    if tool_id == "word_count":
+        words = len(re.findall(r"\b\w+\b", user_input))
+        chars = len(user_input)
+        lines = len(user_input.splitlines())
+        return f"words={words}, chars={chars}, lines={lines}"
     return f"Unknown tool: {tool_id}"
 
 

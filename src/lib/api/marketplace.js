@@ -15,3 +15,11 @@ export async function setWorkflowPublic(workflowId, isPublic) {
 export async function rateMarketplaceWorkflow(workflowId, { score, comment = "" }) {
   return client.post(`/marketplace/workflows/${workflowId}/rate`, { score, comment });
 }
+
+export async function listWorkflowComments(workflowId) {
+  return client.get(`/marketplace/workflows/${workflowId}/comments`);
+}
+
+export async function postWorkflowComment(workflowId, body) {
+  return client.post(`/marketplace/workflows/${workflowId}/comments`, { body });
+}

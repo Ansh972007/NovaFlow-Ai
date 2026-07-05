@@ -9,7 +9,7 @@ import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
-import { cloneMarketplaceWorkflow, listMarketplaceWorkflows, rateMarketplaceWorkflow } from "@/lib/api/marketplace";
+import { cloneMarketplaceWorkflow, listMarketplaceWorkflows, listWorkflowComments, postWorkflowComment, rateMarketplaceWorkflow } from "@/lib/api/marketplace";
 import { createWorkflow } from "@/lib/api/workflows";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -45,6 +45,83 @@ function StarRating({ value = 0, count = 0, onRate, disabled }) {
         </button>
       ))}
       {count > 0 && <span className="ml-1 text-[11px] text-neutral-400">({count})</span>}
+    </div>
+  );
+}
+
+function WorkflowComments({ workflowId, count = 0, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    const rows = await listWorkflowComments(workflowId);
+    setComments(Array.isArray(rows) ? rows : []);
+  }
+
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      try {
+        await load();
+      } catch {
+        setComments([]);
+      }
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setBusy(true);
+    try {
+      const c = await postWorkflowComment(workflowId, text.trim());
+      setComments((prev) => [c, ...prev]);
+      setText("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-neutral-100 pt-4">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={toggle}
+        className="text-xs font-semibold text-neutral-600 hover:text-neutral-900"
+      >
+        {open ? "Hide comments" : `Comments (${count || comments.length || 0})`}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          <form onSubmit={submit} className="flex gap-2">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Share feedback…"
+              className="input-field flex-1 text-xs"
+            />
+            <button type="submit" disabled={busy} className="workspace-btn-ghost shrink-0 text-xs">
+              Post
+            </button>
+          </form>
+          <ul className="max-h-40 space-y-2 overflow-y-auto">
+            {comments.length === 0 ? (
+              <li className="text-xs text-neutral-400">No comments yet.</li>
+            ) : (
+              comments.map((c) => (
+                <li key={c.id} className="rounded-lg bg-neutral-50 px-3 py-2 text-xs">
+                  <p className="font-semibold text-neutral-700">{c.user_name}</p>
+                  <p className="mt-0.5 text-neutral-600">{c.body}</p>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -341,6 +418,7 @@ export default function MarketplaceClient() {
                             {busy ? "Cloning…" : "Clone to workspace"}
                             <span className="transition-transform group-hover:translate-x-0.5">→</span>
                           </button>
+                          <WorkflowComments workflowId={w.id} count={w.comment_count} disabled={busy} />
                         </motion.article>
                       ))}
                     </div>

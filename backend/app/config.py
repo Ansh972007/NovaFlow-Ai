@@ -40,6 +40,12 @@ MICROSOFT_CLIENT_SECRET = os.getenv("MICROSOFT_CLIENT_SECRET", "")
 OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", f"http://localhost:{PORT}")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+LDAP_URL = os.getenv("LDAP_URL", "")
+LDAP_BASE_DN = os.getenv("LDAP_BASE_DN", "")
+LDAP_USER_FILTER = os.getenv("LDAP_USER_FILTER", "(uid={username})")
+LDAP_BIND_DN = os.getenv("LDAP_BIND_DN", "")
+LDAP_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "")
+
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
