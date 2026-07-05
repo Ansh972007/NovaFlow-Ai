@@ -13,12 +13,23 @@ export default function CursorGlow() {
   const ring = useMotionTemplate`radial-gradient(180px circle at ${springX}px ${springY}px, rgba(0,0,0,0.04), transparent 70%)`;
 
   useEffect(() => {
+    let raf = 0;
+    let latest = null;
+    const flush = () => {
+      raf = 0;
+      if (!latest) return;
+      mouseX.set(latest.clientX);
+      mouseY.set(latest.clientY);
+    };
     const move = (e) => {
-      mouseX.set(e.clientX);
-      mouseY.set(e.clientY);
+      latest = e;
+      if (!raf) raf = requestAnimationFrame(flush);
     };
     window.addEventListener("mousemove", move, { passive: true });
-    return () => window.removeEventListener("mousemove", move);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("mousemove", move);
+    };
   }, [mouseX, mouseY]);
 
   return (

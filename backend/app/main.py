@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR
 from app.crypto import md5_hash
 from app.database import SessionLocal, User, init_db
-from app.routers import assistant, chat_ws, knowledge, llm, user
+from app.routers import analytics, assistant, chat_ws, knowledge, llm, user, workflow
 from app.schemas import ok
 
 API_PREFIX = "/api/v1"
@@ -31,7 +31,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="NovaFlow API", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="0.6.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,6 +45,8 @@ app.include_router(user.router, prefix=API_PREFIX)
 app.include_router(assistant.router, prefix=API_PREFIX)
 app.include_router(knowledge.router, prefix=API_PREFIX)
 app.include_router(llm.router, prefix=API_PREFIX)
+app.include_router(workflow.router, prefix=API_PREFIX)
+app.include_router(analytics.router, prefix=API_PREFIX)
 app.include_router(chat_ws.router, prefix=API_PREFIX)
 
 
@@ -55,4 +57,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "0.5.0"})
+    return ok({"name": "NovaFlow API", "version": "0.6.0"})

@@ -9,6 +9,7 @@ import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
 import { getOnlineApps, getAssistants } from "@/lib/api/apps";
+import { getAnalyticsSummary } from "@/lib/api/analytics";
 import { checkBackendHealth } from "@/lib/api/health";
 import { listKnowledge } from "@/lib/api/knowledge";
 import { loadSessions } from "@/lib/chat/storage";
@@ -105,10 +106,12 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [healthOk, setHealthOk] = useState(null);
   const [recentSessions, setRecentSessions] = useState([]);
+  const [recentRuns, setRecentRuns] = useState([]);
   const [stats, setStats] = useState([
     { value: "0", label: "Chat sessions", hint: "Local history" },
     { value: "0", label: "Assistants", hint: "Published & draft" },
     { value: "0", label: "Knowledge bases", hint: "Document libraries" },
+    { value: "0", label: "Workflow runs", hint: "Last 7 days" },
   ]);
 
   const greeting = useMemo(() => getGreeting(), []);
@@ -138,6 +141,7 @@ export default function DashboardPage() {
         }
 
         let kbTotal = 0;
+        let analytics = null;
         try {
           const kb = await listKnowledge({ pageSize: 1 });
           kbTotal = kb?.total || 0;
@@ -145,10 +149,26 @@ export default function DashboardPage() {
           kbTotal = 0;
         }
 
+        try {
+          analytics = await getAnalyticsSummary();
+          setRecentRuns(analytics?.recent_runs || []);
+        } catch {
+          analytics = null;
+        }
+
         setStats([
           { value: String(sessions.length), label: "Chat sessions", hint: "Local history" },
-          { value: String(apps.length), label: "Assistants", hint: "Published & draft" },
-          { value: String(kbTotal), label: "Knowledge bases", hint: "Document libraries" },
+          {
+            value: String(analytics?.assistants_total ?? apps.length),
+            label: "Assistants",
+            hint: `${analytics?.assistants_online ?? 0} online`,
+          },
+          { value: String(analytics?.knowledge_total ?? kbTotal), label: "Knowledge bases", hint: "Document libraries" },
+          {
+            value: String(analytics?.workflow_runs_7d ?? 0),
+            label: "Workflow runs",
+            hint: `${analytics?.workflows_published ?? 0} published`,
+          },
         ]);
       })
       .catch(() => setUser(null))
@@ -224,7 +244,7 @@ export default function DashboardPage() {
             </div>
 
             {user && (
-              <div className="relative mt-10 grid gap-4 border-t border-black/[0.06] pt-8 sm:grid-cols-3">
+              <div className="relative mt-10 grid gap-4 border-t border-black/[0.06] pt-8 sm:grid-cols-2 lg:grid-cols-4">
                 {stats.map((stat, i) => (
                   <motion.div
                     key={stat.label}
@@ -341,6 +361,35 @@ export default function DashboardPage() {
                   </ul>
                 )}
               </motion.div>
+
+              {recentRuns.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, x: 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.44, duration: 0.55, ease }}
+                  className="workspace-panel rounded-2xl p-5"
+                >
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-semibold tracking-tight">Workflow activity</h2>
+                    <Link href="/workflows" className="text-xs font-medium text-neutral-500 hover:text-neutral-900">
+                      View all
+                    </Link>
+                  </div>
+                  <ul className="mt-4 space-y-1">
+                    {recentRuns.map((run) => (
+                      <li key={run.id}>
+                        <Link
+                          href={`/workflows/${run.workflow_id}`}
+                          className="dashboard-recent-item block rounded-xl px-3 py-2.5"
+                        >
+                          <p className="truncate text-sm font-medium">{run.workflow_name}</p>
+                          <p className="mt-0.5 text-[11px] text-neutral-400">{run.duration_ms}ms</p>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </motion.div>
+              )}
 
               <motion.div
                 initial={{ opacity: 0, x: 16 }}

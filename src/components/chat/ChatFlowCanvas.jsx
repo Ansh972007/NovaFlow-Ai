@@ -24,7 +24,7 @@ export default function ChatFlowCanvas({ active = false }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
     let w = 0;
     let h = 0;
     let nodes = [];
@@ -32,6 +32,11 @@ export default function ChatFlowCanvas({ active = false }) {
     let pulses = [];
     let ripples = [];
     let frameId = 0;
+    let pageVisible = document.visibilityState !== "hidden";
+
+    const onVisibility = () => {
+      pageVisible = document.visibilityState !== "hidden";
+    };
 
     const colors = {
       node: "rgba(10,10,10,0.62)",
@@ -320,6 +325,10 @@ export default function ChatFlowCanvas({ active = false }) {
     }
 
     function render(time) {
+      if (!pageVisible) {
+        frameId = requestAnimationFrame(render);
+        return;
+      }
       const t = time * 0.001;
       const raw = mouseRef.current;
       const smooth = smoothRef.current;
@@ -392,11 +401,13 @@ export default function ChatFlowCanvas({ active = false }) {
     window.addEventListener("mousemove", onMove, { passive: true });
     window.addEventListener("mousedown", onClick);
     document.addEventListener("mouseleave", onLeave);
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
       window.removeEventListener("mousemove", onMove);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("mousedown", onClick);
       document.removeEventListener("mouseleave", onLeave);
     };

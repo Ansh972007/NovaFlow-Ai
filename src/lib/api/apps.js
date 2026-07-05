@@ -2,9 +2,13 @@ import client from "./client";
 
 /** Online assistants & workflows available for chat */
 export async function getOnlineApps(params = {}) {
-  return client.get("/chat/online", {
-    params: { page: 1, limit: 50, ...params },
-  });
+  const [assistants, workflows] = await Promise.all([
+    client.get("/chat/online", { params: { page: 1, limit: 50, ...params } }).catch(() => []),
+    client.get("/workflow/online", { params: { limit: 50 } }).catch(() => []),
+  ]);
+  const aList = Array.isArray(assistants) ? assistants : assistants?.data || [];
+  const wList = Array.isArray(workflows) ? workflows : workflows?.data || [];
+  return [...aList, ...wList];
 }
 
 /** All assistants (including offline — for empty online list) */

@@ -43,3 +43,10 @@ async def stream_chat(system_prompt: str, user_message: str) -> AsyncIterator[st
                         yield delta
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
+
+
+async def stream_chat_sync(system_prompt: str, user_message: str) -> str:
+    parts = []
+    async for token in stream_chat(system_prompt, user_message):
+        parts.append(token)
+    return "".join(parts)

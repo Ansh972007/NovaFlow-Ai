@@ -59,6 +59,46 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
     db.commit()
 
 
+def search_chunks_semantic(db: Session, knowledge_id: int, query: str, limit: int = 5) -> list[dict]:
+    q_tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
+    if not q_tokens:
+        return []
+
+    rows = (
+        db.query(KnowledgeChunk, KnowledgeFile)
+        .join(KnowledgeFile, KnowledgeChunk.file_id == KnowledgeFile.id)
+        .filter(KnowledgeChunk.knowledge_id == knowledge_id, KnowledgeFile.status == 2)
+        .all()
+    )
+    scored: list[tuple[float, KnowledgeChunk, KnowledgeFile]] = []
+    for chunk, file in rows:
+        text = chunk.text or ""
+        c_tokens = set(re.findall(r"[a-z0-9]+", text.lower()))
+        if not c_tokens:
+            continue
+        overlap = q_tokens & c_tokens
+        if not overlap:
+            continue
+        score = len(overlap) / (len(q_tokens) ** 0.5)
+        if any(len(t) > 4 for t in overlap):
+            score += 0.5
+        scored.append((score, chunk, file))
+
+    scored.sort(key=lambda x: -x[0])
+    data = []
+    for score, chunk, file in scored[:limit]:
+        data.append(
+            {
+                "text": chunk.text,
+                "chunk_index": chunk.chunk_index,
+                "file_id": file.id,
+                "file_name": file.file_name,
+                "score": round(score, 3),
+            }
+        )
+    return data
+
+
 def search_chunks(db: Session, knowledge_id: int, keyword: str, page: int, limit: int):
     q = (
         db.query(KnowledgeChunk, KnowledgeFile)
@@ -108,7 +148,7 @@ def rag_context_for_assistant(db: Session, assistant_id: str, query: str, limit:
     hits = []
     per_kb = max(2, limit // max(len(kid_list), 1))
     for kid in kid_list:
-        chunks, _ = search_chunks(db, kid, query.strip(), 1, per_kb)
+        chunks = search_chunks_semantic(db, kid, query.strip(), per_kb)
         hits.extend(chunks)
 
     if not hits:

@@ -61,10 +61,10 @@ export default function HeroMockup() {
 
         {/* Chat area */}
         <div className="min-h-[280px] space-y-4 p-5 sm:p-6">
-          <AnimatePresence mode="wait">
+          <AnimatePresence initial={false}>
             {messages.slice(0, step + 1).map((msg, idx) => (
               <motion.div
-                key={`${idx}-${msg.text.slice(0, 20)}`}
+                key={idx}
                 initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}

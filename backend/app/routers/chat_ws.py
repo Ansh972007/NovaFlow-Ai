@@ -8,6 +8,7 @@ from app.crypto import decode_token
 from app.database import Assistant, SessionLocal
 from app.services.knowledge import rag_context_for_assistant
 from app.services.llm import stream_chat
+from app.services.workflow import log_usage
 
 router = APIRouter(tags=["Chat"])
 
@@ -90,6 +91,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 await asyncio.sleep(0)
             await websocket.send_json({"type": "end", "message": {"content": buffer}})
             await websocket.send_json({"type": "close"})
+            log_usage(db, user_id, "chat", assistant_id, {"chars": len(buffer)})
     except WebSocketDisconnect:
         pass
     finally:

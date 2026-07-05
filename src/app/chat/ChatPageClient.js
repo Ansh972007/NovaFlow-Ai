@@ -22,7 +22,7 @@ import { generateId } from "@/lib/utils";
 function ChatLoading() {
   return (
     <div className="chat-shell relative flex min-h-screen items-center justify-center overflow-hidden">
-      <ChatLiveBackground />
+      <ChatLiveBackground variant="full" />
       <CursorGlow />
       <div className="relative z-10 flex flex-col items-center gap-4">
         <div className="relative flex h-12 w-12 items-center justify-center">
@@ -194,7 +194,7 @@ export default function ChatPageClient() {
 
   return (
     <div className="chat-shell relative flex h-[100dvh] overflow-hidden">
-      <ChatLiveBackground className="fixed inset-0 z-0" active={streaming} />
+      <ChatLiveBackground className="fixed inset-0 z-0" active={streaming} variant="full" />
       <CursorGlow />
 
       <ChatSidebar

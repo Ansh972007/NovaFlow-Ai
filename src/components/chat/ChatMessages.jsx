@@ -19,8 +19,8 @@ export default function ChatMessages({ messages, streaming, error, assistantName
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streaming, error]);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, streaming, error]);
 
   const showThinking =
     streaming && messages.length > 0 && messages[messages.length - 1]?.role === "user";
@@ -28,8 +28,7 @@ export default function ChatMessages({ messages, streaming, error, assistantName
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
-        <AnimatePresence mode="wait">
-          {messages.length === 0 && !error && (
+        {messages.length === 0 && !error ? (
             <motion.div
               key="empty"
               initial={{ opacity: 0, y: 20 }}
@@ -90,8 +89,7 @@ export default function ChatMessages({ messages, streaming, error, assistantName
                 ))}
               </motion.div>
             </motion.div>
-          )}
-        </AnimatePresence>
+          ) : null}
 
         <AnimatePresence initial={false}>
           {messages.map((msg) => (

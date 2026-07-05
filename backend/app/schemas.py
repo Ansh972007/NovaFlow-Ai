@@ -59,3 +59,21 @@ class ProcessFiles(BaseModel):
     file_list: List[dict]
     chunk_size: int = 1000
     chunk_overlap: int = 100
+
+
+class WorkflowCreate(BaseModel):
+    name: str = Field(max_length=80)
+    desc: str = ""
+    template_id: str = "rag"
+
+
+class WorkflowUpdate(BaseModel):
+    id: str
+    name: Optional[str] = None
+    desc: Optional[str] = None
+    graph: Optional[dict] = None
+
+
+class WorkflowRunRequest(BaseModel):
+    workflow_id: str
+    input: str = Field(min_length=1, max_length=4000)

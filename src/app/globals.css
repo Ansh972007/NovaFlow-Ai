@@ -937,14 +937,16 @@ body {
 }
 
 .workspace-btn-danger {
-  border-color: rgba(239, 68, 68, 0.25);
-  color: #b91c1c;
-  background: rgba(254, 242, 242, 0.8);
+  border-color: rgba(239, 68, 68, 0.22);
+  color: #dc2626;
+  background: rgba(255, 255, 255, 0.75);
 }
 
-.workspace-btn-danger:hover {
-  background: rgba(254, 226, 226, 0.95);
-  border-color: rgba(239, 68, 68, 0.35);
+.workspace-btn-ghost.workspace-btn-danger:hover {
+  background: rgba(254, 242, 242, 0.95);
+  border-color: rgba(239, 68, 68, 0.32);
+  color: #b91c1c;
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.08);
 }
 
 .dashboard-recent-item {
@@ -956,4 +958,271 @@ body {
   background: rgba(255, 255, 255, 0.65);
   border-color: rgba(0, 0, 0, 0.06);
   transform: translateX(3px);
+}
+
+/* ── Workflow Studio ── */
+.workflow-studio-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 32px rgba(0, 0, 0, 0.04);
+}
+
+@media (min-width: 640px) {
+  .workflow-studio-toolbar {
+    column-gap: 1rem;
+  }
+}
+
+.workflow-studio-rail,
+.workflow-studio-inspector {
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(28px) saturate(1.15);
+}
+
+.workflow-studio-canvas {
+  background-color: rgba(252, 252, 252, 0.55);
+  background-image:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.65) 0%, transparent 50%);
+}
+
+.workflow-canvas-grid {
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.85;
+}
+
+.workflow-canvas-vignette {
+  background: radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(240, 240, 240, 0.35) 100%);
+}
+
+/* Circular workflow nodes */
+.workflow-node-circle {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.97) 0%, rgba(255, 255, 255, 0.82) 100%);
+  backdrop-filter: blur(16px);
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.85) inset;
+}
+
+.workflow-node-trigger { border-color: rgba(16, 185, 129, 0.5); }
+.workflow-node-retrieve { border-color: rgba(14, 165, 233, 0.5); }
+.workflow-node-llm { border-color: rgba(139, 92, 246, 0.5); }
+.workflow-node-output { border-color: rgba(115, 115, 115, 0.35); }
+
+/* Circular selection ring */
+.wf-selection-ring {
+  z-index: 0;
+}
+
+.wf-ring-orbit {
+  transform-origin: center;
+  animation: wf-ring-spin 6s linear infinite;
+}
+
+.wf-ring-orbit-reverse {
+  transform-origin: center;
+  animation: wf-ring-spin 9s linear infinite reverse;
+}
+
+@keyframes wf-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+.wf-orbit-dot {
+  animation: wf-orbit-spin 4s linear infinite;
+}
+
+.wf-orbit-dot-inner {
+  animation: wf-dot-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes wf-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes wf-dot-pulse {
+  0%, 100% { transform: translateX(-50%) scale(1); opacity: 1; }
+  50% { transform: translateX(-50%) scale(1.35); opacity: 0.75; }
+}
+
+.wf-ring-ripple {
+  animation: wf-ring-ripple 2.8s ease-out infinite;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.wf-ring-ripple-2 {
+  animation-delay: 1.4s;
+}
+
+@keyframes wf-ring-ripple {
+  0% { transform: scale(0.75); opacity: 0.7; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+
+.wf-core-ping {
+  animation: wf-core-ping 2s ease-out infinite;
+}
+
+@keyframes wf-core-ping {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+
+.workflow-edge-flow {
+  animation: workflow-edge-dash 1s linear infinite;
+}
+
+@keyframes workflow-edge-dash {
+  to { stroke-dashoffset: -28; }
+}
+
+/* Single dashed line (---) — smooth data-flow animation */
+.wf-edge-dash-idle {
+  animation: wf-edge-dash-march 2.8s linear infinite;
+  animation-delay: var(--wf-edge-delay, 0s);
+}
+
+.wf-edge-dash-active {
+  animation: wf-edge-dash-march 1.5s linear infinite;
+  animation-delay: var(--wf-edge-delay, 0s);
+}
+
+.wf-edge-dash-flowing {
+  animation: wf-edge-dash-march 0.85s linear infinite;
+  animation-delay: var(--wf-edge-delay, 0s);
+}
+
+@keyframes wf-edge-dash-march {
+  to { stroke-dashoffset: -32; }
+}
+
+.wf-edge-packet {
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.2));
+  animation: wf-edge-packet-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes wf-edge-packet-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+.wf-port-pulse {
+  animation: wf-port-glow 3s ease-in-out infinite;
+}
+
+.wf-port-pulse-active {
+  animation: wf-port-glow-active 1.5s ease-in-out infinite;
+}
+
+@keyframes wf-port-glow {
+  0%, 100% { r: 3.5; opacity: 0.2; }
+  50% { r: 4.5; opacity: 0.35; }
+}
+
+@keyframes wf-port-glow-active {
+  0%, 100% { r: 5; opacity: 0.45; }
+  50% { r: 7; opacity: 0.15; }
+}
+
+.workflow-node-port {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  opacity: 0.5;
+  z-index: 15;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.workflow-node-port-live {
+  opacity: 1;
+  animation: wf-port-dot-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes wf-port-dot-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+.workflow-node-connected {
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.8) inset,
+    0 0 20px rgba(10, 10, 10, 0.06);
+}
+
+.workflow-node-connected-ring {
+  border: 1px solid rgba(10, 10, 10, 0.08);
+  animation: wf-connected-ring 3s ease-in-out infinite;
+}
+
+@keyframes wf-connected-ring {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(1.06); opacity: 0.7; }
+}
+
+.workflow-flow-indicator {
+  animation: workspace-pulse 1.5s ease-in-out infinite;
+}
+
+.workflow-flow-indicator-fast {
+  animation: workspace-pulse 0.6s ease-in-out infinite;
+}
+
+.workflow-canvas-flowing {
+  background-color: rgba(248, 253, 250, 0.6);
+}
+
+.workflow-canvas-flowing .workflow-canvas-vignette {
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(167, 243, 208, 0.15) 100%);
+}
+
+.wf-rail-connector {
+  position: relative;
+  height: 14px;
+  margin-left: 1.35rem;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(10,10,10,0.08), rgba(10,10,10,0.18), rgba(10,10,10,0.08));
+  overflow: hidden;
+}
+
+.wf-rail-connector::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, rgba(10,10,10,0.45), transparent);
+  animation: wf-rail-flow 1.8s ease-in-out infinite;
+}
+
+@keyframes wf-rail-flow {
+  0% { transform: translateY(-100%); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+
+.workflow-canvas-scanline {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.04) 2px,
+    rgba(0, 0, 0, 0.04) 3px
+  );
+}
+
+.workflow-studio-main .workspace-panel {
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  background: rgba(252, 252, 252, 0.45);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.wf-rail-active-ring {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 4px rgba(10, 10, 10, 0.15);
 }

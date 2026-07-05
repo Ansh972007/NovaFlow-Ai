@@ -1,6 +1,15 @@
 # Roadmap
 
-## v0.5 — Assistant Studio + RAG (current)
+## v0.6 — Workflow builder + analytics (current)
+
+- [x] Workflow CRUD API + DB models
+- [x] Visual workflow builder (`/workflows/[id]`)
+- [x] Workflow runtime (trigger → retrieve → LLM → output)
+- [x] Semantic chunk retrieval (token overlap scoring)
+- [x] Usage analytics API + dashboard widgets
+- [x] Chat usage logging
+
+## v0.5 — Assistant Studio + RAG (done)
 
 - [x] Assistant detail / studio page (`/apps/[id]`)
 - [x] Link knowledge bases to assistants (RAG in chat)
@@ -40,12 +49,12 @@
 - [x] API client + auth encryption
 - [x] Dashboard shell
 
-## v0.6 — Next
+## v0.7 — Next
 
-- [ ] Visual workflow builder (runtime)
-- [ ] Vector embeddings (replace keyword RAG)
-- [ ] Assistant analytics & usage
+- [ ] Vector embeddings (OpenAI / Milvus)
+- [ ] Workflow WebSocket chat for published workflows
 - [ ] Team roles & permissions
+- [ ] Assistant analytics charts
 
 ## v1.0 — Launch
 
