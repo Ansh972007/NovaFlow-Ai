@@ -1,55 +1,77 @@
 # NovaFlow deployment
 
-NovaFlow ships its **own backend** (FastAPI + MySQL + Redis). Bisheng in this repo is reference-only — not required to run NovaFlow.
+NovaFlow ships its **own backend** (FastAPI + MySQL + Redis + optional Milvus). The `bisheng-main/` folder in this repo is reference-only.
+
+## Profiles
+
+| Script | Stack | Use case |
+|--------|-------|----------|
+| `start-backend.ps1` | API + MySQL + Redis + Milvus | Local frontend dev |
+| `start-prod.ps1` | Web + API + all data services | Production |
+| `start-demo.ps1` | Same as prod + seeded demo data | Try NovaFlow quickly |
 
 ## Local development
 
-### 1. Start NovaFlow API
+### Backend only (Docker)
 
 ```powershell
 cd novaflow-ai
 .\deploy\start-backend.ps1
 ```
 
-This starts:
 | Service | Port |
 |---------|------|
 | NovaFlow API | **3001** |
 | MySQL | 3307 |
 | Redis | 6381 |
+| Milvus | 19530 |
 
 Default admin: **admin** / **admin123**
 
-### 2. Start the web app
+### Frontend
 
 ```powershell
 cd novaflow-ai
-cp .env.example .env.local
+copy .env.example .env.local
 npm install
 npm run dev
 ```
 
 Open **http://localhost:3000**
 
-### 3. Verify
-
-- **http://localhost:3000/api/health** → `{"ok":true,...}`
-- Login page has no “API offline” banner
-
-## Run API without Docker (dev)
+### API without Docker
 
 ```powershell
-cd novaflow-ai/backend
+cd backend
 pip install -r requirements.txt
-copy .env.example .env
 python -m uvicorn app.main:app --reload --port 3001
 ```
 
 Uses SQLite at `backend/data/novaflow.db` when `DATABASE_URL` is unset.
 
-## Optional: real LLM chat
+## Production
 
-Set in `deploy/docker-compose.yml` or `backend/.env`:
+```powershell
+copy deploy\.env.production.example deploy\.env.production
+# Edit secrets
+.\deploy\start-prod.ps1
+```
+
+Web: **http://localhost:3000** · API: **http://localhost:3001**
+
+Full guide: [docs/deployment.md](../docs/deployment.md)
+
+## Demo
+
+```powershell
+.\deploy\start-demo.ps1
+```
+
+Seeds **Support Assistant**, **Document Q&A**, **NovaFlow Handbook** knowledge base, and a **Handbook Q&A** workflow. Also creates viewer user **demo** / **demo123**.
+
+## Optional: real LLM
+
+Set in `deploy/.env.production` or `backend/.env`:
 
 ```
 OPENAI_API_KEY=sk-...
@@ -58,15 +80,15 @@ OPENAI_MODEL=gpt-4o-mini
 
 Without a key, chat runs in demo mode with placeholder replies.
 
-## Architecture
+## Verify
 
-```
-novaflow-ai/
-  src/          # Next.js frontend
-  backend/      # NovaFlow FastAPI API
-  deploy/       # docker-compose + scripts
-```
+- **http://localhost:3000/api/health** → `{ "ok": true }`
+- **http://localhost:3001/health** → API version `1.0.0`
 
-## Bisheng (blueprint only)
+## Files
 
-The `bisheng-main/` folder is kept as a design reference. Do **not** point NovaFlow at Bisheng Docker unless you are comparing behavior.
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Dev backend stack |
+| `docker-compose.prod.yml` | Production (web + api + data) |
+| `.env.production.example` | Production env template |

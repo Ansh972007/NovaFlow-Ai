@@ -3,11 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR
+from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR, DEMO_SEED
 from app.crypto import md5_hash
 from app.database import SessionLocal, User, init_db
 from app.routers import analytics, assistant, chat_ws, knowledge, llm, user, workflow
-from app.services.vector_store import init_vector_store
+from app.services.demo_seed import seed_demo_data
+from app.services.vector_store import init_vector_store, vector_backend
 from app.schemas import ok
 
 API_PREFIX = "/api/v1"
@@ -28,13 +29,15 @@ async def lifespan(_app: FastAPI):
             db.add(admin)
             db.commit()
             print(f"[NovaFlow] Default admin: {ADMIN_USER} / (see NOVAFLOW_ADMIN_PASSWORD)")
+        if DEMO_SEED:
+            seed_demo_data(db)
     finally:
         db.close()
     init_vector_store()
     yield
 
 
-app = FastAPI(title="NovaFlow API", version="0.8.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,9 +58,16 @@ app.include_router(chat_ws.router, prefix=API_PREFIX)
 
 @app.get("/health")
 def health():
-    return ok({"service": "novaflow-api", "status": "ok"})
+    return ok(
+        {
+            "service": "novaflow-api",
+            "status": "ok",
+            "version": "1.0.0",
+            "vector_backend": vector_backend(),
+        }
+    )
 
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "0.8.0"})
+    return ok({"name": "NovaFlow API", "version": "1.0.0"})

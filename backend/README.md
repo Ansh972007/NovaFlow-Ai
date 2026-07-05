@@ -1,8 +1,8 @@
 # NovaFlow API
 
-FastAPI backend for NovaFlow AI — **not** Bisheng. Implements the endpoints used by the NovaFlow frontend.
+FastAPI backend for NovaFlow AI v1.0.
 
-## Quick start (local, SQLite)
+## Quick start (SQLite, no Docker)
 
 ```bash
 pip install -r requirements.txt
@@ -11,7 +11,7 @@ python -m uvicorn app.main:app --reload --port 3001
 
 Default user: **admin** / **admin123**
 
-## Docker (MySQL + Redis)
+## Docker (MySQL + Redis + Milvus)
 
 From `novaflow-ai` root:
 
@@ -19,18 +19,31 @@ From `novaflow-ai` root:
 .\deploy\start-backend.ps1
 ```
 
-## Implemented
+## Demo seed
+
+Set `NOVAFLOW_DEMO_SEED=1` to populate sample assistants, knowledge, and a workflow on first boot:
+
+```bash
+export NOVAFLOW_DEMO_SEED=1
+python -m uvicorn app.main:app --port 3001
+```
+
+Or use `.\deploy\start-demo.ps1` for the full stack.
+
+## Implemented (v1.0)
 
 - Auth (RSA login, JWT, register)
-- Assistants (CRUD, publish, WebSocket chat)
-- Knowledge (upload, chunk, search preview)
-- LLM config stubs
-- Health check
+- Assistants (CRUD, publish, RAG, WebSocket chat, analytics)
+- Knowledge (upload, chunk, embed, Milvus/SQLite search)
+- Workflows (visual graph, REST + WebSocket run progress, chat)
+- Analytics (dashboard, per-assistant, team roles)
+- Demo seed service
+- Health check with version + vector backend
 
-## Roadmap (Bisheng parity)
+## Environment
 
-- Milvus / vector RAG
-- Workflows & skills
-- Multi-tenant groups & roles
-- Model provider admin UI
-- Finetune & evaluation
+See `.env.example` and [docs/deployment.md](../docs/deployment.md).
+
+## API prefix
+
+All routes under `/api/v1/` except `/health` and `/`.

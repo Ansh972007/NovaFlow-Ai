@@ -1,80 +1,97 @@
 # NovaFlow AI
 
-**Enterprise AI workspace** — unified interface for chat, knowledge bases, and AI applications.
+**Enterprise AI workspace** — chat, knowledge bases (RAG), visual workflows, and team analytics in one frosted-glass UI.
 
-> v0.1 — Initial scaffold: landing, auth UI, dashboard shell, API client.
+**Version 1.0** — production-ready Docker stack, English docs, and one-command demo environment.
 
-## What's included (checkpoint v0.1)
+## Features
 
-- Next.js 16 app (JavaScript, App Router, Tailwind CSS)
-- Branded landing page with features & roadmap
-- Login / register pages (NovaFlow API)
-- Dashboard shell with user info
-- API client with dev proxy to backend
-- Project docs & deploy notes
+- **Assistant Studio** — prompts, publish/unpublish, per-assistant analytics
+- **Knowledge (RAG)** — upload, chunk, embed, semantic search
+- **Workflow builder** — circular canvas, live test runs with WebSocket progress
+- **Streaming chat** — assistants and published workflows
+- **Team roles** — admin, editor, viewer with API + UI enforcement
+- **Analytics** — dashboard charts, usage tracking
+- **Milvus** — optional vector store (SQLite fallback for dev)
 
-## Quick start
+## Quick start (development)
 
-### 1. Backend (NovaFlow API)
-
-Start NovaFlow's **own** API (not Bisheng):
+### 1. Backend
 
 ```powershell
+cd novaflow-ai
 .\deploy\start-backend.ps1
 ```
 
-Default API URL: `http://localhost:3001` · login **admin** / **admin123**
-
-> If port 3001 is in use by old Bisheng containers, stop them first:  
-> `docker stop bisheng-frontend`
+API: **http://localhost:3001** · default login **admin** / **admin123**
 
 ### 2. Frontend
 
-```bash
+```powershell
 cd novaflow-ai
-cp .env.example .env.local
+copy .env.example .env.local
 npm install
 npm run dev
 ```
 
 Open **http://localhost:3000**
 
-### 3. Sign in
+## Demo environment (one command)
 
-Use your backend account or register a new user at `/login?mode=register`.
+Full stack with sample handbook, assistants, and workflow:
+
+```powershell
+.\deploy\start-demo.ps1
+```
+
+| Account | Password | Role |
+|---------|----------|------|
+| admin | see `deploy/.env.production` | Admin |
+| demo | demo123 | Viewer |
+
+## Production deployment
+
+```powershell
+copy deploy\.env.production.example deploy\.env.production
+# Edit JWT_SECRET, NOVAFLOW_ADMIN_PASSWORD, OPENAI_API_KEY
+.\deploy\start-prod.ps1
+```
+
+See **[docs/deployment.md](docs/deployment.md)** for HTTPS, reverse proxy, and security checklist.
+
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [User guide](docs/user-guide.md) | Chat, apps, knowledge, workflows, roles |
+| [Deployment](docs/deployment.md) | Production Docker, env vars, troubleshooting |
+| [Architecture](docs/architecture.md) | System design and data model |
+| [Roadmap](docs/roadmap.md) | Version history |
 
 ## Project structure
 
 ```
 novaflow-ai/
 ├── src/              # Next.js frontend
-├── backend/          # NovaFlow FastAPI API
-├── deploy/           # docker-compose + start scripts
-└── docs/             # Architecture & roadmap
+├── backend/          # FastAPI API
+├── deploy/           # Docker Compose + start scripts
+├── docs/             # Guides and architecture
+└── Dockerfile        # Production web image
 ```
 
 ## Environment
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Backend API base URL |
-| `NEXT_PUBLIC_APP_NAME` | `NovaFlow AI` | Display name |
-
-## Roadmap
-
-| Version | Goal |
-|---------|------|
-| **v0.1** | Landing, auth UI, dashboard shell ✅ |
-| v0.2 | Streaming chat |
-| v0.3 | Knowledge upload & list |
-| **v0.4** | NovaFlow API + Docker stack ✅ |
-| v1.0 | Production deploy |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Backend URL (browser) |
+| `OPENAI_API_KEY` | — | Real LLM + embeddings (demo mode without) |
+| `NOVAFLOW_DEMO_SEED` | `0` | Seed sample data on first boot |
 
 ## Tech stack
 
-- **Frontend:** Next.js, React, Tailwind CSS
-- **Backend:** NovaFlow API (FastAPI, MySQL/SQLite, Redis)
-- **Reference:** Bisheng architecture (not a runtime dependency)
+- **Frontend:** Next.js 16, React, Tailwind CSS, Recharts, Framer Motion
+- **Backend:** FastAPI, SQLAlchemy, MySQL/SQLite, Redis, Milvus (optional)
+- **AI:** OpenAI-compatible chat + embeddings
 
 ## License
 

@@ -27,6 +27,8 @@ OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-s
 ADMIN_USER = os.getenv("NOVAFLOW_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("NOVAFLOW_ADMIN_PASSWORD", "admin123")
 
+DEMO_SEED = os.getenv("NOVAFLOW_DEMO_SEED", "").lower() in {"1", "true", "yes"}
+
 EMBEDDING_MODELS = ["text-embedding-3-small", "text-embedding-ada-002"]
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 MILVUS_URI = os.getenv("MILVUS_URI", "")

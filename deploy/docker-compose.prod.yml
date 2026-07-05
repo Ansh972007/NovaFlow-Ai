@@ -1,0 +1,104 @@
+# NovaFlow production stack — web + API + MySQL + Redis + Milvus
+# Usage (from novaflow-ai root):
+#   copy deploy\.env.production.example deploy\.env.production
+#   .\deploy\start-prod.ps1
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: novaflow-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-novaflow}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-novaflow}
+      MYSQL_USER: ${MYSQL_USER:-novaflow}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-novaflow}
+      TZ: UTC
+    volumes:
+      - novaflow_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-novaflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: novaflow-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    container_name: novaflow-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_USE_EMBED: "true"
+      COMMON_STORAGETYPE: local
+    volumes:
+      - novaflow_milvus:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 90s
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: novaflow-api
+    restart: unless-stopped
+    environment:
+      NOVAFLOW_PORT: "3001"
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-novaflow}:${MYSQL_PASSWORD:-novaflow}@mysql:3306/${MYSQL_DATABASE:-novaflow}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in deploy/.env.production}
+      DATA_DIR: /app/data
+      NOVAFLOW_ADMIN_USER: ${NOVAFLOW_ADMIN_USER:-admin}
+      NOVAFLOW_ADMIN_PASSWORD: ${NOVAFLOW_ADMIN_PASSWORD:?Set NOVAFLOW_ADMIN_PASSWORD}
+      NOVAFLOW_DEMO_SEED: ${NOVAFLOW_DEMO_SEED:-0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      MILVUS_URI: http://milvus:19530
+    volumes:
+      - novaflow_data:/app/data
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-NovaFlow AI}
+    container_name: novaflow-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      API_INTERNAL_URL: http://api:3001
+    depends_on:
+      - api
+
+volumes:
+  novaflow_mysql:
+  novaflow_data:
+  novaflow_milvus:
