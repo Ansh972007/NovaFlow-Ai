@@ -1,7 +1,9 @@
 import json
+import re
 import time
 from typing import Any, Awaitable, Callable
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowRun
@@ -54,6 +56,29 @@ TEMPLATES = {
             "edges": [
                 {"from": "trigger", "to": "retrieve"},
                 {"from": "retrieve", "to": "llm"},
+                {"from": "llm", "to": "output"},
+            ],
+        },
+    },
+    "enrich": {
+        "name": "Transform + LLM",
+        "desc": "Format input with a template then run LLM",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Raw input"}},
+                {
+                    "id": "transform",
+                    "type": "transform",
+                    "x": 240,
+                    "y": 140,
+                    "data": {"template": "Customer message:\n{{input}}\n\nDraft a concise reply."},
+                },
+                {"id": "llm", "type": "llm", "x": 440, "y": 140, "data": {"prompt": "You are a helpful assistant."}},
+                {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Reply"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "transform"},
+                {"from": "transform", "to": "llm"},
                 {"from": "llm", "to": "output"},
             ],
         },
@@ -113,6 +138,28 @@ def _topo_order(graph: dict) -> list[dict]:
     if len(order) < len(nodes):
         order = nodes
     return order
+
+
+def _apply_template(template: str, context: dict) -> str:
+    text = template or ""
+    for key in ("input", "retrieved", "output", "http", "transform"):
+        text = text.replace(f"{{{{{key}}}}}", str(context.get(key) or ""))
+    return text
+
+
+async def _fetch_http(url: str, method: str = "GET", body: str = "") -> str:
+    method = (method or "GET").upper()
+    timeout = httpx.Timeout(15.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        if method == "POST":
+            resp = await client.post(url, content=body or None)
+        else:
+            resp = await client.get(url)
+        resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "")
+        if "json" in content_type:
+            return json.dumps(resp.json())[:8000]
+        return (resp.text or "")[:8000]
 
 
 def log_usage(
@@ -254,7 +301,7 @@ async def _execute_graph(
             hits = []
             if kid:
                 kb = db.get(KnowledgeBase, kid)
-                if kb and kb.user_id == user_id and (not workspace_id or kb.workspace_id == workspace_id):
+                if kb and (not workspace_id or kb.workspace_id == workspace_id):
                     hits = search_chunks_semantic(db, kid, context["input"], limit)
             parts = []
             for i, hit in enumerate(hits, 1):
@@ -265,12 +312,47 @@ async def _execute_graph(
             step["output"] = context["retrieved"] or "(no matches)"
             step["hits"] = len(hits)
             step["status"] = "ok"
+        elif ntype == "transform":
+            template = data.get("template") or "{{input}}"
+            rendered = _apply_template(template, context)
+            context["transform"] = rendered
+            context["output"] = rendered
+            step["output"] = rendered[:500] + ("…" if len(rendered) > 500 else "")
+            step["status"] = "ok"
+        elif ntype == "condition":
+            keyword = (data.get("keyword") or "").strip()
+            haystack = context.get("input") or ""
+            matched = bool(keyword and re.search(re.escape(keyword), haystack, re.I))
+            branch = data.get("then_text") if matched else data.get("else_text")
+            branch = _apply_template(branch or "", context) if branch else haystack
+            context["output"] = branch
+            step["matched"] = matched
+            step["output"] = branch[:500] + ("…" if len(branch) > 500 else "")
+            step["status"] = "ok"
+        elif ntype == "http":
+            url = _apply_template(data.get("url") or "", context).strip()
+            method = (data.get("method") or "GET").upper()
+            body = _apply_template(data.get("body") or "", context)
+            if not url:
+                step["output"] = "(no url)"
+                step["status"] = "error"
+            else:
+                try:
+                    result = await _fetch_http(url, method, body)
+                    context["http"] = result
+                    if data.get("set_output", True):
+                        context["output"] = result
+                    step["output"] = result[:500] + ("…" if len(result) > 500 else "")
+                    step["status"] = "ok"
+                except Exception as exc:
+                    step["output"] = str(exc)[:500]
+                    step["status"] = "error"
         elif ntype == "llm":
             prompt = data.get("prompt") or "You are a helpful assistant."
-            user_msg = context["input"]
+            user_msg = context.get("transform") or context["input"]
             if context["retrieved"]:
                 user_msg = (
-                    f"Question: {context['input']}\n\n"
+                    f"Question: {user_msg}\n\n"
                     f"--- Retrieved context ---\n{context['retrieved']}\n--- End context ---"
                 )
             llm_messages = (prompt, user_msg)

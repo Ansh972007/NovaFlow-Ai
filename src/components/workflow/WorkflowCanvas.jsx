@@ -40,6 +40,27 @@ const NODE_META = {
     ring: "output",
     port: "bg-neutral-500",
   },
+  transform: {
+    label: "Transform",
+    accent: "workflow-node-transform",
+    iconBg: "from-amber-400/20 to-amber-600/10 text-amber-700",
+    ring: "transform",
+    port: "bg-amber-500",
+  },
+  condition: {
+    label: "Condition",
+    accent: "workflow-node-condition",
+    iconBg: "from-rose-400/20 to-rose-600/10 text-rose-700",
+    ring: "condition",
+    port: "bg-rose-500",
+  },
+  http: {
+    label: "HTTP",
+    accent: "workflow-node-http",
+    iconBg: "from-cyan-400/20 to-cyan-600/10 text-cyan-700",
+    ring: "http",
+    port: "bg-cyan-500",
+  },
 };
 
 function nodeSubtitle(node) {
@@ -47,6 +68,9 @@ function nodeSubtitle(node) {
   if (node.type === "retrieve") {
     return node.data?.knowledge_id ? `KB #${node.data.knowledge_id}` : "Link knowledge";
   }
+  if (node.type === "transform") return node.data?.template?.slice(0, 28) || "Template";
+  if (node.type === "condition") return node.data?.keyword || "Keyword match";
+  if (node.type === "http") return node.data?.url?.slice(0, 28) || "Request URL";
   return node.data?.label || node.type;
 }
 

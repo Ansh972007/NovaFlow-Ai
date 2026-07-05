@@ -149,6 +149,95 @@ export default function WorkflowInspector({
                       />
                     </label>
                   )}
+
+                  {selected.type === "transform" && (
+                    <label className="mt-6 block">
+                      <span className="text-xs font-semibold text-neutral-600">Template</span>
+                      <p className="mt-1 text-[11px] text-neutral-400">
+                        Use {"{{input}}"}, {"{{retrieved}}"}, {"{{output}}"}, {"{{http}}"}
+                      </p>
+                      <textarea
+                        value={selected.data?.template || ""}
+                        onChange={(e) => onUpdateNode(selected.id, { data: { template: e.target.value } })}
+                        disabled={readOnly}
+                        rows={6}
+                        className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm leading-relaxed"
+                        placeholder="{{input}}"
+                      />
+                    </label>
+                  )}
+
+                  {selected.type === "condition" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Keyword (contains)</span>
+                        <input
+                          value={selected.data?.keyword || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { keyword: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          placeholder="billing"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Text when matched</span>
+                        <textarea
+                          value={selected.data?.then_text || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { then_text: e.target.value } })}
+                          disabled={readOnly}
+                          rows={3}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Text when not matched</span>
+                        <textarea
+                          value={selected.data?.else_text || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { else_text: e.target.value } })}
+                          disabled={readOnly}
+                          rows={3}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  {selected.type === "http" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">URL</span>
+                        <input
+                          value={selected.data?.url || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { url: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          placeholder="https://api.example.com/data?q={{input}}"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Method</span>
+                        <select
+                          value={selected.data?.method || "GET"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { method: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        >
+                          <option value="GET">GET</option>
+                          <option value="POST">POST</option>
+                        </select>
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">POST body (optional)</span>
+                        <textarea
+                          value={selected.data?.body || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { body: e.target.value } })}
+                          disabled={readOnly}
+                          rows={4}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                    </>
+                  )}
                 </>
               )}
             </motion.div>

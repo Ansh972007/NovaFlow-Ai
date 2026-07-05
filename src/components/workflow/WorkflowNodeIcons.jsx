@@ -36,9 +36,39 @@ export function OutputIcon({ size = 18 }) {
   );
 }
 
+export function TransformIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M4 7h16M4 12h10M4 17h6" />
+      <path d="M18 10l3 2-3 2v-4z" />
+    </svg>
+  );
+}
+
+export function ConditionIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M6 3h12v6H6zM6 15h12v6H6z" />
+      <path d="M12 9v6" />
+    </svg>
+  );
+}
+
+export function HttpIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
+    </svg>
+  );
+}
+
 export const NODE_ICONS = {
   trigger: TriggerIcon,
   retrieve: RetrieveIcon,
   llm: LlmIcon,
   output: OutputIcon,
+  transform: TransformIcon,
+  condition: ConditionIcon,
+  http: HttpIcon,
 };

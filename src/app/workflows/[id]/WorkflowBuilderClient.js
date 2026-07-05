@@ -21,6 +21,15 @@ import {
 
 const ease = [0.16, 1, 0.3, 1];
 
+const ADD_NODE_DEFAULTS = {
+  transform: { template: "{{input}}" },
+  condition: { keyword: "", then_text: "{{input}}", else_text: "" },
+  http: { url: "", method: "GET", body: "" },
+  retrieve: { knowledge_id: null, limit: 5 },
+  llm: { prompt: "You are a helpful assistant." },
+  output: { label: "Output" },
+};
+
 export default function WorkflowBuilderClient({ workflowId }) {
   const router = useRouter();
   const [user, setUser] = useState(null);
@@ -85,6 +94,26 @@ export default function WorkflowBuilderClient({ workflowId }) {
         n.id === id ? { ...n, ...patch, data: { ...n.data, ...(patch.data || {}) } } : n
       ),
     }));
+    setSaved(false);
+  }
+
+  function addNode(type) {
+    if (user?.role === "viewer") return;
+    const id = `${type}_${Date.now()}`;
+    const maxX = Math.max(60, ...(graph.nodes || []).map((n) => n.x || 0));
+    const newNode = {
+      id,
+      type,
+      x: maxX + 180,
+      y: 140 + ((graph.nodes?.length || 0) % 3) * 40,
+      data: { ...(ADD_NODE_DEFAULTS[type] || {}) },
+    };
+    setGraph((prev) => ({
+      ...prev,
+      nodes: [...(prev.nodes || []), newNode],
+    }));
+    setSelectedId(id);
+    setInspectorTab("configure");
     setSaved(false);
   }
 
@@ -344,6 +373,23 @@ export default function WorkflowBuilderClient({ workflowId }) {
               );
             })}
           </ul>
+          {!readOnly && (
+            <div className="shrink-0 border-t border-black/[0.04] p-3">
+              <p className="workspace-section-label mb-2">Add node</p>
+              <div className="flex flex-wrap gap-1.5">
+                {["transform", "condition", "http", "retrieve", "llm", "output"].map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => addNode(type)}
+                    className="rounded-lg bg-white/70 px-2.5 py-1.5 text-[10px] font-semibold capitalize text-neutral-600 ring-1 ring-black/[0.06] hover:bg-white"
+                  >
+                    + {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </aside>
 
         <main className="workflow-studio-main min-w-0 flex-1 p-2 sm:p-4">
