@@ -1,0 +1,64 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: novaflow-mysql
+    restart: unless-stopped
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: novaflow
+      MYSQL_DATABASE: novaflow
+      MYSQL_USER: novaflow
+      MYSQL_PASSWORD: novaflow
+      TZ: UTC
+    volumes:
+      - novaflow_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pnovaflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: novaflow-redis
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: novaflow-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NOVAFLOW_PORT: "3001"
+      DATABASE_URL: mysql+pymysql://novaflow:novaflow@mysql:3306/novaflow
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: novaflow-local-dev-secret
+      DATA_DIR: /app/data
+      NOVAFLOW_ADMIN_USER: admin
+      NOVAFLOW_ADMIN_PASSWORD: admin123
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    volumes:
+      - novaflow_data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  novaflow_mysql:
+  novaflow_data:

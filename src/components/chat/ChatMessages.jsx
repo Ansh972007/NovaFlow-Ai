@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const suggestions = [
   "Summarize my documents",
@@ -8,6 +9,11 @@ const suggestions = [
   "Explain step by step",
   "What can you do?",
 ];
+
+const messageVariants = {
+  hidden: { opacity: 0, y: 12, scale: 0.98 },
+  visible: { opacity: 1, y: 0, scale: 1 },
+};
 
 export default function ChatMessages({ messages, streaming, error, assistantName, onSuggest }) {
   const bottomRef = useRef(null);
@@ -21,104 +27,159 @@ export default function ChatMessages({ messages, streaming, error, assistantName
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6">
-        {messages.length === 0 && !error && (
-          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
-            <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900 text-xs font-bold text-white">
-              NF
-            </div>
-            <h2 className="text-xl font-semibold tracking-tight text-neutral-900">
-              {assistantName || "NovaFlow Assistant"}
-            </h2>
-            <p className="mt-2 max-w-sm text-sm text-neutral-500">
-              Ask a question below or pick a starter prompt.
-            </p>
-
-            <div className="mt-8 flex w-full max-w-md flex-wrap justify-center gap-2">
-              {suggestions.map((text) => (
-                <button
-                  key={text}
-                  type="button"
-                  onClick={() => onSuggest?.(text)}
-                  className="rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs text-neutral-700 transition-colors hover:border-neutral-400 hover:bg-neutral-50"
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
+        <AnimatePresence mode="wait">
+          {messages.length === 0 && !error && (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="flex flex-1 flex-col items-center justify-center py-12 text-center"
+            >
+              <div className="relative mb-6 flex h-20 w-20 items-center justify-center">
+                <div className="chat-empty-ring-outer absolute inset-0 rounded-2xl" />
+                <div className="chat-empty-ring absolute inset-1 rounded-2xl" />
+                <motion.div
+                  animate={{ scale: [1, 1.05, 1], rotate: [0, 2, -2, 0] }}
+                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                  className="relative flex h-14 w-14 items-center justify-center rounded-xl bg-neutral-900 text-sm font-bold text-white shadow-xl"
                 >
-                  {text}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+                  NF
+                </motion.div>
+              </div>
 
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            {msg.role === "assistant" && (
-              <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-900 text-[9px] font-bold text-white">
+              <motion.h2
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.15 }}
+                className="text-2xl font-semibold tracking-tight text-neutral-900"
+              >
+                {assistantName || "NovaFlow Assistant"}
+              </motion.h2>
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.25 }}
+                className="mt-2 max-w-sm text-sm text-neutral-500"
+              >
+                Blueprint-ready AI workspace. Ask anything or pick a starter below.
+              </motion.p>
+
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35 }}
+                className="mt-10 flex w-full max-w-lg flex-wrap justify-center gap-2.5"
+              >
+                {suggestions.map((text, i) => (
+                  <motion.button
+                    key={text}
+                    type="button"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 + i * 0.06 }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => onSuggest?.(text)}
+                    className="chat-suggest-chip rounded-full px-4 py-2.5 text-xs font-medium text-neutral-700"
+                  >
+                    {text}
+                  </motion.button>
+                ))}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence initial={false}>
+          {messages.map((msg) => (
+            <motion.div
+              key={msg.id}
+              variants={messageVariants}
+              initial="hidden"
+              animate="visible"
+              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              {msg.role === "assistant" && (
+                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-900 text-[9px] font-bold text-white shadow-md">
+                  NF
+                </div>
+              )}
+
+              <div className={`max-w-[85%] sm:max-w-[78%] ${msg.role === "user" ? "text-right" : ""}`}>
+                {msg.role === "assistant" && (
+                  <p className="mb-1.5 text-[11px] font-medium tracking-wide text-neutral-400 uppercase">
+                    {assistantName || "Assistant"}
+                  </p>
+                )}
+                <div
+                  className={`inline-block px-4 py-3 text-sm leading-relaxed sm:text-[15px] ${
+                    msg.role === "user"
+                      ? "chat-bubble-user text-left"
+                      : `chat-bubble-assistant text-neutral-800${msg.streaming ? " chat-bubble-streaming" : ""}`
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap break-words">
+                    {msg.content || (msg.streaming ? "" : "…")}
+                  </p>
+                  {msg.streaming && !msg.content && (
+                    <span className="inline-flex gap-1 py-1">
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400"
+                          style={{ animationDelay: `${i * 120}ms` }}
+                        />
+                      ))}
+                    </span>
+                  )}
+                  {msg.streaming && msg.content && (
+                    <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-neutral-400 align-middle" />
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showThinking && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex gap-3"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-200 bg-white text-[9px] font-bold text-neutral-500">
                 NF
               </div>
-            )}
-
-            <div className={`max-w-[85%] sm:max-w-[75%] ${msg.role === "user" ? "text-right" : ""}`}>
-              {msg.role === "assistant" && (
-                <p className="mb-1 text-[11px] font-medium text-neutral-400">
-                  {assistantName || "Assistant"}
-                </p>
-              )}
-              <div
-                className={`text-sm leading-relaxed sm:text-[15px] ${
-                  msg.role === "user"
-                    ? "inline-block rounded-2xl rounded-tr-sm bg-white/90 px-4 py-3 text-neutral-900 shadow-sm backdrop-blur-sm ring-1 ring-black/5"
-                    : "text-neutral-800"
-                }`}
-              >
-                <p className="whitespace-pre-wrap break-words">
-                  {msg.content || (msg.streaming ? "" : "…")}
-                </p>
-                {msg.streaming && !msg.content && (
-                  <span className="inline-flex gap-1 py-1">
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        className="h-1 w-1 animate-bounce rounded-full bg-neutral-400"
-                        style={{ animationDelay: `${i * 120}ms` }}
-                      />
-                    ))}
-                  </span>
-                )}
-                {msg.streaming && msg.content && (
-                  <span className="ml-0.5 inline-block h-3.5 w-px animate-pulse bg-neutral-400 align-middle" />
-                )}
+              <div className="chat-bubble-assistant flex items-center gap-2 px-4 py-3 text-sm text-neutral-500">
+                <span className="flex gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400"
+                      style={{ animationDelay: `${i * 140}ms` }}
+                    />
+                  ))}
+                </span>
+                Composing…
               </div>
-            </div>
-          </div>
-        ))}
-
-        {showThinking && (
-          <div className="flex gap-3">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-200 text-[9px] font-bold text-neutral-500">
-              NF
-            </div>
-            <div className="flex items-center gap-2 py-2 text-sm text-neutral-500">
-              <span className="flex gap-1">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="h-1 w-1 animate-bounce rounded-full bg-neutral-400"
-                    style={{ animationDelay: `${i * 140}ms` }}
-                  />
-                ))}
-              </span>
-              Thinking…
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-700 backdrop-blur-sm"
+          >
             {error}
-          </div>
+          </motion.div>
         )}
 
         <div ref={bottomRef} className="h-px shrink-0" />

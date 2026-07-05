@@ -55,3 +55,16 @@ export async function processKnowledgeFiles(knowledgeId, filePaths) {
 export async function retryKnowledgeFile(data) {
   return client.post("/knowledge/retry", data);
 }
+
+/** Search indexed chunks (Q&A preview) */
+export async function searchKnowledgeChunks(knowledgeId, keyword, { page = 1, limit = 6 } = {}) {
+  if (!keyword?.trim()) return { data: [], total: 0 };
+  return client.get("/knowledge/chunk", {
+    params: {
+      knowledge_id: knowledgeId,
+      keyword: keyword.trim(),
+      page,
+      limit,
+    },
+  });
+}

@@ -123,8 +123,9 @@ export default function AuthFormPanel({
           >
             <p className="font-medium">NovaFlow API is offline</p>
             <p className="mt-1 text-xs text-amber-800/90">
-              Start the NovaFlow backend on port <strong>3001</strong>, then retry. See{" "}
-              <code className="rounded bg-amber-100 px-1">deploy/README.md</code> in this project.
+              Run <code className="rounded bg-amber-100 px-1">.\deploy\start-backend.ps1</code> from the{" "}
+              <code className="rounded bg-amber-100 px-1">novaflow-ai</code> folder (NovaFlow stack — not Bisheng).
+              Default login: <strong>admin</strong> / <strong>admin123</strong>.
             </p>
             <button
               type="button"

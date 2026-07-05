@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
-import LiveBackground from "@/components/LiveBackground";
+import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import { FileIcon, KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
 import {
   FILE_STATUS,
@@ -14,6 +15,7 @@ import {
   processKnowledgeFiles,
   uploadKnowledgeFile,
 } from "@/lib/api/knowledge";
+import KnowledgeQAPreview from "@/components/knowledge/KnowledgeQAPreview";
 
 const ease = [0.16, 1, 0.3, 1];
 const POLL_MS = 4000;
@@ -103,50 +105,68 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
     }
   }
 
+  const readyCount = files.filter((f) => f.status === 2).length;
+
   if (!user) {
     return (
       <div className="relative flex min-h-screen items-center justify-center">
-        <LiveBackground variant="subtle" showNetwork />
-        <span className="relative z-10 text-muted">Loading…</span>
+        <WorkspaceLiveBackground />
+        <span className="relative z-10 text-neutral-500">Loading…</span>
       </div>
     );
   }
 
   return (
     <div className="relative min-h-screen overflow-hidden">
-      <LiveBackground variant="subtle" showNetwork mouseTracking />
+      <WorkspaceLiveBackground />
       <div className="relative z-10">
         <AppHeader user={user} />
 
-        <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
+        <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12">
           <Link
             href="/knowledge"
-            className="group mb-6 inline-flex items-center gap-2 text-sm text-muted hover:text-foreground"
+            className="group mb-8 inline-flex items-center gap-2 text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-900"
           >
             <span className="transition-transform group-hover:-translate-x-1">←</span>
-            All knowledge bases
+            All libraries
           </Link>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease }}
-            className="glass-card rounded-2xl p-6 sm:p-8"
+            className="workspace-hero rounded-[1.75rem] p-7 sm:p-9"
           >
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold tracking-widest text-muted uppercase">
-                  Knowledge base
-                </p>
-                <h1 className="mt-2 font-serif text-3xl tracking-tight">
-                  {loading ? "Loading…" : kb?.name}
-                </h1>
-                {kb?.description && (
-                  <p className="mt-2 text-sm text-muted">{kb.description}</p>
-                )}
+            <div className="workspace-hero-glow pointer-events-none absolute inset-0" aria-hidden />
+            <div className="relative flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex gap-4">
+                <div className="workspace-icon-tile h-14 w-14 shrink-0">
+                  <KnowledgeIcon className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="workspace-section-label">Knowledge base</p>
+                  <h1 className="mt-1 font-serif text-3xl tracking-tight sm:text-4xl">
+                    {loading ? "Loading…" : kb?.name}
+                  </h1>
+                  {kb?.description && (
+                    <p className="mt-2 max-w-xl text-sm leading-relaxed text-neutral-500">
+                      {kb.description}
+                    </p>
+                  )}
+                  {!loading && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-white/70 px-3 py-1 text-[11px] font-semibold text-neutral-600 ring-1 ring-black/5">
+                        {files.length} document{files.length !== 1 ? "s" : ""}
+                      </span>
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200/60">
+                        {readyCount} ready
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
               {writeable && (
-                <div>
+                <div className="shrink-0">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -168,9 +188,9 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
             </div>
 
             {uploading && (
-              <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-surface">
+              <div className="relative mt-6 h-1.5 overflow-hidden rounded-full bg-neutral-200/80">
                 <motion.div
-                  className="h-full bg-black"
+                  className="h-full bg-neutral-900"
                   animate={{ width: `${uploadProgress}%` }}
                   transition={{ ease: "linear" }}
                 />
@@ -178,32 +198,33 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
             )}
 
             {error && (
-              <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <p className="relative mt-4 rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-800">
                 {error}
               </p>
             )}
           </motion.div>
 
-          <motion.div
+          <motion.section
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1, ease }}
             className="mt-8"
           >
-            <h2 className="mb-4 text-sm font-semibold tracking-wide text-muted uppercase">
-              Documents ({files.length})
-            </h2>
+            <p className="workspace-section-label mb-4">Documents</p>
 
             {loading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="glass-card h-16 animate-pulse rounded-xl" />
+                  <div key={i} className="workspace-panel h-16 animate-pulse rounded-xl" />
                 ))}
               </div>
             ) : files.length === 0 ? (
-              <div className="glass-card rounded-2xl p-10 text-center">
-                <p className="font-medium">No documents yet</p>
-                <p className="mt-2 text-sm text-muted">
+              <div className="workspace-empty rounded-[1.75rem] p-10 text-center">
+                <div className="workspace-icon-tile mx-auto h-12 w-12">
+                  <FileIcon className="h-5 w-5" />
+                </div>
+                <p className="mt-5 font-semibold">No documents yet</p>
+                <p className="mt-2 text-sm text-neutral-500">
                   Upload PDF, Word, or text files to index them for AI search.
                 </p>
               </div>
@@ -217,18 +238,19 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.04, ease }}
-                      className="glass-card flex items-center justify-between gap-4 rounded-xl px-5 py-4"
+                      className="workspace-list-row flex items-center gap-4 rounded-xl px-5 py-4"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{file.file_name}</p>
-                        <p className="mt-0.5 text-[11px] text-muted">
-                          {file.update_time
-                            ? new Date(file.update_time).toLocaleString()
-                            : "—"}
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-neutral-100 text-neutral-600">
+                        <FileIcon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-neutral-900">{file.file_name}</p>
+                        <p className="mt-0.5 text-[11px] text-neutral-400">
+                          {file.update_time ? new Date(file.update_time).toLocaleString() : "—"}
                         </p>
                       </div>
                       <span
-                        className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${status.color}`}
+                        className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-wide uppercase ${status.color}`}
                       >
                         {status.label}
                       </span>
@@ -237,21 +259,33 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                 })}
               </ul>
             )}
+          </motion.section>
+
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15, ease }}
+            className="mt-8"
+          >
+            <KnowledgeQAPreview knowledgeId={knowledgeId} readyCount={readyCount} />
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
-            className="mt-8 rounded-2xl border border-border bg-white/60 p-5 text-sm text-muted"
+            className="workspace-panel mt-8 rounded-[1.75rem] p-6 text-sm"
           >
-            <p className="font-medium text-foreground">How it works</p>
-            <ol className="mt-2 list-inside list-decimal space-y-1 text-[13px]">
+            <p className="font-semibold text-neutral-900">How it works</p>
+            <ol className="mt-3 list-inside list-decimal space-y-2 text-[13px] leading-relaxed text-neutral-500">
               <li>Upload documents — they are chunked and embedded automatically.</li>
-              <li>Status turns <span className="text-green-700">Ready</span> when indexing completes.</li>
-              <li>Link this library to an assistant in your workspace to enable RAG chat.</li>
+              <li>Status turns <span className="font-semibold text-emerald-700">Ready</span> when indexing completes.</li>
+              <li>Link this library to an assistant to enable RAG-powered chat.</li>
             </ol>
-            <Link href="/chat" className="mt-4 inline-flex text-sm font-semibold text-foreground hover:underline">
+            <Link
+              href="/chat"
+              className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-neutral-900 hover:underline"
+            >
               Open chat →
             </Link>
           </motion.div>

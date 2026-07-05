@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
-import LiveBackground from "@/components/LiveBackground";
+import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import { KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
 import {
   createKnowledge,
@@ -87,118 +89,130 @@ export default function KnowledgeListClient() {
   if (!user) {
     return (
       <div className="relative flex min-h-screen items-center justify-center">
-        <LiveBackground variant="subtle" showNetwork />
-        <span className="relative z-10 text-muted">Loading…</span>
+        <WorkspaceLiveBackground />
+        <span className="relative z-10 text-neutral-500">Loading…</span>
       </div>
     );
   }
 
   return (
     <div className="relative min-h-screen overflow-hidden">
-      <LiveBackground variant="subtle" showNetwork mouseTracking />
+      <WorkspaceLiveBackground />
       <div className="relative z-10">
         <AppHeader user={user} />
 
-        <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease }}
-            className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between"
-          >
-            <div>
-              <p className="text-xs font-semibold tracking-[0.2em] text-muted uppercase">
-                Knowledge
-              </p>
-              <h1 className="mt-2 font-serif text-4xl tracking-tight">Document libraries</h1>
-              <p className="mt-2 max-w-lg text-sm text-muted">
-                Upload PDFs and docs to ground your AI assistants with accurate answers.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              className="btn-primary shrink-0"
-            >
-              + New knowledge base
-            </button>
-          </motion.div>
+        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+          <WorkspaceHero
+            eyebrow="Knowledge"
+            title="Document"
+            titleHighlight="libraries"
+            description="Upload PDFs and docs to ground your AI assistants with accurate, retrieval-powered answers."
+            badge={<span className="workspace-badge-live">RAG ready</span>}
+            actions={
+              <button type="button" onClick={() => setShowCreate(true)} className="btn-primary shrink-0">
+                + New library
+              </button>
+            }
+          />
 
-          <motion.div
+          <motion.section
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1, duration: 0.5, ease }}
+            transition={{ delay: 0.15, duration: 0.55, ease }}
             className="mt-10"
           >
+            {!loading && total > 0 && (
+              <p className="workspace-section-label mb-5">
+                {total} librar{total !== 1 ? "ies" : "y"}
+              </p>
+            )}
+
             {loading ? (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="glass-card h-32 animate-pulse rounded-2xl" />
+                  <div key={i} className="workspace-panel h-44 animate-pulse rounded-2xl" />
                 ))}
               </div>
             ) : items.length === 0 ? (
-              <div className="glass-card rounded-2xl p-12 text-center">
-                <p className="text-lg font-medium">No knowledge bases yet</p>
-                <p className="mt-2 text-sm text-muted">
-                  Create one to start uploading documents for RAG.
+              <div className="workspace-empty rounded-[1.75rem] p-12 text-center sm:p-16">
+                <div className="workspace-icon-tile mx-auto h-14 w-14">
+                  <KnowledgeIcon className="h-6 w-6" />
+                </div>
+                <p className="mt-6 text-xl font-semibold tracking-tight">No knowledge bases yet</p>
+                <p className="mx-auto mt-2 max-w-sm text-sm text-neutral-500">
+                  Create a library, upload documents, and connect it to your assistants for RAG chat.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setShowCreate(true)}
-                  className="btn-primary mt-6"
-                >
+                <button type="button" onClick={() => setShowCreate(true)} className="btn-primary mt-8">
                   Create your first library
                 </button>
               </div>
             ) : (
-              <>
-                <p className="mb-4 text-xs text-muted">{total} knowledge base{total !== 1 ? "s" : ""}</p>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {items.map((kb, i) => (
-                    <motion.div
-                      key={kb.id}
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.05 * i, ease }}
-                    >
-                      <Link
-                        href={`/knowledge/${kb.id}`}
-                        className="glass-card card-hover block rounded-2xl p-6"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <span className="text-2xl">📚</span>
-                          <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-muted">
-                            {kb.state === 1 ? "Published" : "Draft"}
-                          </span>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {items.map((kb, i) => (
+                  <motion.div
+                    key={kb.id}
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.08 + i * 0.05, ease }}
+                  >
+                    <Link href={`/knowledge/${kb.id}`} className="workspace-card group block rounded-2xl p-6">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="workspace-icon-tile h-11 w-11 transition-transform duration-300 group-hover:scale-105">
+                          <KnowledgeIcon className="h-5 w-5" />
                         </div>
-                        <h2 className="mt-4 font-semibold">{kb.name}</h2>
-                        <p className="mt-1 line-clamp-2 text-sm text-muted">
-                          {kb.description || "No description"}
-                        </p>
-                        <p className="mt-4 text-[11px] text-muted-light">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${
+                            kb.state === 1
+                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60"
+                              : "bg-neutral-100 text-neutral-500 ring-1 ring-neutral-200/60"
+                          }`}
+                        >
+                          {kb.state === 1 ? "Published" : "Draft"}
+                        </span>
+                      </div>
+                      <h2 className="mt-5 text-lg font-semibold tracking-tight group-hover:text-neutral-900">
+                        {kb.name}
+                      </h2>
+                      <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-neutral-500">
+                        {kb.description || "No description"}
+                      </p>
+                      <p className="mt-5 flex items-center justify-between text-[11px] text-neutral-400">
+                        <span>
                           Updated {kb.update_time ? new Date(kb.update_time).toLocaleDateString() : "—"}
-                        </p>
-                      </Link>
-                    </motion.div>
-                  ))}
-                </div>
-              </>
+                        </span>
+                        <span className="font-semibold text-neutral-700 opacity-0 transition-opacity group-hover:opacity-100">
+                          Open →
+                        </span>
+                      </p>
+                    </Link>
+                  </motion.div>
+                ))}
+              </div>
             )}
-          </motion.div>
+          </motion.section>
         </main>
       </div>
 
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-md">
           <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-md rounded-2xl border border-border bg-white p-6 shadow-2xl"
+            initial={{ opacity: 0, scale: 0.96, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="workspace-modal w-full max-w-md rounded-[1.5rem] p-7 sm:p-8"
           >
-            <h2 className="font-serif text-2xl">New knowledge base</h2>
-            <p className="mt-1 text-sm text-muted">Store documents for retrieval-augmented chat.</p>
+            <div className="flex items-start gap-4">
+              <div className="workspace-icon-tile h-12 w-12 shrink-0">
+                <KnowledgeIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-serif text-2xl tracking-tight">New knowledge base</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  Store documents for retrieval-augmented chat.
+                </p>
+              </div>
+            </div>
 
-            <form onSubmit={handleCreate} className="mt-6 space-y-4">
+            <form onSubmit={handleCreate} className="mt-7 space-y-4">
               <div>
                 <label className="mb-1.5 block text-sm font-medium">Name</label>
                 <input
@@ -236,7 +250,7 @@ export default function KnowledgeListClient() {
                 </div>
               )}
               {error && (
-                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                <p className="rounded-xl border border-red-200 bg-red-50/90 px-3 py-2 text-sm text-red-800">
                   {error}
                 </p>
               )}
@@ -244,16 +258,16 @@ export default function KnowledgeListClient() {
                 <button
                   type="button"
                   onClick={() => setShowCreate(false)}
-                  className="flex-1 rounded-full border border-border py-2.5 text-sm font-medium hover:bg-surface"
+                  className="workspace-btn-ghost flex-1"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={creating}
-                  className="auth-submit-btn flex-1 rounded-full py-2.5 text-sm font-semibold disabled:opacity-50"
+                  className="btn-primary flex-1 disabled:opacity-50"
                 >
-                  {creating ? "Creating…" : "Create"}
+                  {creating ? "Creating…" : "Create library"}
                 </button>
               </div>
             </form>

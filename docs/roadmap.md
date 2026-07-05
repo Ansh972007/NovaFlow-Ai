@@ -1,13 +1,28 @@
 # Roadmap
 
-## v0.3 — Knowledge (current)
+## v0.5 — Assistant Studio + RAG (current)
+
+- [x] Assistant detail / studio page (`/apps/[id]`)
+- [x] Link knowledge bases to assistants (RAG in chat)
+- [x] Settings page — workspace UI
+- [x] Workflows preview page (`/workflows`)
+- [x] Unified frosted workspace UI across chat, dashboard, apps, knowledge
+
+## v0.4 — Onboarding (done)
+
+- [x] First-run setup wizard (`/setup`)
+- [x] 3 starter assistant templates
+- [x] Health & settings page (`/settings`)
+- [x] Apps page — create, publish, delete assistants
+- [x] NovaFlow FastAPI backend + Docker stack
+
+## v0.3 — Knowledge (done)
 
 - [x] Knowledge base list (`/knowledge`)
 - [x] Create knowledge base
 - [x] File upload with progress
 - [x] Processing status (auto-refresh)
-- [ ] Q&A preview
-- [ ] Push tag v0.3.0
+- [x] Q&A preview (chunk search)
 
 ## v0.2 — Chat (done)
 
@@ -25,12 +40,12 @@
 - [x] API client + auth encryption
 - [x] Dashboard shell
 
-## v0.4 — Onboarding
+## v0.6 — Next
 
-- [ ] First-run setup wizard
-- [ ] 3 starter templates
-- [ ] Lite Docker compose
-- [ ] Health status page
+- [ ] Visual workflow builder (runtime)
+- [ ] Vector embeddings (replace keyword RAG)
+- [ ] Assistant analytics & usage
+- [ ] Team roles & permissions
 
 ## v1.0 — Launch
 

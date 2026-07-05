@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import KnowledgeDetailClient from "./KnowledgeDetailClient";
-import LiveBackground from "@/components/LiveBackground";
+import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -16,7 +16,7 @@ export default async function KnowledgeDetailPage({ params }) {
     <Suspense
       fallback={
         <div className="relative flex min-h-screen items-center justify-center">
-          <LiveBackground variant="subtle" showNetwork />
+          <WorkspaceLiveBackground />
           <span className="relative z-10 text-muted">Loading…</span>
         </div>
       }

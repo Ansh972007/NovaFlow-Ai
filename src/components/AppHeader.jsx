@@ -13,6 +13,8 @@ export default function AppHeader({ user, links = [] }) {
     { href: "/dashboard", label: "Dashboard" },
     { href: "/chat", label: "Chat" },
     { href: "/knowledge", label: "Knowledge" },
+    { href: "/apps", label: "Apps" },
+    { href: "/workflows", label: "Workflows" },
   ];
 
   const navLinks = links.length ? links : defaultLinks;
@@ -28,7 +30,7 @@ export default function AppHeader({ user, links = [] }) {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/80 bg-white/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-40 border-b border-neutral-200/90 bg-white/95 backdrop-blur-xl shadow-sm">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Logo size="sm" />
         <div className="flex items-center gap-1 sm:gap-2">

@@ -1,22 +1,29 @@
 # NovaFlow deployment
 
+NovaFlow ships its **own backend** (FastAPI + MySQL + Redis). Bisheng in this repo is reference-only — not required to run NovaFlow.
+
 ## Local development
 
-### 1. Start the NovaFlow API (backend)
-
-The API must be running on **port 3001** before you sign in.
-
-From this repo:
+### 1. Start NovaFlow API
 
 ```powershell
+cd novaflow-ai
 .\deploy\start-backend.ps1
 ```
 
-Or manually — see `deploy/start-backend.ps1` for the exact command used on your machine.
+This starts:
+| Service | Port |
+|---------|------|
+| NovaFlow API | **3001** |
+| MySQL | 3307 |
+| Redis | 6381 |
 
-### 2. Start the NovaFlow web app
+Default admin: **admin** / **admin123**
 
-```bash
+### 2. Start the web app
+
+```powershell
+cd novaflow-ai
 cp .env.example .env.local
 npm install
 npm run dev
@@ -24,22 +31,42 @@ npm run dev
 
 Open **http://localhost:3000**
 
-Next.js proxies `/api/*` → your NovaFlow API at `NEXT_PUBLIC_API_URL` (default `http://localhost:3001`).
+### 3. Verify
 
-### 3. Verify connection
+- **http://localhost:3000/api/health** → `{"ok":true,...}`
+- Login page has no “API offline” banner
 
-- Login page shows no “API offline” warning
-- Or open **http://localhost:3000/api/health** — should return `{"ok":true,...}`
+## Run API without Docker (dev)
 
-## Ports
+```powershell
+cd novaflow-ai/backend
+pip install -r requirements.txt
+copy .env.example .env
+python -m uvicorn app.main:app --reload --port 3001
+```
 
-| Service | Port |
-|---------|------|
-| NovaFlow Web | 3000 |
-| NovaFlow API | 3001 |
+Uses SQLite at `backend/data/novaflow.db` when `DATABASE_URL` is unset.
 
-## Production (future)
+## Optional: real LLM chat
 
-- Build: `npm run build && npm start`
-- Serve behind nginx with API upstream
-- Lite Docker compose coming in v0.4
+Set in `deploy/docker-compose.yml` or `backend/.env`:
+
+```
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Without a key, chat runs in demo mode with placeholder replies.
+
+## Architecture
+
+```
+novaflow-ai/
+  src/          # Next.js frontend
+  backend/      # NovaFlow FastAPI API
+  deploy/       # docker-compose + scripts
+```
+
+## Bisheng (blueprint only)
+
+The `bisheng-main/` folder is kept as a design reference. Do **not** point NovaFlow at Bisheng Docker unless you are comparing behavior.

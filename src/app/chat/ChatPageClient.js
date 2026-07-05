@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { motion } from "framer-motion";
 import ChatSidebar from "@/components/chat/ChatSidebar";
 import ChatMessages from "@/components/chat/ChatMessages";
 import ChatInput from "@/components/chat/ChatInput";
 import ChatLiveBackground from "@/components/chat/ChatLiveBackground";
+import CursorGlow from "@/components/CursorGlow";
 import { useAssistantChat } from "@/hooks/useAssistantChat";
-import { getOnlineApps, getAssistants, FLOW_TYPE } from "@/lib/api/apps";
+import { getOnlineApps, getAssistants, getAssistantInfo, FLOW_TYPE } from "@/lib/api/apps";
 import { getUserInfo, logout } from "@/lib/api/auth";
 import {
   getSessionsForApp,
@@ -21,8 +23,12 @@ function ChatLoading() {
   return (
     <div className="chat-shell relative flex min-h-screen items-center justify-center overflow-hidden">
       <ChatLiveBackground />
+      <CursorGlow />
       <div className="relative z-10 flex flex-col items-center gap-4">
-        <div className="h-10 w-10 animate-pulse rounded-lg bg-neutral-200/80" />
+        <div className="relative flex h-12 w-12 items-center justify-center">
+          <div className="chat-empty-ring absolute inset-0 rounded-xl" />
+          <div className="h-10 w-10 animate-pulse rounded-lg bg-neutral-900/90" />
+        </div>
         <p className="text-sm text-neutral-500">Loading workspace…</p>
       </div>
     </div>
@@ -44,6 +50,7 @@ export default function ChatPageClient() {
   const [loadingApps, setLoadingApps] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [ragCount, setRagCount] = useState(0);
 
   const { messages, streaming, error, sendMessage, stop } = useAssistantChat({
     app: selectedApp,
@@ -87,6 +94,19 @@ export default function ChatPageClient() {
       setSelectedApp(app);
     });
   }, [authChecked, user, loadApps, appIdParam]);
+
+  useEffect(() => {
+    if (!selectedApp?.id) {
+      setRagCount(0);
+      return;
+    }
+    getAssistantInfo(selectedApp.id)
+      .then((info) => {
+        const ids = info?.knowledge_ids || info?.knowledge_list?.map((k) => k.id) || [];
+        setRagCount(ids.length);
+      })
+      .catch(() => setRagCount(0));
+  }, [selectedApp?.id]);
 
   useEffect(() => {
     if (!selectedApp) return;
@@ -175,6 +195,7 @@ export default function ChatPageClient() {
   return (
     <div className="chat-shell relative flex h-[100dvh] overflow-hidden">
       <ChatLiveBackground className="fixed inset-0 z-0" active={streaming} />
+      <CursorGlow />
 
       <ChatSidebar
         apps={apps}
@@ -191,14 +212,18 @@ export default function ChatPageClient() {
         onLogout={handleLogout}
       />
 
-      <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="relative flex min-h-0 flex-1 flex-col bg-white/85 backdrop-blur-sm">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-200/80 bg-white/90 px-3 backdrop-blur-md sm:px-4">
-          <div className="flex min-w-0 items-center gap-2">
+      <div className="chat-main-panel relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
+        <motion.header
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="chat-header flex h-14 shrink-0 items-center justify-between px-3 sm:px-5"
+        >
+          <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 md:hidden"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-neutral-100 md:hidden"
               aria-label="Open menu"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -206,51 +231,71 @@ export default function ChatPageClient() {
               </svg>
             </button>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-neutral-900">{headerTitle}</p>
+              <div className="flex items-center gap-2">
+                <p className="truncate text-sm font-semibold tracking-tight text-neutral-900">{headerTitle}</p>
+                {ragCount > 0 && (
+                  <Link
+                    href={selectedApp ? `/apps/${selectedApp.id}` : "/apps"}
+                    className="workspace-badge-live hidden shrink-0 sm:inline-flex"
+                    title="Knowledge bases linked for RAG"
+                  >
+                    RAG · {ragCount}
+                  </Link>
+                )}
+              </div>
               {streaming && (
-                <p className="flex items-center gap-1 text-[10px] text-neutral-500">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                <p className="flex items-center gap-1.5 text-[10px] font-medium text-neutral-500">
+                  <span className="chat-status-dot h-1.5 w-1.5 rounded-full bg-emerald-500" />
                   Responding…
                 </p>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
+            <Link
+              href={selectedApp ? `/apps/${selectedApp.id}` : "/apps"}
+              className="chat-header-link hidden rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-500 hover:bg-neutral-100/80 hover:text-neutral-900 sm:inline"
+            >
+              Configure
+            </Link>
             <Link
               href="/dashboard"
-              className="hidden rounded-md px-2.5 py-1.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 sm:inline"
+              className="chat-header-link hidden rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-500 hover:bg-neutral-100/80 hover:text-neutral-900 sm:inline"
             >
               Dashboard
             </Link>
             <Link
               href="/knowledge"
-              className="hidden rounded-md px-2.5 py-1.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 sm:inline"
+              className="chat-header-link hidden rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-500 hover:bg-neutral-100/80 hover:text-neutral-900 sm:inline"
             >
               Knowledge
             </Link>
             <Link
               href="/"
-              className="rounded-md px-2.5 py-1.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+              className="chat-header-link rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-500 hover:bg-neutral-100/80 hover:text-neutral-900"
             >
               Home
             </Link>
           </div>
-        </header>
+        </motion.header>
 
         {!selectedApp && !loadingApps ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-neutral-100 text-sm font-bold text-neutral-600">
-              NF
+            <div className="relative mb-5 flex h-14 w-14 items-center justify-center">
+              <div className="chat-empty-ring absolute inset-0 rounded-xl" />
+              <div className="relative flex h-12 w-12 items-center justify-center rounded-xl bg-neutral-900 text-sm font-bold text-white">
+                NF
+              </div>
             </div>
-            <p className="text-lg font-semibold text-neutral-900">No assistant connected</p>
+            <p className="text-xl font-semibold tracking-tight text-neutral-900">No assistant connected</p>
             <p className="mt-2 max-w-sm text-sm text-neutral-500">
               Publish an assistant in your NovaFlow workspace, then refresh.
             </p>
             <button
               type="button"
               onClick={loadApps}
-              className="mt-5 rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+              className="mt-6 rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg transition-transform hover:scale-[1.02] hover:bg-neutral-800"
             >
               Refresh
             </button>
@@ -272,7 +317,6 @@ export default function ChatPageClient() {
             />
             </>
           )}
-        </div>
       </div>
     </div>
   );

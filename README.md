@@ -17,13 +17,16 @@
 
 ### 1. Backend (NovaFlow API)
 
-NovaFlow needs its API running locally. From the project root:
+Start NovaFlow's **own** API (not Bisheng):
 
 ```powershell
 .\deploy\start-backend.ps1
 ```
 
-Default API URL: `http://localhost:3001`
+Default API URL: `http://localhost:3001` · login **admin** / **admin123**
+
+> If port 3001 is in use by old Bisheng containers, stop them first:  
+> `docker stop bisheng-frontend`
 
 ### 2. Frontend
 
@@ -44,13 +47,10 @@ Use your backend account or register a new user at `/login?mode=register`.
 
 ```
 novaflow-ai/
-├── src/
-│   ├── app/              # Pages (landing, login, dashboard, docs)
-│   ├── components/       # UI components (Logo, Navbar)
-│   └── lib/api/          # API client & auth helpers
-├── docs/                 # Architecture & roadmap
-├── deploy/               # Docker / deployment configs
-└── public/               # Static assets
+├── src/              # Next.js frontend
+├── backend/          # NovaFlow FastAPI API
+├── deploy/           # docker-compose + start scripts
+└── docs/             # Architecture & roadmap
 ```
 
 ## Environment
@@ -67,14 +67,14 @@ novaflow-ai/
 | **v0.1** | Landing, auth UI, dashboard shell ✅ |
 | v0.2 | Streaming chat |
 | v0.3 | Knowledge upload & list |
-| v0.4 | Setup wizard + templates |
+| **v0.4** | NovaFlow API + Docker stack ✅ |
 | v1.0 | Production deploy |
 
 ## Tech stack
 
-- **Frontend:** Next.js, React, Tailwind CSS, Axios
-- **Backend:** NovaFlow API (FastAPI, port 3001)
-- **Infra:** Docker, MySQL, Redis, Milvus, Elasticsearch
+- **Frontend:** Next.js, React, Tailwind CSS
+- **Backend:** NovaFlow API (FastAPI, MySQL/SQLite, Redis)
+- **Reference:** Bisheng architecture (not a runtime dependency)
 
 ## License
 

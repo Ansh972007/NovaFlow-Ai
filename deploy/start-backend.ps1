@@ -1,37 +1,54 @@
-# Start NovaFlow API (local backend on port 3001)
-# Run from the novaflow-ai project root: .\deploy\start-backend.ps1
+# Start NovaFlow API — own stack (MySQL + Redis + API on port 3001)
+# Run from novaflow-ai root: .\deploy\start-backend.ps1
 
 $ErrorActionPreference = "Stop"
+$Root = Split-Path $PSScriptRoot -Parent
+$ComposeFile = Join-Path $PSScriptRoot "docker-compose.yml"
 
-try {
-  $ping = Invoke-WebRequest -Uri "http://localhost:3001/api/v1/user/public_key" -UseBasicParsing -TimeoutSec 5
-  if ($ping.StatusCode -eq 200) {
-    Write-Host "NovaFlow API is already running at http://localhost:3001" -ForegroundColor Green
-    exit 0
+function Test-NovaApi {
+  try {
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:3001/health" -UseBasicParsing -TimeoutSec 10
+    if ($r.StatusCode -ne 200) { return $false }
+    $j = $r.Content | ConvertFrom-Json
+    return $j.status_code -eq 200
+  } catch {
+    try {
+      $r = Invoke-WebRequest -Uri "http://127.0.0.1:3001/api/v1/user/public_key" -UseBasicParsing -TimeoutSec 10
+      return $r.StatusCode -eq 200
+    } catch {
+      return $false
+    }
   }
-} catch {
-  # not running — continue to start
 }
 
-$composePaths = @(
-  "$PSScriptRoot\..\..\bisheng-main\docker",
-  "$PSScriptRoot\..\..\docker",
-  "$env:USERPROFILE\Downloads\bisheng-main\bisheng-main\docker"
-)
+if (Test-NovaApi) {
+  Write-Host "NovaFlow API is already running at http://localhost:3001" -ForegroundColor Green
+  exit 0
+}
 
-$composeDir = $composePaths | Where-Object { Test-Path "$_\docker-compose.yml" } | Select-Object -First 1
-
-if (-not $composeDir) {
-  Write-Host "NovaFlow API: could not find docker-compose.yml." -ForegroundColor Red
-  Write-Host "Set NEXT_PUBLIC_API_URL in .env.local to your running API."
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+  Write-Host "Docker not found. Run API locally instead:" -ForegroundColor Yellow
+  Write-Host "  cd backend && pip install -r requirements.txt && python -m uvicorn app.main:app --port 3001" -ForegroundColor Gray
   exit 1
 }
 
-Write-Host "Starting NovaFlow API from $composeDir ..." -ForegroundColor Cyan
-Push-Location $composeDir
-docker compose -f docker-compose.yml -p novaflow-api up -d
+Write-Host "Starting NovaFlow stack (MySQL + Redis + API)..." -ForegroundColor Cyan
+Push-Location $PSScriptRoot
+docker compose -f docker-compose.yml up -d --build
 Pop-Location
 
-Write-Host ""
-Write-Host "NovaFlow API should be available at http://localhost:3001" -ForegroundColor Green
-Write-Host "Then run: npm run dev" -ForegroundColor Green
+Write-Host "Waiting for NovaFlow API (up to 120s)..." -ForegroundColor Cyan
+$deadline = (Get-Date).AddSeconds(120)
+while ((Get-Date) -lt $deadline) {
+  if (Test-NovaApi) {
+    Write-Host ""
+    Write-Host "NovaFlow API is online at http://localhost:3001" -ForegroundColor Green
+    Write-Host "Default login: admin / admin123" -ForegroundColor Gray
+    Write-Host "Frontend:  cd novaflow-ai && npm run dev" -ForegroundColor Gray
+    exit 0
+  }
+  Start-Sleep -Seconds 5
+}
+
+Write-Host "API not ready yet. Check logs: docker logs novaflow-api --tail 40" -ForegroundColor Yellow
+exit 1
