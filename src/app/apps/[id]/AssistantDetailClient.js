@@ -15,7 +15,9 @@ import {
   setAssistantStatus,
   updateAssistant,
 } from "@/lib/api/apps";
+import { getAssistantAnalytics } from "@/lib/api/analytics";
 import { listKnowledge } from "@/lib/api/knowledge";
+import AssistantAnalytics from "@/components/apps/AssistantAnalytics";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -33,14 +35,16 @@ export default function AssistantDetailClient({ assistantId }) {
   const [status, setStatus] = useState(0);
   const [linkedIds, setLinkedIds] = useState([]);
   const [libraries, setLibraries] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [info, kbRes] = await Promise.all([
+      const [info, kbRes, analyticsRes] = await Promise.all([
         getAssistantInfo(assistantId),
         listKnowledge({ pageSize: 100 }),
+        getAssistantAnalytics(assistantId).catch(() => null),
       ]);
       setName(info?.name || "");
       setDesc(info?.desc || info?.description || "");
@@ -48,6 +52,7 @@ export default function AssistantDetailClient({ assistantId }) {
       setStatus(info?.status ?? 0);
       setLinkedIds(info?.knowledge_ids || info?.knowledge_list?.map((k) => k.id) || []);
       setLibraries(kbRes?.data || []);
+      setAnalytics(analyticsRes);
     } catch (err) {
       setError(err.message || "Failed to load assistant");
     } finally {
@@ -129,6 +134,8 @@ export default function AssistantDetailClient({ assistantId }) {
     );
   }
 
+  const readOnly = user.role === "viewer";
+
   return (
     <div className="relative min-h-screen overflow-hidden">
       <WorkspaceLiveBackground active={saving} />
@@ -185,14 +192,16 @@ export default function AssistantDetailClient({ assistantId }) {
                     Open chat
                   </Link>
                 )}
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={handleTogglePublish}
-                  className="workspace-btn-ghost disabled:opacity-50"
-                >
-                  {status === 1 ? "Unpublish" : "Publish"}
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={handleTogglePublish}
+                    className="workspace-btn-ghost disabled:opacity-50"
+                  >
+                    {status === 1 ? "Unpublish" : "Publish"}
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>
@@ -200,6 +209,12 @@ export default function AssistantDetailClient({ assistantId }) {
           {error && (
             <p className="mt-4 rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-800">
               {error}
+            </p>
+          )}
+
+          {readOnly && (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-800">
+              Viewer access — you can inspect this assistant but cannot edit it.
             </p>
           )}
 
@@ -214,6 +229,7 @@ export default function AssistantDetailClient({ assistantId }) {
           )}
 
           <form onSubmit={handleSave} className="mt-8 space-y-6">
+            <fieldset disabled={readOnly} className="space-y-6 disabled:opacity-80">
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
@@ -340,7 +356,11 @@ export default function AssistantDetailClient({ assistantId }) {
                 </ul>
               )}
             </motion.div>
+            </fieldset>
 
+            <AssistantAnalytics analytics={analytics} />
+
+            {!readOnly && (
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <button
                 type="button"
@@ -353,6 +373,7 @@ export default function AssistantDetailClient({ assistantId }) {
                 {saving ? "Saving…" : "Save changes"}
               </button>
             </div>
+            )}
           </form>
         </main>
       </div>

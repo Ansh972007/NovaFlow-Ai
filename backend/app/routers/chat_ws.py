@@ -5,10 +5,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app.crypto import decode_token
-from app.database import Assistant, SessionLocal, Workflow
+from app.database import Assistant, SessionLocal, User, Workflow
+from app.deps import effective_role
 from app.services.knowledge import rag_context_for_assistant
 from app.services.llm import stream_chat
-from app.services.workflow import log_usage, resolve_workflow_llm_messages
+from app.services.workflow import log_usage, resolve_workflow_llm_messages, run_workflow_with_progress
 
 router = APIRouter(tags=["Chat"])
 
@@ -166,5 +167,62 @@ async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
             )
     except WebSocketDisconnect:
         pass
+    finally:
+        db.close()
+
+
+@router.websocket("/workflow/run/ws/{workflow_id}")
+async def workflow_run_ws(websocket: WebSocket, workflow_id: str):
+    await websocket.accept()
+    user_id = get_user_id_from_ws(websocket)
+    if not user_id:
+        await websocket.send_json({"type": "error", "message": "Unauthorized"})
+        await websocket.close()
+        return
+
+    db: Session = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if not user or user.delete:
+            await websocket.send_json({"type": "error", "message": "Unauthorized"})
+            await websocket.close()
+            return
+        if effective_role(user) == "viewer":
+            await websocket.send_json({"type": "error", "message": "Viewer access is read-only"})
+            await websocket.close()
+            return
+
+        workflow = db.get(Workflow, workflow_id)
+        if not workflow or workflow.user_id != user_id:
+            await websocket.send_json({"type": "error", "message": "Workflow not found"})
+            await websocket.close()
+            return
+
+        raw = await websocket.receive_text()
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            await websocket.send_json({"type": "error", "message": "Invalid payload"})
+            await websocket.close()
+            return
+
+        user_input = (payload.get("input") or "").strip()
+        if not user_input:
+            await websocket.send_json({"type": "error", "message": "Input required"})
+            await websocket.close()
+            return
+
+        async def emit(event: dict):
+            await websocket.send_json(event)
+
+        await run_workflow_with_progress(db, workflow, user_id, user_input, emit)
+        await websocket.send_json({"type": "close"})
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        try:
+            await websocket.send_json({"type": "error", "message": str(exc)})
+        except Exception:
+            pass
     finally:
         db.close()

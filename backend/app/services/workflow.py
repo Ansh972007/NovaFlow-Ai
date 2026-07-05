@@ -1,12 +1,14 @@
 import json
 import time
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy.orm import Session
 
 from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowRun
 from app.services.knowledge import search_chunks_semantic
-from app.services.llm import stream_chat_sync
+from app.services.llm import stream_chat, stream_chat_sync
+
+EmitFn = Callable[[dict], Awaitable[None]] | None
 
 
 FLOW_TYPE_WORKFLOW = 10
@@ -158,20 +160,80 @@ async def run_workflow(db: Session, workflow: Workflow, user_id: int, user_input
     }
 
 
+async def run_workflow_with_progress(
+    db: Session,
+    workflow: Workflow,
+    user_id: int,
+    user_input: str,
+    emit: EmitFn,
+) -> dict[str, Any]:
+    start = time.perf_counter()
+    try:
+        graph = json.loads(workflow.graph_json or "{}")
+    except json.JSONDecodeError:
+        graph = {"nodes": [], "edges": []}
+
+    async def _emit(event: dict):
+        if emit:
+            await emit(event)
+
+    context, steps = await _execute_graph(
+        db, user_id, graph, user_input.strip(), emit=_emit, stream_llm=bool(emit)
+    )
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    final_output = context["output"] or context["input"]
+
+    run = WorkflowRun(
+        workflow_id=workflow.id,
+        user_id=user_id,
+        input_text=user_input[:4000],
+        output_text=final_output[:8000],
+        status=1,
+        duration_ms=duration_ms,
+        steps_json=json.dumps(steps),
+    )
+    db.add(run)
+    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms})
+    db.commit()
+
+    result = {
+        "workflow_id": workflow.id,
+        "output": final_output,
+        "steps": steps,
+        "duration_ms": duration_ms,
+        "run_id": run.id,
+    }
+    await _emit({"type": "complete", **result})
+    return result
+
+
 async def _execute_graph(
-    db: Session, user_id: int, graph: dict, user_input: str, *, skip_llm: bool = False
+    db: Session,
+    user_id: int,
+    graph: dict,
+    user_input: str,
+    *,
+    skip_llm: bool = False,
+    stream_llm: bool = False,
+    emit: EmitFn = None,
 ) -> tuple[dict, list[dict]]:
     context = {"input": user_input, "retrieved": "", "output": ""}
     steps: list[dict] = []
     llm_messages: tuple[str, str] | None = None
 
+    async def _emit(event: dict):
+        if emit:
+            await emit(event)
+
     for node in _topo_order(graph):
         ntype = node.get("type")
         data = node.get("data") or {}
-        step = {"node_id": node.get("id"), "type": ntype, "status": "ok"}
+        step = {"node_id": node.get("id"), "type": ntype, "status": "running"}
+        await _emit({"type": "step", "phase": "start", "step": {**step}})
 
         if ntype == "trigger":
             step["output"] = context["input"]
+            step["status"] = "ok"
         elif ntype == "retrieve":
             kid = data.get("knowledge_id")
             limit = int(data.get("limit") or 5)
@@ -188,6 +250,7 @@ async def _execute_graph(
             context["retrieved"] = "\n\n".join(parts)
             step["output"] = context["retrieved"] or "(no matches)"
             step["hits"] = len(hits)
+            step["status"] = "ok"
         elif ntype == "llm":
             prompt = data.get("prompt") or "You are a helpful assistant."
             user_msg = context["input"]
@@ -199,16 +262,30 @@ async def _execute_graph(
             llm_messages = (prompt, user_msg)
             if skip_llm:
                 step["output"] = "(streaming)"
+                step["status"] = "ok"
+            elif stream_llm and emit:
+                await _emit({"type": "llm_start"})
+                reply = ""
+                async for token in stream_chat(prompt, user_msg):
+                    reply += token
+                    await _emit({"type": "stream", "message": {"content": token}})
+                context["output"] = reply
+                step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
+                step["status"] = "ok"
+                await _emit({"type": "llm_end"})
             else:
                 reply = await stream_chat_sync(prompt, user_msg)
                 context["output"] = reply
                 step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
+                step["status"] = "ok"
         elif ntype == "output":
             step["output"] = context["output"] or context["input"]
+            step["status"] = "ok"
         else:
             step["status"] = "skipped"
 
         steps.append(step)
+        await _emit({"type": "step", "phase": "done", "step": step})
 
     if skip_llm and llm_messages:
         context["_llm_system"] = llm_messages[0]

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import EMBEDDING_MODELS
 from app.database import KnowledgeBase, KnowledgeFile, get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_editor
 from app.schemas import KnowledgeCreate, ProcessFiles, fail, ok
 from app.services.knowledge import kb_upload_dir, process_file_record, search_chunks
 
@@ -48,7 +48,7 @@ def embedding_param():
 
 
 @router.post("/knowledge/create")
-def create_knowledge(body: KnowledgeCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_knowledge(body: KnowledgeCreate, db: Session = Depends(get_db), user=Depends(require_editor)):
     kb = KnowledgeBase(
         name=body.name.strip(),
         description=body.description or "",
@@ -99,7 +99,7 @@ async def upload_file(
     knowledge_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_editor),
 ):
     kb = db.get(KnowledgeBase, knowledge_id)
     if not kb or kb.user_id != user.user_id:
@@ -123,7 +123,7 @@ async def upload_file(
 
 
 @router.post("/knowledge/process")
-def process_files(body: ProcessFiles, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def process_files(body: ProcessFiles, db: Session = Depends(get_db), user=Depends(require_editor)):
     kb = db.get(KnowledgeBase, body.knowledge_id)
     if not kb or kb.user_id != user.user_id:
         return fail(404, "Knowledge base not found")

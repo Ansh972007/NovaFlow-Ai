@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import Assistant, AssistantKnowledge, KnowledgeBase, get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_editor
 from app.schemas import AssistantCreate, AssistantKnowledgeUpdate, AssistantUpdate, fail, ok
 from app.services.knowledge import get_assistant_knowledge_ids, set_assistant_knowledge
 
@@ -73,7 +73,7 @@ def assistant_info(assistant_id: str, db: Session = Depends(get_db), user=Depend
 
 
 @router.post("/assistant")
-def create_assistant(body: AssistantCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_assistant(body: AssistantCreate, db: Session = Depends(get_db), user=Depends(require_editor)):
     a = Assistant(
         name=body.name.strip(),
         prompt=body.prompt.strip(),
@@ -88,7 +88,7 @@ def create_assistant(body: AssistantCreate, db: Session = Depends(get_db), user=
 
 
 @router.put("/assistant")
-def update_assistant(body: AssistantUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def update_assistant(body: AssistantUpdate, db: Session = Depends(get_db), user=Depends(require_editor)):
     a = db.get(Assistant, body.id)
     if not a or a.user_id != user.user_id:
         return fail(404, "Assistant not found")
@@ -109,7 +109,7 @@ def set_status(
     id: str = Body(..., alias="id"),
     status: int = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_editor),
 ):
     a = db.get(Assistant, id)
     if not a or a.user_id != user.user_id:
@@ -124,7 +124,7 @@ def set_status(
 def delete_assistant(
     assistant_id: str = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_editor),
 ):
     a = db.get(Assistant, assistant_id)
     if not a or a.user_id != user.user_id:
@@ -139,7 +139,7 @@ def delete_assistant(
 def update_assistant_knowledge(
     body: AssistantKnowledgeUpdate,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_editor),
 ):
     a = db.get(Assistant, body.assistant_id)
     if not a or a.user_id != user.user_id:

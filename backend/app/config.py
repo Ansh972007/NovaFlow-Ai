@@ -28,3 +28,5 @@ ADMIN_USER = os.getenv("NOVAFLOW_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("NOVAFLOW_ADMIN_PASSWORD", "admin123")
 
 EMBEDDING_MODELS = ["text-embedding-3-small", "text-embedding-ada-002"]
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
+MILVUS_URI = os.getenv("MILVUS_URI", "")

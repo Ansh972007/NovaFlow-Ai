@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL, UPLOAD_DIR
 from app.database import KnowledgeBase, KnowledgeChunk, KnowledgeFile
 from app.services.embeddings import embed_texts_sync, parse_embedding, rank_by_embedding
+from app.services.vector_store import delete_by_file, milvus_enabled, search_vectors, upsert_vectors
 
 
 def extract_text(path: Path) -> str:
@@ -47,8 +48,13 @@ def _embed_chunks(db: Session, kb: KnowledgeBase, chunk_rows: list[KnowledgeChun
         batch = chunk_rows[i : i + batch_size]
         texts = [(c.text or "")[:8000] for c in batch]
         vectors = embed_texts_sync(texts, model)
+        milvus_rows: list[tuple[int, int, int, list[float]]] = []
         for chunk, vec in zip(batch, vectors):
             chunk.embedding_json = json.dumps(vec)
+            if milvus_enabled() and chunk.id:
+                milvus_rows.append((chunk.id, chunk.knowledge_id, chunk.file_id, vec))
+        if milvus_rows:
+            upsert_vectors(milvus_rows)
     db.commit()
 
 
@@ -59,6 +65,7 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
         path = UPLOAD_DIR / record.file_path
         text = extract_text(path)
         pieces = chunk_text(text, chunk_size, chunk_overlap)
+        delete_by_file(record.id)
         db.query(KnowledgeChunk).filter(KnowledgeChunk.file_id == record.id).delete()
         chunk_rows: list[KnowledgeChunk] = []
         for i, piece in enumerate(pieces):
@@ -71,6 +78,8 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
             db.add(row)
             chunk_rows.append(row)
         db.commit()
+        for row in chunk_rows:
+            db.refresh(row)
         kb = db.get(KnowledgeBase, record.knowledge_id)
         if kb and chunk_rows:
             _embed_chunks(db, kb, chunk_rows)
@@ -121,6 +130,38 @@ def _token_search(db: Session, knowledge_id: int, query: str, limit: int) -> lis
     return data
 
 
+def _milvus_hits(db: Session, knowledge_id: int, query_vec: list[float], limit: int) -> list[dict]:
+    hits = search_vectors(knowledge_id, query_vec, limit)
+    if not hits:
+        return []
+    chunk_ids = [cid for cid, _ in hits]
+    score_map = {cid: score for cid, score in hits}
+    rows = (
+        db.query(KnowledgeChunk, KnowledgeFile)
+        .join(KnowledgeFile, KnowledgeChunk.file_id == KnowledgeFile.id)
+        .filter(
+            KnowledgeChunk.id.in_(chunk_ids),
+            KnowledgeChunk.knowledge_id == knowledge_id,
+            KnowledgeFile.status == 2,
+        )
+        .all()
+    )
+    data = []
+    for chunk, file in rows:
+        data.append(
+            {
+                "text": chunk.text,
+                "chunk_index": chunk.chunk_index,
+                "file_id": file.id,
+                "file_name": file.file_name,
+                "score": round(score_map.get(chunk.id, 0), 4),
+                "method": "milvus",
+            }
+        )
+    data.sort(key=lambda x: -x["score"])
+    return data[:limit]
+
+
 def _vector_search(db: Session, knowledge_id: int, query: str, limit: int, model: str) -> list[dict]:
     if not OPENAI_API_KEY:
         return []
@@ -128,6 +169,11 @@ def _vector_search(db: Session, knowledge_id: int, query: str, limit: int, model
     if not vectors:
         return []
     query_vec = vectors[0]
+
+    if milvus_enabled():
+        milvus_results = _milvus_hits(db, knowledge_id, query_vec, limit)
+        if milvus_results:
+            return milvus_results
 
     rows = (
         db.query(KnowledgeChunk, KnowledgeFile)

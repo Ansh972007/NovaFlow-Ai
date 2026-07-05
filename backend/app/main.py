@@ -7,6 +7,7 @@ from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR
 from app.crypto import md5_hash
 from app.database import SessionLocal, User, init_db
 from app.routers import analytics, assistant, chat_ws, knowledge, llm, user, workflow
+from app.services.vector_store import init_vector_store
 from app.schemas import ok
 
 API_PREFIX = "/api/v1"
@@ -29,10 +30,11 @@ async def lifespan(_app: FastAPI):
             print(f"[NovaFlow] Default admin: {ADMIN_USER} / (see NOVAFLOW_ADMIN_PASSWORD)")
     finally:
         db.close()
+    init_vector_store()
     yield
 
 
-app = FastAPI(title="NovaFlow API", version="0.7.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="0.8.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,4 +60,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "0.7.0"})
+    return ok({"name": "NovaFlow API", "version": "0.8.0"})

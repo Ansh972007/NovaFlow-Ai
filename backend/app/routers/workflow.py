@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import Assistant, KnowledgeBase, UsageEvent, Workflow, WorkflowRun, get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_editor
 from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
 from app.services.workflow import (
     TEMPLATES,
@@ -69,7 +69,7 @@ def workflow_info(workflow_id: str, db: Session = Depends(get_db), user=Depends(
 
 
 @router.post("/workflow")
-def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), user=Depends(require_editor)):
     tpl = TEMPLATES.get(body.template_id) or TEMPLATES["rag"]
     w = Workflow(
         name=body.name.strip() or tpl["name"],
@@ -85,7 +85,7 @@ def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), user=De
 
 
 @router.put("/workflow")
-def update_workflow(body: WorkflowUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def update_workflow(body: WorkflowUpdate, db: Session = Depends(get_db), user=Depends(require_editor)):
     w = db.get(Workflow, body.id)
     if not w or w.user_id != user.user_id:
         return fail(404, "Workflow not found")
@@ -106,7 +106,7 @@ def set_workflow_status(
     id: str = Body(..., alias="id"),
     status: int = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_editor),
 ):
     w = db.get(Workflow, id)
     if not w or w.user_id != user.user_id:
@@ -121,7 +121,7 @@ def set_workflow_status(
 def delete_workflow(
     workflow_id: str = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_editor),
 ):
     w = db.get(Workflow, workflow_id)
     if not w or w.user_id != user.user_id:
@@ -136,7 +136,7 @@ def delete_workflow(
 async def execute_workflow(
     body: WorkflowRunRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_editor),
 ):
     w = db.get(Workflow, body.workflow_id)
     if not w or w.user_id != user.user_id:

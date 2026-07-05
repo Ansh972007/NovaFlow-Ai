@@ -17,6 +17,7 @@ export default function WorkflowInspector({
   running,
   runResult,
   recentRuns,
+  readOnly = false,
 }) {
   const tabs = [
     { id: "configure", label: "Configure" },
@@ -90,6 +91,7 @@ export default function WorkflowInspector({
                             data: { knowledge_id: e.target.value ? Number(e.target.value) : null },
                           })
                         }
+                        disabled={readOnly}
                         className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-neutral-900/10"
                       >
                         <option value="">Select library…</option>
@@ -115,6 +117,7 @@ export default function WorkflowInspector({
                             data: { limit: Number(e.target.value) || 5 },
                           })
                         }
+                        disabled={readOnly}
                         className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
                       />
                     </label>
@@ -126,6 +129,7 @@ export default function WorkflowInspector({
                       <textarea
                         value={selected.data?.prompt || ""}
                         onChange={(e) => onUpdateNode(selected.id, { data: { prompt: e.target.value } })}
+                        disabled={readOnly}
                         rows={8}
                         className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-neutral-900/10"
                         placeholder="Instructions for the LLM step…"
@@ -139,6 +143,7 @@ export default function WorkflowInspector({
                       <input
                         value={selected.data?.label || ""}
                         onChange={(e) => onUpdateNode(selected.id, { data: { label: e.target.value } })}
+                        disabled={readOnly}
                         className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
                         placeholder={selected.type === "trigger" ? "User input" : "Response"}
                       />
@@ -169,7 +174,7 @@ export default function WorkflowInspector({
               <button
                 type="button"
                 onClick={onRun}
-                disabled={running || !runInput.trim()}
+                disabled={running || !runInput.trim() || readOnly}
                 className="btn-primary mt-4 w-full"
               >
                 {running ? "Running pipeline…" : "Run workflow"}
@@ -200,6 +205,9 @@ export default function WorkflowInspector({
                             <div className="min-w-0 flex-1 rounded-lg bg-white/70 px-3 py-2">
                               <span className="text-xs font-semibold capitalize text-neutral-800">{step.type}</span>
                               <span className="ml-2 text-[10px] text-emerald-600">{step.status}</span>
+                              {step.status === "running" && (
+                                <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                              )}
                             </div>
                           </motion.li>
                         ))}

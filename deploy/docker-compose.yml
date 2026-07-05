@@ -32,6 +32,25 @@ services:
       timeout: 3s
       retries: 5
 
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    container_name: novaflow-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_USE_EMBED: "true"
+      COMMON_STORAGETYPE: local
+    ports:
+      - "19530:19530"
+    volumes:
+      - novaflow_milvus:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 90s
+
   api:
     build:
       context: ../backend
@@ -51,6 +70,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      MILVUS_URI: http://milvus:19530
     volumes:
       - novaflow_data:/app/data
     depends_on:
@@ -58,7 +78,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      milvus:
+        condition: service_healthy
 
 volumes:
   novaflow_mysql:
   novaflow_data:
+  novaflow_milvus:

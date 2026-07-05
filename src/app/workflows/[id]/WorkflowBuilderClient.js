@@ -14,7 +14,7 @@ import { listKnowledge } from "@/lib/api/knowledge";
 import {
   deleteWorkflow,
   getWorkflowInfo,
-  runWorkflow,
+  runWorkflowWs,
   setWorkflowStatus,
   updateWorkflow,
 } from "@/lib/api/workflows";
@@ -103,15 +103,47 @@ export default function WorkflowBuilderClient({ workflowId }) {
   }
 
   async function handleRun() {
-    if (!runInput.trim()) return;
+    if (!runInput.trim() || readOnly) return;
     setRunning(true);
-    setRunResult(null);
+    setRunResult({ output: "", steps: [] });
     setError("");
     setInspectorTab("test");
+    const steps = [];
+    let streamOutput = "";
     try {
       await updateWorkflow({ id: workflowId, name: name.trim(), desc, graph });
-      const result = await runWorkflow(workflowId, runInput.trim());
-      setRunResult(result);
+      await runWorkflowWs(workflowId, runInput.trim(), {
+        onStep: (data) => {
+          if (data.phase === "done" && data.step) {
+            const idx = steps.findIndex((s) => s.node_id === data.step.node_id);
+            if (idx >= 0) steps[idx] = data.step;
+            else steps.push(data.step);
+            setRunResult({
+              output: streamOutput,
+              steps: [...steps],
+            });
+          } else if (data.phase === "start" && data.step) {
+            setRunResult((prev) => ({
+              output: prev?.output || streamOutput,
+              steps: [...steps, { ...data.step, status: "running" }],
+            }));
+          }
+        },
+        onStream: (token) => {
+          streamOutput += token;
+          setRunResult((prev) => ({
+            output: streamOutput,
+            steps: prev?.steps || [...steps],
+          }));
+        },
+        onComplete: (data) => {
+          setRunResult({
+            output: data.output,
+            steps: data.steps,
+            duration_ms: data.duration_ms,
+          });
+        },
+      });
       await load();
     } catch (err) {
       setError(err.message || "Run failed");
@@ -148,6 +180,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
     );
   }
 
+  const readOnly = user.role === "viewer";
+
   return (
     <div className="workflow-studio relative flex h-screen flex-col overflow-hidden">
       <WorkspaceLiveBackground active={saving || running} />
@@ -175,7 +209,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 setName(e.target.value);
                 setSaved(false);
               }}
-              disabled={loading}
+              disabled={loading || readOnly}
               className="min-w-0 flex-1 truncate bg-transparent font-serif text-sm tracking-tight outline-none sm:text-lg"
               placeholder="Workflow name"
             />
@@ -193,7 +227,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
               setDesc(e.target.value);
               setSaved(false);
             }}
-            disabled={loading}
+            disabled={loading || readOnly}
             className="mt-0.5 hidden w-full truncate bg-transparent text-[11px] text-neutral-500 outline-none md:block"
             placeholder="Add a short description…"
           />
@@ -209,41 +243,51 @@ export default function WorkflowBuilderClient({ workflowId }) {
               Saved
             </motion.span>
           )}
-          <button
-            type="button"
-            onClick={() => setInspectorTab("test")}
-            className="workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs lg:inline-flex"
-          >
-            Test
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || loading}
-            className="btn-primary !px-3 !py-1.5 text-xs"
-          >
-            {saving ? "…" : "Save"}
-          </button>
-          <button
-            type="button"
-            onClick={togglePublish}
-            className="workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs xl:inline-flex"
-          >
-            {status === 1 ? "Unpub" : "Publish"}
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="workspace-btn-ghost workspace-btn-danger !px-2.5 !py-1.5 text-xs"
-          >
-            Delete
-          </button>
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                onClick={() => setInspectorTab("test")}
+                className="workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs lg:inline-flex"
+              >
+                Test
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || loading}
+                className="btn-primary !px-3 !py-1.5 text-xs"
+              >
+                {saving ? "…" : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={togglePublish}
+                className="workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs xl:inline-flex"
+              >
+                {status === 1 ? "Unpub" : "Publish"}
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="workspace-btn-ghost workspace-btn-danger !px-2.5 !py-1.5 text-xs"
+              >
+                Delete
+              </button>
+            </>
+          )}
         </div>
       </motion.header>
 
       {error && (
         <div className="relative z-20 shrink-0 border-b border-red-100 bg-red-50/90 px-4 py-2 text-center text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {readOnly && (
+        <div className="relative z-20 shrink-0 border-b border-amber-100 bg-amber-50/90 px-4 py-2 text-center text-sm text-amber-800">
+          Viewer access — you can inspect workflows but cannot edit or run them.
         </div>
       )}
 
@@ -317,10 +361,14 @@ export default function WorkflowBuilderClient({ workflowId }) {
             ) : (
               <WorkflowCanvas
                 graph={graph}
-                onChange={(g) => {
-                  setGraph(g);
-                  setSaved(false);
-                }}
+                onChange={
+                  readOnly
+                    ? undefined
+                    : (g) => {
+                        setGraph(g);
+                        setSaved(false);
+                      }
+                }
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 flowing={running}
@@ -334,13 +382,14 @@ export default function WorkflowBuilderClient({ workflowId }) {
           onTabChange={setInspectorTab}
           selected={selected}
           knowledgeBases={libraries}
-          onUpdateNode={updateNode}
+          onUpdateNode={readOnly ? () => {} : updateNode}
           runInput={runInput}
           onRunInputChange={setRunInput}
           onRun={handleRun}
           running={running}
           runResult={runResult}
           recentRuns={recentRuns}
+          readOnly={readOnly}
         />
       </div>
     </div>

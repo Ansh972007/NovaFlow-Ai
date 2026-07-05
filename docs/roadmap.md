@@ -1,6 +1,13 @@
 # Roadmap
 
-## v0.7 — Embeddings, workflow chat, analytics charts, team roles (current)
+## v0.8 — Milvus, role enforcement, assistant analytics, run progress (current)
+
+- [x] Optional Milvus vector store (Docker + SQLite fallback)
+- [x] Viewer role enforcement on mutating APIs (`require_editor` / `require_admin`)
+- [x] Per-assistant analytics detail page (`/analytics/assistants/{id}`)
+- [x] Workflow run WebSocket progress events (`/workflow/run/ws/{id}`)
+
+## v0.7 — Embeddings, workflow chat, analytics charts, team roles (done)
 
 - [x] OpenAI vector embeddings on knowledge ingest (cosine search + keyword fallback)
 - [x] Workflow WebSocket chat for published workflows (`/workflow/chat/{id}`)
@@ -56,13 +63,6 @@
 - [x] Login / register UI
 - [x] API client + auth encryption
 - [x] Dashboard shell
-
-## v0.8 — Next
-
-- [ ] Milvus vector store (production scale)
-- [ ] Viewer role enforcement on mutating APIs
-- [ ] Per-assistant analytics detail page
-- [ ] Workflow run WebSocket progress events
 
 ## v1.0 — Launch
 

@@ -1,4 +1,15 @@
 import client from "./client";
+import { getApiBaseUrl } from "./config";
+
+function getWsUrl(path) {
+  const apiUrl = getApiBaseUrl();
+  const url = new URL(apiUrl);
+  const protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("nf_token") : null;
+  const tokenQuery = token ? `?t=${encodeURIComponent(token)}` : "";
+  return `${protocol}//${url.host}${path}${tokenQuery}`;
+}
 
 export const FLOW_TYPE_WORKFLOW = 10;
 
@@ -40,6 +51,56 @@ export async function deleteWorkflow(workflowId) {
 
 export async function runWorkflow(workflowId, input) {
   return client.post("/workflow/run", { workflow_id: workflowId, input });
+}
+
+export function runWorkflowWs(workflowId, input, handlers = {}) {
+  return new Promise((resolve, reject) => {
+    const url = getWsUrl(`/api/v1/workflow/run/ws/${workflowId}`);
+    const ws = new WebSocket(url);
+    let result = null;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ input }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "error") {
+          handlers.onError?.(data.message || "Run failed");
+          reject(new Error(data.message || "Run failed"));
+          ws.close();
+          return;
+        }
+        if (data.type === "step") {
+          handlers.onStep?.(data);
+        } else if (data.type === "stream") {
+          const token = data.message?.content || "";
+          handlers.onStream?.(token, data);
+        } else if (data.type === "complete") {
+          result = data;
+          handlers.onComplete?.(data);
+        } else if (data.type === "close") {
+          ws.close();
+          resolve(result);
+        }
+      } catch (err) {
+        handlers.onError?.(err.message);
+        reject(err);
+        ws.close();
+      }
+    };
+
+    ws.onerror = () => {
+      const msg = "WebSocket connection failed";
+      handlers.onError?.(msg);
+      reject(new Error(msg));
+    };
+
+    ws.onclose = () => {
+      if (result) resolve(result);
+    };
+  });
 }
 
 export async function getOnlineWorkflows() {
