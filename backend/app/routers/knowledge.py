@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import EMBEDDING_MODELS
 from app.database import KnowledgeBase, KnowledgeFile, get_db
-from app.deps import get_current_user, require_editor
+from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import KnowledgeCreate, ProcessFiles, fail, ok
 from app.services.knowledge import kb_upload_dir, process_file_record, search_chunks
 
@@ -32,9 +32,9 @@ def list_knowledge(
     page_size: int = Query(50, alias="page_size"),
     name: str = Query(""),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx=Depends(get_workspace_ctx),
 ):
-    q = db.query(KnowledgeBase).filter(KnowledgeBase.user_id == user.user_id)
+    q = db.query(KnowledgeBase).filter(KnowledgeBase.workspace_id == ctx.workspace_id)
     if name:
         q = q.filter(KnowledgeBase.name.contains(name))
     total = q.count()
@@ -48,13 +48,14 @@ def embedding_param():
 
 
 @router.post("/knowledge/create")
-def create_knowledge(body: KnowledgeCreate, db: Session = Depends(get_db), user=Depends(require_editor)):
+def create_knowledge(body: KnowledgeCreate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
     kb = KnowledgeBase(
         name=body.name.strip(),
         description=body.description or "",
         model=body.model or EMBEDDING_MODELS[0],
         type=body.type,
-        user_id=user.user_id,
+        user_id=ctx.user.user_id,
+        workspace_id=ctx.workspace_id,
     )
     db.add(kb)
     db.commit()
@@ -69,10 +70,10 @@ def file_list(
     page_num: int = Query(1),
     page_size: int = Query(50),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx=Depends(get_workspace_ctx),
 ):
     kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.user_id != user.user_id:
+    if not kb or kb.workspace_id != ctx.workspace_id:
         return fail(404, "Knowledge base not found")
     rows = (
         db.query(KnowledgeFile)
@@ -91,7 +92,7 @@ def file_list(
         }
         for f in rows
     ]
-    return ok({"data": data, "writeable": True, "total": len(data)})
+    return ok({"data": data, "writeable": ctx.role != "viewer", "total": len(data)})
 
 
 @router.post("/knowledge/upload/{knowledge_id}")
@@ -99,10 +100,10 @@ async def upload_file(
     knowledge_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user=Depends(require_editor),
+    ctx=Depends(require_workspace_editor),
 ):
     kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.user_id != user.user_id:
+    if not kb or kb.workspace_id != ctx.workspace_id:
         return fail(404, "Knowledge base not found")
     dest_dir = kb_upload_dir(knowledge_id)
     safe_name = file.filename or "upload.bin"
@@ -123,9 +124,9 @@ async def upload_file(
 
 
 @router.post("/knowledge/process")
-def process_files(body: ProcessFiles, db: Session = Depends(get_db), user=Depends(require_editor)):
+def process_files(body: ProcessFiles, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
     kb = db.get(KnowledgeBase, body.knowledge_id)
-    if not kb or kb.user_id != user.user_id:
+    if not kb or kb.workspace_id != ctx.workspace_id:
         return fail(404, "Knowledge base not found")
     for item in body.file_list:
         fp = item.get("file_path")
@@ -146,10 +147,10 @@ def get_chunks(
     page: int = Query(1),
     limit: int = Query(10),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx=Depends(get_workspace_ctx),
 ):
     kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.user_id != user.user_id:
+    if not kb or kb.workspace_id != ctx.workspace_id:
         return fail(404, "Knowledge base not found")
     data, total = search_chunks(db, knowledge_id, keyword, page, limit)
     return ok({"data": data, "total": total})

@@ -1,12 +1,17 @@
 # Roadmap
 
-## v1.2 — SSO / OAuth (current)
+## v1.3 — Multi-tenant workspaces (current)
 
-- [x] Google OAuth sign-in
-- [x] Microsoft (Azure AD) OAuth sign-in
-- [x] OAuth callback page + login buttons when configured
-- [x] User model: email, oauth_provider, oauth_subject
-- [x] Settings → SSO status for admins
+- [x] Workspace model with members (admin / editor / viewer)
+- [x] Resources scoped by `workspace_id` (assistants, knowledge, workflows, analytics)
+- [x] Workspace API: list, create, invite members, role management
+- [x] `X-Workspace-Id` header + workspace switcher in UI
+- [x] WebSocket chat/run scoped to active workspace
+- [x] Legacy data migration to personal workspaces on startup
+
+## v1.2 — SSO / OAuth (done)
+
+- [x] Google + Microsoft OAuth, callback page, SSO status in Settings
 
 ## v1.1 — Admin operations (done)
 
@@ -20,9 +25,8 @@
 
 | Feature | Est. effort |
 |---------|-------------|
-| Multi-tenant workspaces | 1–2 weeks |
 | Advanced workflow nodes | 1 week |
 | Multiple model providers + key vault | 3–5 days |
 | Fine-tune & evaluation | 2–3 weeks |
 
-**~3–5 weeks part-time** to full Bisheng-class parity from v1.2.
+**~2–4 weeks part-time** to full Bisheng-class parity from v1.3.

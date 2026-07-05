@@ -42,6 +42,10 @@ client.interceptors.request.use((config) => {
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const wid = localStorage.getItem("nf_workspace_id");
+    if (wid) {
+      config.headers["X-Workspace-Id"] = wid;
+    }
   }
   return config;
 });

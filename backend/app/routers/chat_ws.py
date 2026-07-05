@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.crypto import decode_token
 from app.database import Assistant, SessionLocal, User, Workflow
 from app.deps import effective_role
+from app.services.tenancy import ensure_personal_workspace, get_membership
 from app.services.knowledge import rag_context_for_assistant
 from app.services.llm import stream_chat
 from app.services.workflow import log_usage, resolve_workflow_llm_messages, run_workflow_with_progress
@@ -24,6 +25,26 @@ def get_user_id_from_ws(websocket: WebSocket) -> int | None:
     return int(payload["sub"])
 
 
+def get_ws_workspace(db: Session, websocket: WebSocket, user_id: int) -> tuple[int, str] | None:
+    raw = websocket.query_params.get("workspace_id")
+    if raw:
+        try:
+            wid = int(raw)
+        except ValueError:
+            return None
+        membership = get_membership(db, user_id, wid)
+        if not membership:
+            return None
+        return wid, membership.role or "editor"
+
+    user = db.get(User, user_id)
+    if not user:
+        return None
+    ws = ensure_personal_workspace(db, user)
+    membership = get_membership(db, user_id, ws.id)
+    return ws.id, (membership.role if membership else "editor")
+
+
 def _parse_user_message(payload: dict) -> str:
     return (
         payload.get("inputs", {}).get("input")
@@ -33,7 +54,16 @@ def _parse_user_message(payload: dict) -> str:
     )
 
 
-async def _stream_reply(websocket: WebSocket, db: Session, user_id: int, resource_id: str, event_type: str, system: str, user_msg: str):
+async def _stream_reply(
+    websocket: WebSocket,
+    db: Session,
+    user_id: int,
+    resource_id: str,
+    event_type: str,
+    system: str,
+    user_msg: str,
+    workspace_id: int | None = None,
+):
     await websocket.send_json({"type": "start"})
     buffer = ""
     async for token in stream_chat(system, user_msg):
@@ -44,7 +74,7 @@ async def _stream_reply(websocket: WebSocket, db: Session, user_id: int, resourc
         await asyncio.sleep(0)
     await websocket.send_json({"type": "end", "message": {"content": buffer}})
     await websocket.send_json({"type": "close"})
-    log_usage(db, user_id, event_type, resource_id, {"chars": len(buffer)})
+    log_usage(db, user_id, event_type, resource_id, {"chars": len(buffer)}, workspace_id)
 
 
 @router.websocket("/assistant/chat/{assistant_id}")
@@ -58,8 +88,15 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
 
     db: Session = SessionLocal()
     try:
+        ws_ctx = get_ws_workspace(db, websocket, user_id)
+        if not ws_ctx:
+            await websocket.send_json({"type": "error", "category": "error", "message": "Invalid workspace"})
+            await websocket.close()
+            return
+        wid, _role = ws_ctx
+
         assistant = db.get(Assistant, assistant_id)
-        if not assistant or assistant.user_id != user_id:
+        if not assistant or assistant.workspace_id != wid:
             await websocket.send_json({"type": "error", "category": "error", "message": "Assistant not found"})
             await websocket.close()
             return
@@ -102,7 +139,14 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     f"--- Context ---\n{rag}\n--- End context ---"
                 )
             await _stream_reply(
-                websocket, db, user_id, assistant_id, "chat", system_prompt, str(user_msg).strip()
+                websocket,
+                db,
+                user_id,
+                assistant_id,
+                "chat",
+                system_prompt,
+                str(user_msg).strip(),
+                wid,
             )
     except WebSocketDisconnect:
         pass
@@ -121,8 +165,15 @@ async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
 
     db: Session = SessionLocal()
     try:
+        ws_ctx = get_ws_workspace(db, websocket, user_id)
+        if not ws_ctx:
+            await websocket.send_json({"type": "error", "category": "error", "message": "Invalid workspace"})
+            await websocket.close()
+            return
+        wid, _role = ws_ctx
+
         workflow = db.get(Workflow, workflow_id)
-        if not workflow or workflow.user_id != user_id:
+        if not workflow or workflow.workspace_id != wid:
             await websocket.send_json({"type": "error", "category": "error", "message": "Workflow not found"})
             await websocket.close()
             return
@@ -163,7 +214,14 @@ async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
                 db, workflow, user_id, str(user_msg).strip()
             )
             await _stream_reply(
-                websocket, db, user_id, workflow.id, "workflow_chat", system, llm_user
+                websocket,
+                db,
+                user_id,
+                workflow.id,
+                "workflow_chat",
+                system,
+                llm_user,
+                wid,
             )
     except WebSocketDisconnect:
         pass
@@ -182,18 +240,25 @@ async def workflow_run_ws(websocket: WebSocket, workflow_id: str):
 
     db: Session = SessionLocal()
     try:
+        ws_ctx = get_ws_workspace(db, websocket, user_id)
+        if not ws_ctx:
+            await websocket.send_json({"type": "error", "message": "Invalid workspace"})
+            await websocket.close()
+            return
+        wid, ws_role = ws_ctx
+
         user = db.get(User, user_id)
         if not user or user.delete:
             await websocket.send_json({"type": "error", "message": "Unauthorized"})
             await websocket.close()
             return
-        if effective_role(user) == "viewer":
+        if ws_role == "viewer" or effective_role(user) == "viewer":
             await websocket.send_json({"type": "error", "message": "Viewer access is read-only"})
             await websocket.close()
             return
 
         workflow = db.get(Workflow, workflow_id)
-        if not workflow or workflow.user_id != user_id:
+        if not workflow or workflow.workspace_id != wid:
             await websocket.send_json({"type": "error", "message": "Workflow not found"})
             await websocket.close()
             return
@@ -215,7 +280,7 @@ async def workflow_run_ws(websocket: WebSocket, workflow_id: str):
         async def emit(event: dict):
             await websocket.send_json(event)
 
-        await run_workflow_with_progress(db, workflow, user_id, user_input, emit)
+        await run_workflow_with_progress(db, workflow, user_id, user_input, emit, workspace_id=wid)
         await websocket.send_json({"type": "close"})
     except WebSocketDisconnect:
         pass

@@ -15,7 +15,8 @@ from app.config import (
     MICROSOFT_CLIENT_SECRET,
     OAUTH_REDIRECT_BASE,
 )
-from app.crypto import create_token, md5_hash
+from app.crypto import md5_hash
+from app.services.tenancy import ensure_personal_workspace
 from app.database import User
 from sqlalchemy.orm import Session
 
@@ -169,6 +170,7 @@ def find_or_create_oauth_user(
         if email and not user.email:
             user.email = email
             db.commit()
+        ensure_personal_workspace(db, user)
         return user
 
     if email:
@@ -177,6 +179,7 @@ def find_or_create_oauth_user(
             existing.oauth_provider = provider
             existing.oauth_subject = sub
             db.commit()
+            ensure_personal_workspace(db, existing)
             return existing
 
     username = _unique_username(db, email, name, sub)
@@ -191,6 +194,7 @@ def find_or_create_oauth_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    ensure_personal_workspace(db, user)
     return user
 
 

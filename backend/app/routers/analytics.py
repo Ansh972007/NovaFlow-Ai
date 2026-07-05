@@ -8,41 +8,41 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import Assistant, KnowledgeBase, UsageEvent, Workflow, WorkflowRun, User, get_db
-from app.deps import get_current_user, require_admin
+from app.deps import get_workspace_ctx, require_admin
 from app.schemas import ok, fail
 
 router = APIRouter(tags=["Analytics"])
 
 
 @router.get("/analytics/summary")
-def analytics_summary(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    uid = user.user_id
+def analytics_summary(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    wid = ctx.workspace_id
     since = datetime.utcnow() - timedelta(days=7)
 
-    assistants_total = db.query(Assistant).filter(Assistant.user_id == uid).count()
-    assistants_online = db.query(Assistant).filter(Assistant.user_id == uid, Assistant.status == 1).count()
-    knowledge_total = db.query(KnowledgeBase).filter(KnowledgeBase.user_id == uid).count()
-    workflows_total = db.query(Workflow).filter(Workflow.user_id == uid).count()
-    workflows_published = db.query(Workflow).filter(Workflow.user_id == uid, Workflow.status == 1).count()
-    workflow_runs = db.query(WorkflowRun).filter(WorkflowRun.user_id == uid).count()
+    assistants_total = db.query(Assistant).filter(Assistant.workspace_id == wid).count()
+    assistants_online = db.query(Assistant).filter(Assistant.workspace_id == wid, Assistant.status == 1).count()
+    knowledge_total = db.query(KnowledgeBase).filter(KnowledgeBase.workspace_id == wid).count()
+    workflows_total = db.query(Workflow).filter(Workflow.workspace_id == wid).count()
+    workflows_published = db.query(Workflow).filter(Workflow.workspace_id == wid, Workflow.status == 1).count()
+    workflow_runs = db.query(WorkflowRun).filter(WorkflowRun.workspace_id == wid).count()
     workflow_runs_7d = (
-        db.query(WorkflowRun).filter(WorkflowRun.user_id == uid, WorkflowRun.create_time >= since).count()
+        db.query(WorkflowRun).filter(WorkflowRun.workspace_id == wid, WorkflowRun.create_time >= since).count()
     )
     chat_events_7d = (
         db.query(UsageEvent)
-        .filter(UsageEvent.user_id == uid, UsageEvent.event_type == "chat", UsageEvent.create_time >= since)
+        .filter(UsageEvent.workspace_id == wid, UsageEvent.event_type == "chat", UsageEvent.create_time >= since)
         .count()
     )
     workflow_chat_7d = (
         db.query(UsageEvent)
-        .filter(UsageEvent.user_id == uid, UsageEvent.event_type == "workflow_chat", UsageEvent.create_time >= since)
+        .filter(UsageEvent.workspace_id == wid, UsageEvent.event_type == "workflow_chat", UsageEvent.create_time >= since)
         .count()
     )
 
     recent_runs = (
         db.query(WorkflowRun, Workflow)
         .join(Workflow, WorkflowRun.workflow_id == Workflow.id)
-        .filter(WorkflowRun.user_id == uid)
+        .filter(WorkflowRun.workspace_id == wid)
         .order_by(WorkflowRun.create_time.desc())
         .limit(5)
         .all()
@@ -73,9 +73,9 @@ def analytics_summary(db: Session = Depends(get_db), user=Depends(get_current_us
 
 
 @router.get("/analytics/timeseries")
-def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     days = max(1, min(days, 30))
-    uid = user.user_id
+    wid = ctx.workspace_id
     start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
 
     buckets: dict[str, dict] = {}
@@ -85,7 +85,7 @@ def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), user=Depe
 
     events = (
         db.query(UsageEvent)
-        .filter(UsageEvent.user_id == uid, UsageEvent.create_time >= start)
+        .filter(UsageEvent.workspace_id == wid, UsageEvent.create_time >= start)
         .all()
     )
     for ev in events:
@@ -101,7 +101,7 @@ def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), user=Depe
 
     runs = (
         db.query(WorkflowRun)
-        .filter(WorkflowRun.user_id == uid, WorkflowRun.create_time >= start)
+        .filter(WorkflowRun.workspace_id == wid, WorkflowRun.create_time >= start)
         .all()
     )
     for run in runs:
@@ -116,14 +116,14 @@ def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), user=Depe
 
 
 @router.get("/analytics/assistants")
-def analytics_assistants(days: int = 7, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    uid = user.user_id
+def analytics_assistants(days: int = 7, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    wid = ctx.workspace_id
     since = datetime.utcnow() - timedelta(days=max(1, min(days, 30)))
 
     rows = (
         db.query(UsageEvent)
         .filter(
-            UsageEvent.user_id == uid,
+            UsageEvent.workspace_id == wid,
             UsageEvent.event_type.in_(["chat", "workflow_chat"]),
             UsageEvent.create_time >= since,
         )
@@ -136,11 +136,11 @@ def analytics_assistants(days: int = 7, db: Session = Depends(get_db), user=Depe
 
     assistants = {
         a.id: a.name
-        for a in db.query(Assistant).filter(Assistant.user_id == uid).all()
+        for a in db.query(Assistant).filter(Assistant.workspace_id == wid).all()
     }
     workflows = {
         w.id: w.name
-        for w in db.query(Workflow).filter(Workflow.user_id == uid).all()
+        for w in db.query(Workflow).filter(Workflow.workspace_id == wid).all()
     }
 
     items = []
@@ -157,11 +157,11 @@ def analytics_assistant_detail(
     assistant_id: str,
     days: int = 7,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx=Depends(get_workspace_ctx),
 ):
-    uid = user.user_id
+    wid = ctx.workspace_id
     assistant = db.get(Assistant, assistant_id)
-    if not assistant or assistant.user_id != uid:
+    if not assistant or assistant.workspace_id != wid:
         return fail(404, "Assistant not found")
 
     days = max(1, min(days, 30))
@@ -175,7 +175,7 @@ def analytics_assistant_detail(
     events = (
         db.query(UsageEvent)
         .filter(
-            UsageEvent.user_id == uid,
+            UsageEvent.workspace_id == wid,
             UsageEvent.event_type == "chat",
             UsageEvent.resource_id == assistant_id,
             UsageEvent.create_time >= start,

@@ -115,10 +115,18 @@ def _topo_order(graph: dict) -> list[dict]:
     return order
 
 
-def log_usage(db: Session, user_id: int, event_type: str, resource_id: str, meta: dict | None = None):
+def log_usage(
+    db: Session,
+    user_id: int,
+    event_type: str,
+    resource_id: str,
+    meta: dict | None = None,
+    workspace_id: int | None = None,
+):
     db.add(
         UsageEvent(
             user_id=user_id,
+            workspace_id=workspace_id,
             event_type=event_type,
             resource_id=resource_id,
             meta=json.dumps(meta or {}),
@@ -127,20 +135,23 @@ def log_usage(db: Session, user_id: int, event_type: str, resource_id: str, meta
     db.commit()
 
 
-async def run_workflow(db: Session, workflow: Workflow, user_id: int, user_input: str) -> dict[str, Any]:
+async def run_workflow(
+    db: Session, workflow: Workflow, user_id: int, user_input: str, workspace_id: int | None = None
+) -> dict[str, Any]:
     start = time.perf_counter()
     try:
         graph = json.loads(workflow.graph_json or "{}")
     except json.JSONDecodeError:
         graph = {"nodes": [], "edges": []}
 
-    context, steps = await _execute_graph(db, user_id, graph, user_input.strip())
+    context, steps = await _execute_graph(db, user_id, graph, user_input.strip(), workspace_id=workspace_id)
     duration_ms = int((time.perf_counter() - start) * 1000)
     final_output = context["output"] or context["input"]
 
     run = WorkflowRun(
         workflow_id=workflow.id,
         user_id=user_id,
+        workspace_id=workspace_id or workflow.workspace_id,
         input_text=user_input[:4000],
         output_text=final_output[:8000],
         status=1,
@@ -148,7 +159,7 @@ async def run_workflow(db: Session, workflow: Workflow, user_id: int, user_input
         steps_json=json.dumps(steps),
     )
     db.add(run)
-    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms})
+    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms}, workspace_id or workflow.workspace_id)
     db.commit()
 
     return {
@@ -166,6 +177,7 @@ async def run_workflow_with_progress(
     user_id: int,
     user_input: str,
     emit: EmitFn,
+    workspace_id: int | None = None,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -178,7 +190,7 @@ async def run_workflow_with_progress(
             await emit(event)
 
     context, steps = await _execute_graph(
-        db, user_id, graph, user_input.strip(), emit=_emit, stream_llm=bool(emit)
+        db, user_id, graph, user_input.strip(), emit=_emit, stream_llm=bool(emit), workspace_id=workspace_id
     )
     duration_ms = int((time.perf_counter() - start) * 1000)
     final_output = context["output"] or context["input"]
@@ -186,6 +198,7 @@ async def run_workflow_with_progress(
     run = WorkflowRun(
         workflow_id=workflow.id,
         user_id=user_id,
+        workspace_id=workspace_id or workflow.workspace_id,
         input_text=user_input[:4000],
         output_text=final_output[:8000],
         status=1,
@@ -193,7 +206,7 @@ async def run_workflow_with_progress(
         steps_json=json.dumps(steps),
     )
     db.add(run)
-    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms})
+    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms}, workspace_id or workflow.workspace_id)
     db.commit()
 
     result = {
@@ -216,6 +229,7 @@ async def _execute_graph(
     skip_llm: bool = False,
     stream_llm: bool = False,
     emit: EmitFn = None,
+    workspace_id: int | None = None,
 ) -> tuple[dict, list[dict]]:
     context = {"input": user_input, "retrieved": "", "output": ""}
     steps: list[dict] = []
@@ -240,7 +254,7 @@ async def _execute_graph(
             hits = []
             if kid:
                 kb = db.get(KnowledgeBase, kid)
-                if kb and kb.user_id == user_id:
+                if kb and kb.user_id == user_id and (not workspace_id or kb.workspace_id == workspace_id):
                     hits = search_chunks_semantic(db, kid, context["input"], limit)
             parts = []
             for i, hit in enumerate(hits, 1):

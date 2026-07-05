@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Logo from "./Logo";
+import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import { logout } from "@/lib/api/auth";
 
 export default function AppHeader({ user, links = [] }) {
@@ -45,6 +46,7 @@ export default function AppHeader({ user, links = [] }) {
           ))}
           {user ? (
             <>
+              <WorkspaceSwitcher />
               <span className="hidden rounded-full border border-border px-3 py-1.5 text-xs text-muted lg:inline">
                 {user.user_name}
               </span>

@@ -1,14 +1,11 @@
 import client from "./client";
-import { getApiBaseUrl } from "./config";
+import { getApiBaseUrl, getWsQueryString } from "./config";
 
 function getWsUrl(path) {
   const apiUrl = getApiBaseUrl();
   const url = new URL(apiUrl);
   const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("nf_token") : null;
-  const tokenQuery = token ? `?t=${encodeURIComponent(token)}` : "";
-  return `${protocol}//${url.host}${path}${tokenQuery}`;
+  return `${protocol}//${url.host}${path}${getWsQueryString()}`;
 }
 
 export const FLOW_TYPE_WORKFLOW = 10;

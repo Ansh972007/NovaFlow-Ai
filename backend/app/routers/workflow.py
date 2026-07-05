@@ -1,11 +1,11 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.database import Assistant, KnowledgeBase, UsageEvent, Workflow, WorkflowRun, get_db
-from app.deps import get_current_user, require_editor
+from app.database import Workflow, WorkflowRun, get_db
+from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
 from app.services.workflow import (
     TEMPLATES,
@@ -22,9 +22,9 @@ def list_workflows(
     limit: int = Query(50, ge=1, le=100),
     status: int | None = Query(None),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx=Depends(get_workspace_ctx),
 ):
-    q = db.query(Workflow).filter(Workflow.user_id == user.user_id)
+    q = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id)
     if status is not None:
         q = q.filter(Workflow.status == status)
     total = q.count()
@@ -33,7 +33,7 @@ def list_workflows(
 
 
 @router.get("/workflow/templates")
-def workflow_templates(user=Depends(get_current_user)):
+def workflow_templates(ctx=Depends(get_workspace_ctx)):
     data = [
         {"id": tid, "name": tpl["name"], "desc": tpl["desc"], "graph": tpl["graph"]}
         for tid, tpl in TEMPLATES.items()
@@ -42,9 +42,9 @@ def workflow_templates(user=Depends(get_current_user)):
 
 
 @router.get("/workflow/info/{workflow_id}")
-def workflow_info(workflow_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def workflow_info(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     w = db.get(Workflow, workflow_id)
-    if not w or w.user_id != user.user_id:
+    if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
     data = workflow_dict(w)
     runs = (
@@ -69,13 +69,14 @@ def workflow_info(workflow_id: str, db: Session = Depends(get_db), user=Depends(
 
 
 @router.post("/workflow")
-def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), user=Depends(require_editor)):
+def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
     tpl = TEMPLATES.get(body.template_id) or TEMPLATES["rag"]
     w = Workflow(
         name=body.name.strip() or tpl["name"],
         desc=body.desc or tpl.get("desc", ""),
         graph_json=json.dumps(tpl["graph"]),
-        user_id=user.user_id,
+        user_id=ctx.user.user_id,
+        workspace_id=ctx.workspace_id,
         status=0,
     )
     db.add(w)
@@ -85,9 +86,9 @@ def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), user=De
 
 
 @router.put("/workflow")
-def update_workflow(body: WorkflowUpdate, db: Session = Depends(get_db), user=Depends(require_editor)):
+def update_workflow(body: WorkflowUpdate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
     w = db.get(Workflow, body.id)
-    if not w or w.user_id != user.user_id:
+    if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
     if body.name is not None:
         w.name = body.name.strip()
@@ -106,10 +107,10 @@ def set_workflow_status(
     id: str = Body(..., alias="id"),
     status: int = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(require_editor),
+    ctx=Depends(require_workspace_editor),
 ):
     w = db.get(Workflow, id)
-    if not w or w.user_id != user.user_id:
+    if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
     w.status = status
     w.update_time = datetime.utcnow()
@@ -121,10 +122,10 @@ def set_workflow_status(
 def delete_workflow(
     workflow_id: str = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(require_editor),
+    ctx=Depends(require_workspace_editor),
 ):
     w = db.get(Workflow, workflow_id)
-    if not w or w.user_id != user.user_id:
+    if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
     db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).delete()
     db.delete(w)
@@ -136,12 +137,12 @@ def delete_workflow(
 async def execute_workflow(
     body: WorkflowRunRequest,
     db: Session = Depends(get_db),
-    user=Depends(require_editor),
+    ctx=Depends(require_workspace_editor),
 ):
     w = db.get(Workflow, body.workflow_id)
-    if not w or w.user_id != user.user_id:
+    if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
-    result = await run_workflow(db, w, user.user_id, body.input.strip())
+    result = await run_workflow(db, w, ctx.user.user_id, body.input.strip(), ctx.workspace_id)
     return ok(result)
 
 
@@ -149,11 +150,11 @@ async def execute_workflow(
 def online_workflows(
     limit: int = Query(50),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx=Depends(get_workspace_ctx),
 ):
     rows = (
         db.query(Workflow)
-        .filter(Workflow.user_id == user.user_id, Workflow.status == 1)
+        .filter(Workflow.workspace_id == ctx.workspace_id, Workflow.status == 1)
         .order_by(Workflow.update_time.desc())
         .limit(limit)
         .all()

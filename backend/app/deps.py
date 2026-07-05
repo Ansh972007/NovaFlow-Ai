@@ -4,7 +4,8 @@ from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.crypto import decode_token
-from app.database import User, get_db
+from app.database import User, Workspace, get_db
+from app.services.tenancy import WorkspaceCtx, ensure_personal_workspace, get_membership
 
 ROLE_RANK = {"viewer": 0, "editor": 1, "admin": 2}
 
@@ -52,6 +53,32 @@ def get_optional_user(
     return db.get(User, int(payload["sub"]))
 
 
+def get_workspace_ctx(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    x_workspace_id: Optional[int] = Header(None, alias="X-Workspace-Id"),
+) -> WorkspaceCtx:
+    wid = x_workspace_id
+    if not wid:
+        ws = ensure_personal_workspace(db, user)
+        wid = ws.id
+    else:
+        ws = db.get(Workspace, wid)
+        if not ws:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
+    membership = get_membership(db, user.user_id, wid)
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    return WorkspaceCtx(
+        user=user,
+        workspace_id=wid,
+        role=membership.role or "editor",
+        workspace=ws,
+    )
+
+
 def require_min_role(min_role: str) -> Callable:
     def _dep(user: User = Depends(get_current_user)) -> User:
         if ROLE_RANK.get(effective_role(user), 0) < ROLE_RANK.get(min_role, 1):
@@ -62,6 +89,18 @@ def require_min_role(min_role: str) -> Callable:
         return user
 
     return _dep
+
+
+def require_workspace_editor(ctx: WorkspaceCtx = Depends(get_workspace_ctx)) -> WorkspaceCtx:
+    if ROLE_RANK.get(ctx.role, 0) < ROLE_RANK.get("editor", 1):
+        raise HTTPException(status_code=403, detail="Editor access required in this workspace")
+    return ctx
+
+
+def require_workspace_admin(ctx: WorkspaceCtx = Depends(get_workspace_ctx)) -> WorkspaceCtx:
+    if ROLE_RANK.get(ctx.role, 0) < ROLE_RANK.get("admin", 1):
+        raise HTTPException(status_code=403, detail="Workspace admin access required")
+    return ctx
 
 
 require_editor = require_min_role("editor")

@@ -43,6 +43,7 @@ class Assistant(Base):
     prompt = Column(Text, nullable=False)
     logo = Column(String(255), default="")
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     status = Column(Integer, default=0)  # 0 offline, 1 online
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -57,6 +58,7 @@ class KnowledgeBase(Base):
     model = Column(String(120), default="text-embedding-3-small")
     type = Column(Integer, default=0)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -105,6 +107,7 @@ class Workflow(Base):
     desc = Column(String(500), default="")
     graph_json = Column(Text, default="{}")
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     status = Column(Integer, default=0)  # 0 draft, 1 published
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -116,6 +119,7 @@ class WorkflowRun(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     input_text = Column(Text, default="")
     output_text = Column(Text, default="")
     steps_json = Column(Text, default="[]")
@@ -129,6 +133,7 @@ class UsageEvent(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     event_type = Column(String(32), nullable=False)
     resource_id = Column(String(64), default="")
     meta = Column(Text, default="{}")
@@ -143,6 +148,26 @@ class WorkspaceSetting(Base):
     embedding_model = Column(String(120), default="")
     openai_base_url = Column(String(255), default="")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False)
+    slug = Column(String(64), unique=True, nullable=False, index=True)
+    owner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), primary_key=True)
+    role = Column(String(16), default="editor")  # admin | editor | viewer
+    create_time = Column(DateTime, default=datetime.utcnow)
 
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
@@ -175,10 +200,31 @@ def migrate_schema():
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
 
+    workspace_cols = {
+        "assistants": "ALTER TABLE assistants ADD COLUMN workspace_id INTEGER",
+        "knowledge_bases": "ALTER TABLE knowledge_bases ADD COLUMN workspace_id INTEGER",
+        "workflows": "ALTER TABLE workflows ADD COLUMN workspace_id INTEGER",
+        "workflow_runs": "ALTER TABLE workflow_runs ADD COLUMN workspace_id INTEGER",
+        "usage_events": "ALTER TABLE usage_events ADD COLUMN workspace_id INTEGER",
+    }
+    for table, ddl in workspace_cols.items():
+        if table in insp.get_table_names():
+            cols = {c["name"] for c in insp.get_columns(table)}
+            if "workspace_id" not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)
     migrate_schema()
+    db = SessionLocal()
+    try:
+        from app.services.tenancy import migrate_legacy_workspaces
+
+        migrate_legacy_workspaces(db)
+    finally:
+        db.close()
 
 
 def get_db():

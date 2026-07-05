@@ -1,16 +1,11 @@
 import { FLOW_TYPE } from "@/lib/api/apps";
-import { getApiBaseUrl } from "@/lib/api/config";
+import { getApiBaseUrl, getWsQueryString } from "@/lib/api/config";
 
 function getWsUrl(path) {
   const apiUrl = getApiBaseUrl();
   const url = new URL(apiUrl);
   const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("nf_token")
-      : null;
-  const tokenQuery = token ? `?t=${encodeURIComponent(token)}` : "";
-  return `${protocol}//${url.host}${path}${tokenQuery}`;
+  return `${protocol}//${url.host}${path}${getWsQueryString()}`;
 }
 
 function buildInitPayload(app, chatId) {

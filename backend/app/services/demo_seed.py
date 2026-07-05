@@ -8,6 +8,7 @@ from app.config import DATA_DIR
 from app.crypto import md5_hash
 from app.database import Assistant, AssistantKnowledge, KnowledgeBase, KnowledgeFile, User, Workflow
 from app.services.knowledge import kb_upload_dir, process_file_record
+from app.services.tenancy import ensure_personal_workspace
 from app.services.workflow import DEFAULT_RAG_GRAPH
 
 DEMO_MARKER = DATA_DIR / ".demo_seeded"
@@ -58,13 +59,20 @@ def seed_demo_data(db: Session) -> bool:
     if not admin:
         return False
 
+    ws = ensure_personal_workspace(db, admin)
+    wid = ws.id
+
     if not db.query(User).filter(User.user_name == "demo").first():
-        db.add(User(user_name="demo", password=md5_hash("demo123"), role="viewer"))
+        demo_user = User(user_name="demo", password=md5_hash("demo123"), role="viewer")
+        db.add(demo_user)
+        db.flush()
+        ensure_personal_workspace(db, demo_user)
 
     kb = KnowledgeBase(
         name="NovaFlow Handbook",
         description="Sample product docs for RAG demos",
         user_id=admin.user_id,
+        workspace_id=wid,
     )
     db.add(kb)
     db.flush()
@@ -93,6 +101,7 @@ def seed_demo_data(db: Session) -> bool:
             "available. Be concise and friendly. If unsure, say so and suggest contacting support."
         ),
         user_id=admin.user_id,
+        workspace_id=wid,
         status=1,
     )
     docs = Assistant(
@@ -103,6 +112,7 @@ def seed_demo_data(db: Session) -> bool:
             "and cite the source document when possible."
         ),
         user_id=admin.user_id,
+        workspace_id=wid,
         status=1,
     )
     db.add(support)
@@ -122,6 +132,7 @@ def seed_demo_data(db: Session) -> bool:
         desc="Retrieve handbook chunks then answer with LLM",
         graph_json=json.dumps(graph),
         user_id=admin.user_id,
+        workspace_id=wid,
         status=1,
     )
     db.add(workflow)

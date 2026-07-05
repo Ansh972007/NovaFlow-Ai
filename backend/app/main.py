@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR, DEMO_SEED
 from app.crypto import md5_hash
 from app.database import SessionLocal, User, init_db
-from app.routers import analytics, assistant, auth_oauth, chat_ws, knowledge, llm, user, workflow
+from app.routers import analytics, assistant, auth_oauth, chat_ws, knowledge, llm, user, workflow, workspace
 from app.services.demo_seed import seed_demo_data
+from app.services.tenancy import ensure_personal_workspace
 from app.services.workspace_settings import load_settings
 from app.services.vector_store import init_vector_store, vector_backend
 from app.schemas import ok
@@ -29,6 +30,8 @@ async def lifespan(_app: FastAPI):
             )
             db.add(admin)
             db.commit()
+            db.refresh(admin)
+            ensure_personal_workspace(db, admin)
             print(f"[NovaFlow] Default admin: {ADMIN_USER} / (see NOVAFLOW_ADMIN_PASSWORD)")
         if DEMO_SEED:
             seed_demo_data(db)
@@ -39,7 +42,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="NovaFlow API", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="1.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,6 +59,7 @@ app.include_router(knowledge.router, prefix=API_PREFIX)
 app.include_router(llm.router, prefix=API_PREFIX)
 app.include_router(workflow.router, prefix=API_PREFIX)
 app.include_router(analytics.router, prefix=API_PREFIX)
+app.include_router(workspace.router, prefix=API_PREFIX)
 app.include_router(chat_ws.router, prefix=API_PREFIX)
 
 
@@ -65,7 +69,7 @@ def health():
         {
             "service": "novaflow-api",
             "status": "ok",
-            "version": "1.2.0",
+            "version": "1.3.0",
             "vector_backend": vector_backend(),
         }
     )
@@ -73,4 +77,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "1.2.0"})
+    return ok({"name": "NovaFlow API", "version": "1.3.0"})
