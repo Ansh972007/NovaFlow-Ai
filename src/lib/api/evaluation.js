@@ -24,8 +24,40 @@ export async function deleteEvalCase(suiteId, caseId) {
   return client.delete(`/eval/suites/${suiteId}/cases/${caseId}`);
 }
 
-export async function runEvalSuite(suiteId) {
-  return client.post(`/eval/suites/${suiteId}/run`);
+export async function runEvalSuite(suiteId, options = {}) {
+  return client.post(`/eval/suites/${suiteId}/run`, options);
+}
+
+export async function importEvalCasesCsv(suiteId, csv) {
+  return client.post(`/eval/suites/${suiteId}/import-csv`, { csv });
+}
+
+export async function compareEvalSuite(suiteId, payload) {
+  return client.post(`/eval/suites/${suiteId}/compare`, payload);
+}
+
+export async function listEvalSchedules() {
+  return client.get("/eval/schedules");
+}
+
+export async function createEvalSchedule(payload) {
+  return client.post("/eval/schedules", payload);
+}
+
+export async function updateEvalSchedule(id, payload) {
+  return client.patch(`/eval/schedules/${id}`, payload);
+}
+
+export async function deleteEvalSchedule(id) {
+  return client.delete(`/eval/schedules/${id}`);
+}
+
+export async function triggerEvalSchedule(id) {
+  return client.post(`/eval/schedules/${id}/trigger`);
+}
+
+export async function listEvalComparisons() {
+  return client.get("/eval/comparisons");
 }
 
 export async function getEvalRun(runId) {

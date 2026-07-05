@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -41,10 +42,21 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
     init_vector_store()
+
+    from app.services.eval_scheduler import background_scheduler_loop
+
+    stop_event = asyncio.Event()
+    scheduler_task = asyncio.create_task(background_scheduler_loop(stop_event))
     yield
+    stop_event.set()
+    scheduler_task.cancel()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        pass
 
 
-app = FastAPI(title="NovaFlow API", version="1.6.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="1.8.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -73,7 +85,7 @@ def health():
         {
             "service": "novaflow-api",
             "status": "ok",
-            "version": "1.6.0",
+            "version": "1.8.0",
             "vector_backend": vector_backend(),
         }
     )
@@ -81,4 +93,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "1.6.0"})
+    return ok({"name": "NovaFlow API", "version": "1.8.0"})

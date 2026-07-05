@@ -1,6 +1,18 @@
 # Roadmap
 
-## v1.6 — Evaluation & fine-tune (current)
+## v1.8 — Schedules, comparison, webhooks (current)
+
+- [x] Scheduled eval runs — interval-based auto-run with optional webhook on completion
+- [x] Multi-assistant comparison — side-by-side pass rates on the same benchmark suite
+- [x] Fine-tune job webhooks — notify external URL when training completes or fails
+
+## v1.7 — Eval judge, CSV import, model apply (done)
+
+- [x] LLM-as-judge scoring — subjective pass/fail with score + reason on benchmark runs
+- [x] Bulk CSV import — eval cases and fine-tune training rows
+- [x] Auto-apply fine-tuned model — set provider `chat_model` from succeeded jobs
+
+## v1.6 — Evaluation & fine-tune (done)
 
 - [x] Benchmark suites — test cases against assistants with RAG, pass/fail scoring
 - [x] Eval runs — latency, pass rate, per-case results
@@ -24,8 +36,8 @@
 
 | Feature | Notes |
 |---------|--------|
-| LLM-as-judge eval scoring | Subjective quality metrics |
-| Bulk CSV import for eval/finetune | Larger datasets |
-| Auto-apply fine-tuned model to provider | One-click activation |
+| Eval regression alerts | Slack/email when pass rate drops |
+| Comparison charts | Visual trend over time |
+| Cron expressions | Finer schedule control than hourly intervals |
 
-**NovaFlow v1.6** reaches core enterprise parity for assistant quality and customization.
+**NovaFlow v1.8** automates quality checks and makes it easy to compare assistants head-to-head.

@@ -31,3 +31,11 @@ export async function startFineTuneJob(payload) {
 export async function refreshFineTuneJob(id) {
   return client.post(`/finetune/jobs/${id}/refresh`);
 }
+
+export async function importFineTuneCsv(datasetId, csv) {
+  return client.post(`/finetune/datasets/${datasetId}/import-csv`, { csv });
+}
+
+export async function applyFineTuneJob(jobId, options = {}) {
+  return client.post(`/finetune/jobs/${jobId}/apply`, options);
+}

@@ -1,12 +1,19 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import FineTuneDataset, FineTuneJob, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import fail, ok
-from app.services.finetune import dataset_dict, job_dict, refresh_finetune_job, start_finetune_job
+from app.services.csv_import import parse_finetune_rows_csv
+from app.services.finetune import (
+    apply_finetuned_model,
+    dataset_dict,
+    job_dict,
+    refresh_finetune_job,
+    start_finetune_job,
+)
 
 router = APIRouter(tags=["Fine-tune"])
 
@@ -113,8 +120,71 @@ async def create_job(body: dict, db: Session = Depends(get_db), ctx=Depends(requ
             ctx.workspace_id,
             body.get("provider_id"),
             (body.get("base_model") or "gpt-4o-mini-2024-07-18").strip(),
+            webhook_url=(body.get("webhook_url") or "").strip(),
         )
         return ok(job_dict(job))
+    except ValueError as exc:
+        return fail(400, str(exc))
+
+
+@router.post("/finetune/datasets/{dataset_id}/import-csv")
+async def import_dataset_csv(
+    dataset_id: int,
+    body: dict | None = None,
+    file: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    import json
+
+    row = db.get(FineTuneDataset, dataset_id)
+    if not row or row.workspace_id != ctx.workspace_id:
+        return fail(404, "Dataset not found")
+
+    text = ""
+    if file and file.filename:
+        raw = await file.read()
+        text = raw.decode("utf-8-sig", errors="replace")
+    elif body and body.get("csv"):
+        text = str(body["csv"])
+    else:
+        return fail(400, "Provide csv text or upload a .csv file")
+
+    parsed = parse_finetune_rows_csv(text)
+    if not parsed:
+        return fail(400, "No valid rows. Columns: user, assistant (optional: system)")
+
+    try:
+        existing = json.loads(row.rows_json or "[]")
+    except json.JSONDecodeError:
+        existing = []
+    existing.extend(parsed)
+    row.rows_json = json.dumps(existing)
+    row.update_time = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return ok({"imported": len(parsed), "dataset": dataset_dict(row)})
+
+
+@router.post("/finetune/jobs/{job_id}/apply")
+def apply_job(
+    job_id: int,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    job = db.get(FineTuneJob, job_id)
+    if not job or job.workspace_id != ctx.workspace_id:
+        return fail(404, "Job not found")
+    opts = body or {}
+    try:
+        provider = apply_finetuned_model(
+            db,
+            job,
+            provider_id=opts.get("provider_id"),
+            activate=bool(opts.get("activate", True)),
+        )
+        return ok({"provider": provider, "job": job_dict(job)})
     except ValueError as exc:
         return fail(400, str(exc))
 

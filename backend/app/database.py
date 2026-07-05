@@ -218,6 +218,41 @@ class EvalRun(Base):
     suite = relationship("EvalSuite", back_populates="runs")
 
 
+class EvalSchedule(Base):
+    __tablename__ = "eval_schedules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suite_id = Column(Integer, ForeignKey("eval_suites.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    interval_hours = Column(Integer, default=24)
+    enabled = Column(Integer, default=1)
+    scoring = Column(String(16), default="rules")
+    judge_threshold = Column(Integer, default=4)
+    webhook_url = Column(String(500), default="")
+    last_run_at = Column(DateTime, nullable=True)
+    next_run_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    suite = relationship("EvalSuite")
+
+
+class EvalComparison(Base):
+    __tablename__ = "eval_comparisons"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suite_id = Column(Integer, ForeignKey("eval_suites.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    assistant_ids_json = Column(Text, default="[]")
+    scoring = Column(String(16), default="rules")
+    results_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+    suite = relationship("EvalSuite")
+
+
 class FineTuneDataset(Base):
     __tablename__ = "finetune_datasets"
 
@@ -247,6 +282,8 @@ class FineTuneJob(Base):
     job_id = Column(String(64), default="")
     fine_tuned_model = Column(String(120), default="")
     error_message = Column(Text, default="")
+    webhook_url = Column(String(500), default="")
+    webhook_sent = Column(Integer, default=0)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -314,6 +351,16 @@ def migrate_schema():
         if table in insp.get_table_names():
             cols = {c["name"] for c in insp.get_columns(table)}
             if "workspace_id" not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+    if "finetune_jobs" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("finetune_jobs")}
+        for col, ddl in [
+            ("webhook_url", "ALTER TABLE finetune_jobs ADD COLUMN webhook_url VARCHAR(500) DEFAULT ''"),
+            ("webhook_sent", "ALTER TABLE finetune_jobs ADD COLUMN webhook_sent INTEGER DEFAULT 0"),
+        ]:
+            if col not in cols:
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
 

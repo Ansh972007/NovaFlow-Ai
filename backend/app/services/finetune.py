@@ -37,6 +37,8 @@ def job_dict(job: FineTuneJob) -> dict:
         "job_id": job.job_id or "",
         "fine_tuned_model": job.fine_tuned_model or "",
         "error_message": job.error_message or "",
+        "webhook_url": job.webhook_url or "",
+        "webhook_sent": bool(job.webhook_sent),
         "create_time": job.create_time.isoformat() if job.create_time else None,
         "update_time": job.update_time.isoformat() if job.update_time else None,
     }
@@ -95,6 +97,7 @@ async def start_finetune_job(
     workspace_id: int,
     provider_id: int | None,
     base_model: str,
+    webhook_url: str = "",
 ) -> FineTuneJob:
     rows = json.loads(dataset.rows_json or "[]")
     content = build_jsonl(rows)
@@ -107,6 +110,8 @@ async def start_finetune_job(
         provider_id=provider_id,
         base_model=base_model or "gpt-4o-mini-2024-07-18",
         status="uploading",
+        webhook_url=(webhook_url or "").strip()[:500],
+        webhook_sent=0,
     )
     db.add(job)
     db.commit()
@@ -153,6 +158,7 @@ async def start_finetune_job(
 async def refresh_finetune_job(db: Session, job: FineTuneJob) -> FineTuneJob:
     if not job.job_id:
         return job
+    prev_status = job.status
     api_key, base_url = _provider_openai_key(db, job.provider_id)
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.get(
@@ -169,4 +175,65 @@ async def refresh_finetune_job(db: Session, job: FineTuneJob) -> FineTuneJob:
     job.update_time = datetime.utcnow()
     db.commit()
     db.refresh(job)
+    if job.status != prev_status:
+        await send_finetune_webhook_if_needed(db, job)
     return job
+
+
+TERMINAL_FINETUNE = {"succeeded", "failed", "cancelled", "completed"}
+
+
+async def send_finetune_webhook_if_needed(db: Session, job: FineTuneJob) -> None:
+    if not (job.webhook_url or "").strip():
+        return
+    if job.webhook_sent:
+        return
+    if job.status not in TERMINAL_FINETUNE:
+        return
+    from app.services.webhooks import post_webhook
+
+    await post_webhook(
+        job.webhook_url,
+        {
+            "job_id": job.id,
+            "openai_job_id": job.job_id,
+            "status": job.status,
+            "fine_tuned_model": job.fine_tuned_model or "",
+            "error_message": job.error_message or "",
+            "dataset_id": job.dataset_id,
+        },
+        event="finetune.completed",
+    )
+    job.webhook_sent = 1
+    job.update_time = datetime.utcnow()
+    db.commit()
+    db.refresh(job)
+
+
+def apply_finetuned_model(
+    db: Session,
+    job: FineTuneJob,
+    *,
+    provider_id: int | None = None,
+    activate: bool = True,
+) -> dict:
+    from app.services.llm_providers import activate_provider, get_active_provider_row, provider_dict, update_provider
+
+    model_id = (job.fine_tuned_model or "").strip()
+    if not model_id:
+        raise ValueError("Job has no fine-tuned model yet — refresh status first")
+    if job.status not in {"succeeded", "completed"}:
+        raise ValueError(f"Job status is '{job.status}'; wait until training succeeds")
+
+    target_id = provider_id or job.provider_id
+    if not target_id:
+        active = get_active_provider_row(db)
+        if not active:
+            raise ValueError("No provider configured — specify provider_id")
+        target_id = active.id
+
+    update_provider(db, target_id, {"chat_model": model_id})
+    if activate:
+        return activate_provider(db, target_id)
+    prov = db.get(LlmProvider, target_id)
+    return provider_dict(prov)
