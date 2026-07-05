@@ -31,3 +31,11 @@ export async function inviteWorkspaceMember(workspaceId, user_name, role = "edit
 export async function updateWorkspaceMemberRole(workspaceId, memberId, role) {
   return client.patch(`/workspaces/${workspaceId}/members/${memberId}/role`, { role });
 }
+
+export async function getWorkspaceQuotas(workspaceId) {
+  return client.get(`/workspaces/${workspaceId}/quotas`);
+}
+
+export async function updateWorkspaceQuotas(workspaceId, payload) {
+  return client.patch(`/workspaces/${workspaceId}/quotas`, payload);
+}

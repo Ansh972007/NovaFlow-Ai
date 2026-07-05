@@ -6,8 +6,22 @@ import httpx
 from app.services.workspace_settings import get_chat_config
 
 
-async def stream_chat(system_prompt: str, user_message: str) -> AsyncIterator[str]:
-    cfg = get_chat_config()
+async def stream_chat(
+    system_prompt: str,
+    user_message: str,
+    *,
+    db=None,
+    workspace_id: int | None = None,
+) -> AsyncIterator[str]:
+    cfg = get_chat_config(db)
+    ab_meta = None
+    if db is not None and workspace_id:
+        from app.services.ab_routing import pick_ab_model
+
+        routed = pick_ab_model(db, workspace_id, cfg.get("model") or "")
+        if routed:
+            cfg = {**cfg, "model": routed["model"]}
+            ab_meta = routed
     if not cfg["api_key"]:
         reply = (
             f"I'm {system_prompt[:40]}… (NovaFlow demo mode — add a model provider in Settings.)\n\n"
@@ -85,8 +99,14 @@ async def _stream_anthropic(cfg: dict, system_prompt: str, user_message: str) ->
                     continue
 
 
-async def stream_chat_sync(system_prompt: str, user_message: str) -> str:
+async def stream_chat_sync(
+    system_prompt: str,
+    user_message: str,
+    *,
+    db=None,
+    workspace_id: int | None = None,
+) -> str:
     parts = []
-    async for token in stream_chat(system_prompt, user_message):
+    async for token in stream_chat(system_prompt, user_message, db=db, workspace_id=workspace_id):
         parts.append(token)
     return "".join(parts)

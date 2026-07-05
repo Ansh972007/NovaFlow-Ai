@@ -114,3 +114,37 @@ def update_member_role_ws(
     member.role = role
     db.commit()
     return ok({"user_id": member.user_id, "role": member.role})
+
+
+@router.get("/workspaces/{workspace_id}/quotas")
+def get_workspace_quotas(workspace_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    if ctx.workspace_id != workspace_id:
+        return fail(403, "Switch to this workspace first")
+    from app.services.ab_routing import quotas_with_usage
+
+    return ok(quotas_with_usage(db, workspace_id))
+
+
+@router.patch("/workspaces/{workspace_id}/quotas")
+def update_workspace_quotas(
+    workspace_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_admin),
+):
+    if ctx.workspace_id != workspace_id:
+        return fail(403, "Switch to this workspace first")
+    from app.database import WorkspaceQuota
+    from app.services.ab_routing import quotas_with_usage
+
+    q = db.get(WorkspaceQuota, workspace_id)
+    if not q:
+        q = WorkspaceQuota(workspace_id=workspace_id)
+        db.add(q)
+    if "eval_runs_monthly_limit" in body:
+        q.eval_runs_monthly_limit = max(0, int(body["eval_runs_monthly_limit"]))
+    if "finetune_jobs_monthly_limit" in body:
+        q.finetune_jobs_monthly_limit = max(0, int(body["finetune_jobs_monthly_limit"]))
+    q.update_time = datetime.utcnow()
+    db.commit()
+    return ok(quotas_with_usage(db, workspace_id))

@@ -99,6 +99,9 @@ async def start_finetune_job(
     base_model: str,
     webhook_url: str = "",
 ) -> FineTuneJob:
+    from app.services.ab_routing import check_finetune_quota
+
+    check_finetune_quota(db, workspace_id)
     rows = json.loads(dataset.rows_json or "[]")
     content = build_jsonl(rows)
     api_key, base_url = _provider_openai_key(db, provider_id)

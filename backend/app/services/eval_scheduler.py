@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 
 from app.database import EvalSchedule, EvalSuite, SessionLocal
-from app.services.evaluation import run_eval_suite
+from app.services.evaluation import compute_schedule_next_run, run_eval_suite
 
 logger = logging.getLogger("novaflow.scheduler")
 
@@ -50,7 +50,7 @@ async def tick_eval_schedules() -> None:
                     webhook_url=sched.webhook_url or "",
                 )
                 sched.last_run_at = now
-                sched.next_run_at = now + timedelta(hours=max(1, sched.interval_hours or 24))
+                sched.next_run_at = compute_schedule_next_run(sched, now)
                 sched.update_time = now
                 db.commit()
             except Exception as exc:

@@ -12,6 +12,14 @@ export async function createEvalSuite(payload) {
   return client.post("/eval/suites", payload);
 }
 
+export async function listEvalTemplates() {
+  return client.get("/eval/templates");
+}
+
+export async function createSuiteFromTemplate(payload) {
+  return client.post("/eval/suites/from-template", payload);
+}
+
 export async function deleteEvalSuite(id) {
   return client.delete(`/eval/suites/${id}`);
 }
@@ -60,6 +68,37 @@ export async function listEvalComparisons() {
   return client.get("/eval/comparisons");
 }
 
+export async function getSuiteTrends(suiteId, limit = 30) {
+  return client.get(`/eval/suites/${suiteId}/trends`, { params: { limit } });
+}
+
+export async function getComparisonTrends(suiteId, limit = 20) {
+  const params = { limit };
+  if (suiteId) params.suite_id = suiteId;
+  return client.get("/eval/comparisons/trends", { params });
+}
+
+export async function listEvalAlerts() {
+  return client.get("/eval/alerts");
+}
+
+export async function createEvalAlert(payload) {
+  return client.post("/eval/alerts", payload);
+}
+
+export async function updateEvalAlert(id, payload) {
+  return client.patch(`/eval/alerts/${id}`, payload);
+}
+
+export async function deleteEvalAlert(id) {
+  return client.delete(`/eval/alerts/${id}`);
+}
+
 export async function getEvalRun(runId) {
   return client.get(`/eval/runs/${runId}`);
+}
+
+export async function getEvalRunDiff(runId, baselineRunId) {
+  const params = baselineRunId ? { baseline_run_id: baselineRunId } : {};
+  return client.get(`/eval/runs/${runId}/diff`, { params });
 }

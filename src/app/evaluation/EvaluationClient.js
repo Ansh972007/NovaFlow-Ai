@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import { SuiteTrendChart, ComparisonTrendChart } from "@/components/evaluation/EvalTrendCharts";
 import { getUserInfo } from "@/lib/api/auth";
 import { getAssistantsPage } from "@/lib/api/apps";
 import {
@@ -21,6 +22,15 @@ import {
   deleteEvalSchedule,
   triggerEvalSchedule,
   updateEvalSchedule,
+  getSuiteTrends,
+  getComparisonTrends,
+  listEvalAlerts,
+  createEvalAlert,
+  deleteEvalAlert,
+  updateEvalAlert,
+  getEvalRunDiff,
+  listEvalTemplates,
+  createSuiteFromTemplate,
 } from "@/lib/api/evaluation";
 import {
   listFineTuneDatasets,
@@ -31,7 +41,12 @@ import {
   refreshFineTuneJob,
   importFineTuneCsv,
   applyFineTuneJob,
+  estimateFineTuneCost,
+  listAbRoutes,
+  createAbRoute,
+  deleteAbRoute,
 } from "@/lib/api/finetune";
+import { getActiveWorkspaceId, getWorkspaceQuotas, updateWorkspaceQuotas } from "@/lib/api/workspaces";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -58,9 +73,30 @@ export default function EvaluationClient() {
   const [newSchedule, setNewSchedule] = useState({
     suite_id: "",
     interval_hours: 24,
+    cron_expression: "",
     webhook_url: "",
     scoring: "rules",
   });
+  const [alerts, setAlerts] = useState([]);
+  const [trendSuiteId, setTrendSuiteId] = useState("");
+  const [suiteTrends, setSuiteTrends] = useState([]);
+  const [comparisonTrends, setComparisonTrends] = useState([]);
+  const [newAlert, setNewAlert] = useState({
+    suite_id: "",
+    min_pass_rate: 80,
+    drop_points: 10,
+    webhook_url: "",
+    pagerduty_routing_key: "",
+    opsgenie_api_key: "",
+    email_to: "",
+  });
+  const [runDiff, setRunDiff] = useState(null);
+  const [costEstimate, setCostEstimate] = useState(null);
+  const [templates, setTemplates] = useState([]);
+  const [templatePick, setTemplatePick] = useState({ template_id: "", assistant_id: "" });
+  const [abRoutes, setAbRoutes] = useState([]);
+  const [newAbRoute, setNewAbRoute] = useState({ base_model: "", variant_model: "", variant_traffic_pct: 50 });
+  const [quotas, setQuotas] = useState(null);
 
   const [newSuite, setNewSuite] = useState({ name: "", assistant_id: "", caseInput: "", caseExpected: "" });
   const [newDataset, setNewDataset] = useState({
@@ -75,18 +111,28 @@ export default function EvaluationClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, d, j, apps, sched] = await Promise.all([
+      const [s, d, j, apps, sched, al, tpl, ab, q] = await Promise.all([
         listEvalSuites().catch(() => []),
         listFineTuneDatasets().catch(() => []),
         listFineTuneJobs().catch(() => []),
         getAssistantsPage({ limit: 50 }).catch(() => ({ data: [] })),
         listEvalSchedules().catch(() => []),
+        listEvalAlerts().catch(() => []),
+        listEvalTemplates().catch(() => []),
+        listAbRoutes().catch(() => []),
+        getActiveWorkspaceId()
+          ? getWorkspaceQuotas(getActiveWorkspaceId()).catch(() => null)
+          : Promise.resolve(null),
       ]);
       setSuites(Array.isArray(s) ? s : []);
       setDatasets(Array.isArray(d) ? d : []);
       setJobs(Array.isArray(j) ? j : []);
       setAssistants(apps?.data || []);
       setSchedules(Array.isArray(sched) ? sched : []);
+      setAlerts(Array.isArray(al) ? al : []);
+      setTemplates(Array.isArray(tpl) ? tpl : []);
+      setAbRoutes(Array.isArray(ab) ? ab : []);
+      setQuotas(q);
     } finally {
       setLoading(false);
     }
@@ -102,12 +148,38 @@ export default function EvaluationClient() {
     if (user) load();
   }, [user, load]);
 
+  useEffect(() => {
+    if (tab !== "trends") return;
+    async function loadTrends() {
+      const sid = trendSuiteId || suites[0]?.id;
+      if (!sid) {
+        setSuiteTrends([]);
+        setComparisonTrends([]);
+        return;
+      }
+      try {
+        const [st, ct] = await Promise.all([
+          getSuiteTrends(sid).catch(() => ({ points: [] })),
+          getComparisonTrends(sid).catch(() => ({ series: [] })),
+        ]);
+        setSuiteTrends(st?.points || []);
+        setComparisonTrends(ct?.series || []);
+        if (!trendSuiteId && sid) setTrendSuiteId(String(sid));
+      } catch {
+        setSuiteTrends([]);
+        setComparisonTrends([]);
+      }
+    }
+    loadTrends();
+  }, [tab, trendSuiteId, suites]);
+
   async function openSuite(id) {
     setError("");
     try {
       const detail = await getEvalSuite(id);
       setSelectedSuite(detail);
       setLastRun(null);
+      setRunDiff(null);
     } catch (err) {
       setError(err.message || "Failed to load suite");
     }
@@ -151,6 +223,7 @@ export default function EvaluationClient() {
         judge_threshold: 4,
       });
       setLastRun(run);
+      setRunDiff(null);
       await openSuite(selectedSuite.id);
     } catch (err) {
       setError(err.message || "Run failed");
@@ -243,11 +316,12 @@ export default function EvaluationClient() {
       await createEvalSchedule({
         suite_id: Number(newSchedule.suite_id),
         interval_hours: Number(newSchedule.interval_hours) || 24,
+        cron_expression: newSchedule.cron_expression.trim(),
         webhook_url: newSchedule.webhook_url.trim(),
         scoring: newSchedule.scoring,
         enabled: true,
       });
-      setNewSchedule({ suite_id: "", interval_hours: 24, webhook_url: "", scoring: "rules" });
+      setNewSchedule({ suite_id: "", interval_hours: 24, cron_expression: "", webhook_url: "", scoring: "rules" });
       await load();
     } catch (err) {
       setError(err.message || "Create schedule failed");
@@ -276,6 +350,111 @@ export default function EvaluationClient() {
       await load();
     } catch (err) {
       setError(err.message || "Trigger failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateAlert(e) {
+    e.preventDefault();
+    if (!newAlert.suite_id) return;
+    setBusy(true);
+    setError("");
+    try {
+      await createEvalAlert({
+        suite_id: Number(newAlert.suite_id),
+        min_pass_rate: Number(newAlert.min_pass_rate),
+        drop_points: Number(newAlert.drop_points),
+        webhook_url: newAlert.webhook_url.trim(),
+        pagerduty_routing_key: newAlert.pagerduty_routing_key.trim(),
+        opsgenie_api_key: newAlert.opsgenie_api_key.trim(),
+        email_to: newAlert.email_to.trim(),
+      });
+      setNewAlert({
+        suite_id: "",
+        min_pass_rate: 80,
+        drop_points: 10,
+        webhook_url: "",
+        pagerduty_routing_key: "",
+        opsgenie_api_key: "",
+        email_to: "",
+      });
+      await load();
+    } catch (err) {
+      setError(err.message || "Create alert failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleLoadDiff() {
+    if (!lastRun?.id) return;
+    setBusy(true);
+    setError("");
+    try {
+      const diff = await getEvalRunDiff(lastRun.id);
+      setRunDiff(diff);
+    } catch (err) {
+      setError(err.message || "Diff failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleEstimateCost(datasetId) {
+    setBusy(true);
+    setError("");
+    try {
+      const est = await estimateFineTuneCost(datasetId);
+      setCostEstimate(est);
+    } catch (err) {
+      setError(err.message || "Estimate failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const diffStatusStyle = {
+    regressed: "border-red-200 bg-red-50/60",
+    improved: "border-emerald-200 bg-emerald-50/60",
+    unchanged: "border-black/5 bg-white/50",
+    new: "border-blue-200 bg-blue-50/40",
+    removed: "border-amber-200 bg-amber-50/40",
+  };
+
+  async function handleCreateFromTemplate(e) {
+    e.preventDefault();
+    if (!templatePick.template_id || !templatePick.assistant_id) return;
+    setBusy(true);
+    setError("");
+    try {
+      await createSuiteFromTemplate({
+        template_id: templatePick.template_id,
+        assistant_id: templatePick.assistant_id,
+      });
+      setTemplatePick({ template_id: "", assistant_id: "" });
+      await load();
+    } catch (err) {
+      setError(err.message || "Template import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateAbRoute(e) {
+    e.preventDefault();
+    if (!newAbRoute.base_model.trim() || !newAbRoute.variant_model.trim()) return;
+    setBusy(true);
+    try {
+      await createAbRoute({
+        base_model: newAbRoute.base_model.trim(),
+        variant_model: newAbRoute.variant_model.trim(),
+        variant_traffic_pct: Number(newAbRoute.variant_traffic_pct) || 50,
+      });
+      setNewAbRoute({ base_model: "", variant_model: "", variant_traffic_pct: 50 });
+      await load();
+    } catch (err) {
+      setError(err.message || "A/B route failed");
     } finally {
       setBusy(false);
     }
@@ -361,7 +540,9 @@ export default function EvaluationClient() {
             {[
               { id: "benchmark", label: "Benchmarks" },
               { id: "compare", label: "Compare" },
+              { id: "trends", label: "Trends" },
               { id: "schedules", label: "Schedules" },
+              { id: "alerts", label: "Alerts" },
               { id: "finetune", label: "Fine-tune" },
             ].map((t) => (
               <button
@@ -410,6 +591,40 @@ export default function EvaluationClient() {
                       </li>
                     ))}
                   </ul>
+                )}
+
+                {!readOnly && (
+                  <form onSubmit={handleCreateFromTemplate} className="mt-6 space-y-3 border-t border-black/5 pt-5">
+                    <h3 className="text-sm font-semibold">From template</h3>
+                    <select
+                      className="input-field w-full"
+                      value={templatePick.template_id}
+                      onChange={(e) => setTemplatePick((p) => ({ ...p, template_id: e.target.value }))}
+                    >
+                      <option value="">Industry template…</option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.case_count} cases)
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="input-field w-full"
+                      value={templatePick.assistant_id}
+                      onChange={(e) => setTemplatePick((p) => ({ ...p, assistant_id: e.target.value }))}
+                      required={!!templatePick.template_id}
+                    >
+                      <option value="">Assistant…</option>
+                      {assistants.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" disabled={busy || !templatePick.template_id} className="btn-primary disabled:opacity-50">
+                      Create from template
+                    </button>
+                  </form>
                 )}
 
                 {!readOnly && (
@@ -514,6 +729,39 @@ export default function EvaluationClient() {
                           Avg latency {lastRun.avg_latency_ms}ms
                           {lastRun.scoring === "judge" && " · LLM judge"}
                         </p>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={handleLoadDiff}
+                          className="workspace-btn-ghost mt-2 !py-1 text-xs"
+                        >
+                          {runDiff ? "Refresh diff vs previous" : "Diff vs previous run"}
+                        </button>
+                      </div>
+                    )}
+                    {runDiff && (
+                      <div className="mt-3 rounded-xl border border-black/5 bg-white/60 px-4 py-3 text-xs">
+                        <p className="font-semibold text-neutral-800">
+                          Run #{runDiff.current_run_id} vs #{runDiff.baseline_run_id}:{" "}
+                          {runDiff.pass_rate_delta >= 0 ? "+" : ""}
+                          {runDiff.pass_rate_delta}% pass rate
+                        </p>
+                        <p className="mt-1 text-neutral-500">
+                          {runDiff.summary.regressed} regressed · {runDiff.summary.improved} improved ·{" "}
+                          {runDiff.summary.unchanged} unchanged
+                        </p>
+                        <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                          {runDiff.items
+                            .filter((i) => i.status === "regressed" || i.status === "improved")
+                            .map((item) => (
+                              <li
+                                key={item.case_id}
+                                className={`rounded border px-2 py-1 ${diffStatusStyle[item.status] || ""}`}
+                              >
+                                <span className="font-medium capitalize">{item.status}</span>: {item.input}
+                              </li>
+                            ))}
+                        </ul>
                       </div>
                     )}
                     <ul className="mt-4 max-h-80 space-y-2 overflow-y-auto">
@@ -641,13 +889,61 @@ export default function EvaluationClient() {
             </motion.section>
           )}
 
+          {tab === "trends" && (
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="workspace-panel mt-6 rounded-[1.5rem] p-5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">Quality trends</h2>
+                  <p className="mt-1 text-sm text-neutral-500">Pass rate over time for benchmarks and comparisons.</p>
+                </div>
+                <select
+                  className="input-field !w-auto text-sm"
+                  value={trendSuiteId}
+                  onChange={(e) => setTrendSuiteId(e.target.value)}
+                >
+                  <option value="">Select suite…</option>
+                  {suites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mt-6 grid gap-8 lg:grid-cols-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-700">Benchmark pass rate</h3>
+                  <SuiteTrendChart points={suiteTrends} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-700">Comparison history</h3>
+                  <ComparisonTrendChart series={comparisonTrends} />
+                </div>
+              </div>
+            </motion.section>
+          )}
+
           {tab === "schedules" && (
             <div className="mt-6 grid gap-6 lg:grid-cols-2">
               <motion.section className="workspace-panel rounded-[1.5rem] p-5">
                 <h2 className="text-lg font-semibold">Scheduled runs</h2>
                 <p className="mt-1 text-xs text-neutral-500">
-                  Auto-run benchmarks on an interval. Optional webhook fires on each completion.
+                  Auto-run benchmarks on an interval or cron expression. Optional webhook on completion.
                 </p>
+                {quotas && (
+                  <p className="mt-2 text-xs text-neutral-500">
+                    Usage this month: {quotas.eval_runs_this_month}
+                    {quotas.eval_runs_monthly_limit ? ` / ${quotas.eval_runs_monthly_limit} eval runs` : " eval runs"}
+                    {" · "}
+                    {quotas.finetune_jobs_this_month}
+                    {quotas.finetune_jobs_monthly_limit
+                      ? ` / ${quotas.finetune_jobs_monthly_limit} fine-tune jobs`
+                      : " fine-tune jobs"}
+                  </p>
+                )}
                 <ul className="mt-4 space-y-2">
                   {schedules.map((sched) => {
                     const suite = suites.find((s) => s.id === sched.suite_id);
@@ -656,7 +952,10 @@ export default function EvaluationClient() {
                         <p className="font-medium">
                           {suite?.name || `Suite #${sched.suite_id}`}
                           <span className="ml-2 text-xs font-normal text-neutral-500">
-                            every {sched.interval_hours}h · {sched.enabled ? "on" : "off"}
+                            {sched.cron_expression
+                              ? `cron: ${sched.cron_expression}`
+                              : `every ${sched.interval_hours}h`}{" "}
+                            · {sched.enabled ? "on" : "off"}
                           </span>
                         </p>
                         {sched.next_run_at && (
@@ -720,9 +1019,15 @@ export default function EvaluationClient() {
                       type="number"
                       min={1}
                       className="input-field w-full"
-                      placeholder="Interval (hours)"
+                      placeholder="Interval (hours, if no cron)"
                       value={newSchedule.interval_hours}
                       onChange={(e) => setNewSchedule((p) => ({ ...p, interval_hours: e.target.value }))}
+                    />
+                    <input
+                      className="input-field w-full font-mono text-xs"
+                      placeholder="Cron expression (optional, e.g. 0 9 * * *)"
+                      value={newSchedule.cron_expression}
+                      onChange={(e) => setNewSchedule((p) => ({ ...p, cron_expression: e.target.value }))}
                     />
                     <select
                       className="input-field w-full"
@@ -747,8 +1052,127 @@ export default function EvaluationClient() {
             </div>
           )}
 
-          {tab === "finetune" && (
+          {tab === "alerts" && (
             <div className="mt-6 grid gap-6 lg:grid-cols-2">
+              <motion.section className="workspace-panel rounded-[1.5rem] p-5">
+                <h2 className="text-lg font-semibold">Regression alerts</h2>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Notify Slack (webhook) or email when pass rate drops below a threshold or vs the previous run.
+                </p>
+                <ul className="mt-4 space-y-2">
+                  {alerts.map((a) => {
+                    const suite = suites.find((s) => s.id === a.suite_id);
+                    return (
+                      <li key={a.id} className="workspace-list-row rounded-xl px-4 py-3 text-sm">
+                        <p className="font-medium">
+                          {suite?.name || `Suite #${a.suite_id}`}
+                          <span className="ml-2 text-xs font-normal text-neutral-500">
+                            min {a.min_pass_rate}% · drop {a.drop_points}pts · {a.enabled ? "on" : "off"}
+                          </span>
+                        </p>
+                        {!readOnly && (
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                await updateEvalAlert(a.id, { enabled: !a.enabled });
+                                await load();
+                              }}
+                              className="workspace-btn-ghost !py-1 text-xs"
+                            >
+                              {a.enabled ? "Pause" : "Resume"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                await deleteEvalAlert(a.id);
+                                await load();
+                              }}
+                              className="workspace-btn-ghost workspace-btn-danger !py-1 text-xs"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </motion.section>
+
+              {!readOnly && (
+                <motion.section className="workspace-panel rounded-[1.5rem] p-5">
+                  <h2 className="text-lg font-semibold">New alert</h2>
+                  <form onSubmit={handleCreateAlert} className="mt-4 space-y-3">
+                    <select
+                      className="input-field w-full"
+                      value={newAlert.suite_id}
+                      onChange={(e) => setNewAlert((p) => ({ ...p, suite_id: e.target.value }))}
+                      required
+                    >
+                      <option value="">Suite…</option>
+                      {suites.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        className="input-field w-full"
+                        placeholder="Min pass %"
+                        value={newAlert.min_pass_rate}
+                        onChange={(e) => setNewAlert((p) => ({ ...p, min_pass_rate: e.target.value }))}
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        className="input-field w-full"
+                        placeholder="Drop pts vs prev"
+                        value={newAlert.drop_points}
+                        onChange={(e) => setNewAlert((p) => ({ ...p, drop_points: e.target.value }))}
+                      />
+                    </div>
+                    <input
+                      className="input-field w-full text-xs"
+                      placeholder="Slack / webhook URL"
+                      value={newAlert.webhook_url}
+                      onChange={(e) => setNewAlert((p) => ({ ...p, webhook_url: e.target.value }))}
+                    />
+                    <input
+                      className="input-field w-full text-xs font-mono"
+                      placeholder="PagerDuty routing key"
+                      value={newAlert.pagerduty_routing_key}
+                      onChange={(e) => setNewAlert((p) => ({ ...p, pagerduty_routing_key: e.target.value }))}
+                    />
+                    <input
+                      className="input-field w-full text-xs font-mono"
+                      placeholder="Opsgenie API key"
+                      value={newAlert.opsgenie_api_key}
+                      onChange={(e) => setNewAlert((p) => ({ ...p, opsgenie_api_key: e.target.value }))}
+                    />
+                    <input
+                      className="input-field w-full text-xs"
+                      placeholder="Email to (requires SMTP_* env on server)"
+                      value={newAlert.email_to}
+                      onChange={(e) => setNewAlert((p) => ({ ...p, email_to: e.target.value }))}
+                    />
+                    <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">
+                      Create alert
+                    </button>
+                  </form>
+                </motion.section>
+              )}
+            </div>
+          )}
+
+          {tab === "finetune" && (
+            <div className="mt-6 grid gap-6 lg:grid-cols-3">
               <motion.section className="workspace-panel rounded-[1.5rem] p-5">
                 <h2 className="text-lg font-semibold">Training datasets</h2>
                 <ul className="mt-4 space-y-2">
@@ -774,6 +1198,14 @@ export default function EvaluationClient() {
                             <button
                               type="button"
                               disabled={busy}
+                              onClick={() => handleEstimateCost(d.id)}
+                              className="workspace-btn-ghost !py-1.5 text-xs"
+                            >
+                              Estimate
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
                               onClick={() => handleStartJob(d.id)}
                               className="workspace-btn-ghost !py-1.5 text-xs"
                             >
@@ -785,6 +1217,17 @@ export default function EvaluationClient() {
                     </li>
                   ))}
                 </ul>
+                {costEstimate && (
+                  <div className="mt-4 rounded-xl border border-black/5 bg-white/70 px-4 py-3 text-sm">
+                    <p className="font-semibold">Cost estimate — dataset #{costEstimate.dataset_id}</p>
+                    <p className="mt-1 text-neutral-600">
+                      ~${costEstimate.estimated_cost_usd} USD (
+                      {costEstimate.estimated_training_tokens.toLocaleString()} tokens ×{" "}
+                      {costEstimate.assumed_epochs} epochs @ ${costEstimate.price_per_1m_tokens_usd}/1M)
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-400">{costEstimate.disclaimer}</p>
+                  </div>
+                )}
                 {!readOnly && (
                   <form onSubmit={handleCreateDataset} className="mt-6 space-y-3 border-t border-black/5 pt-5">
                     <h3 className="text-sm font-semibold">New dataset</h3>
@@ -819,6 +1262,64 @@ export default function EvaluationClient() {
                     />
                     <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">
                       Create dataset
+                    </button>
+                  </form>
+                )}
+              </motion.section>
+
+              <motion.section className="workspace-panel rounded-[1.5rem] p-5">
+                <h2 className="text-lg font-semibold">A/B model routing</h2>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Split live assistant chat traffic between base and fine-tuned models.
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {abRoutes.map((r) => (
+                    <li key={r.id} className="workspace-list-row rounded-xl px-4 py-3 text-xs">
+                      <p className="font-medium">
+                        {r.base_model} ↔ {r.variant_model}{" "}
+                        <span className="text-neutral-500">({r.variant_traffic_pct}% variant)</span>
+                      </p>
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            await deleteAbRoute(r.id);
+                            await load();
+                          }}
+                          className="workspace-btn-ghost workspace-btn-danger mt-2 !py-1"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {!readOnly && (
+                  <form onSubmit={handleCreateAbRoute} className="mt-4 space-y-2 border-t border-black/5 pt-4">
+                    <input
+                      className="input-field w-full font-mono text-xs"
+                      placeholder="Base model"
+                      value={newAbRoute.base_model}
+                      onChange={(e) => setNewAbRoute((p) => ({ ...p, base_model: e.target.value }))}
+                    />
+                    <input
+                      className="input-field w-full font-mono text-xs"
+                      placeholder="Fine-tuned variant model"
+                      value={newAbRoute.variant_model}
+                      onChange={(e) => setNewAbRoute((p) => ({ ...p, variant_model: e.target.value }))}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      className="input-field w-full text-xs"
+                      placeholder="Variant traffic %"
+                      value={newAbRoute.variant_traffic_pct}
+                      onChange={(e) => setNewAbRoute((p) => ({ ...p, variant_traffic_pct: e.target.value }))}
+                    />
+                    <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">
+                      Enable A/B route
                     </button>
                   </form>
                 )}

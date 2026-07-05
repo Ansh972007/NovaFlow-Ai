@@ -66,7 +66,7 @@ async def _stream_reply(
 ):
     await websocket.send_json({"type": "start"})
     buffer = ""
-    async for token in stream_chat(system, user_msg):
+    async for token in stream_chat(system, user_msg, db=db, workspace_id=workspace_id):
         buffer += token
         await websocket.send_json(
             {"type": "stream", "message": {"content": token, "reasoning_content": ""}}

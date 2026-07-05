@@ -39,3 +39,21 @@ export async function importFineTuneCsv(datasetId, csv) {
 export async function applyFineTuneJob(jobId, options = {}) {
   return client.post(`/finetune/jobs/${jobId}/apply`, options);
 }
+
+export async function estimateFineTuneCost(datasetId, baseModel = "gpt-4o-mini-2024-07-18") {
+  return client.get(`/finetune/datasets/${datasetId}/estimate`, {
+    params: { base_model: baseModel },
+  });
+}
+
+export async function listAbRoutes() {
+  return client.get("/finetune/ab-routes");
+}
+
+export async function createAbRoute(payload) {
+  return client.post("/finetune/ab-routes", payload);
+}
+
+export async function deleteAbRoute(id) {
+  return client.delete(`/finetune/ab-routes/${id}`);
+}

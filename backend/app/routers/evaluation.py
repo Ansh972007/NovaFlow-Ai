@@ -3,13 +3,27 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
-from app.database import Assistant, EvalCase, EvalComparison, EvalRun, EvalSchedule, EvalSuite, get_db
+from app.database import (
+    Assistant,
+    EvalCase,
+    EvalComparison,
+    EvalRegressionAlert,
+    EvalRun,
+    EvalSchedule,
+    EvalSuite,
+    get_db,
+)
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import fail, ok
 from app.services.csv_import import parse_eval_cases_csv
+from app.services.eval_alerts import alert_dict, comparison_trends, suite_trends
+from app.services.eval_diff import diff_eval_runs
+from app.services.cron_schedule import validate_cron
+from app.services.eval_templates import get_template, list_templates
 from app.services.evaluation import (
     case_dict,
     comparison_dict,
+    compute_schedule_next_run,
     run_dict,
     run_eval_comparison,
     run_eval_suite,
@@ -18,6 +32,53 @@ from app.services.evaluation import (
 )
 
 router = APIRouter(tags=["Evaluation"])
+
+
+@router.get("/eval/templates")
+def get_eval_templates():
+    return ok(list_templates())
+
+
+@router.post("/eval/suites/from-template")
+def create_suite_from_template(
+    body: dict,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    template_id = (body.get("template_id") or "").strip()
+    assistant_id = (body.get("assistant_id") or "").strip()
+    if not template_id or not assistant_id:
+        return fail(400, "template_id and assistant_id required")
+    tpl = get_template(template_id)
+    if not tpl:
+        return fail(404, "Template not found")
+    assistant = db.get(Assistant, assistant_id)
+    if not assistant or assistant.workspace_id != ctx.workspace_id:
+        return fail(404, "Assistant not found")
+
+    name = (body.get("name") or tpl["name"]).strip()[:120]
+    suite = EvalSuite(
+        name=name,
+        description=tpl.get("description", "")[:500],
+        assistant_id=assistant_id,
+        user_id=ctx.user.user_id,
+        workspace_id=ctx.workspace_id,
+    )
+    db.add(suite)
+    db.flush()
+    for i, row in enumerate(tpl.get("cases") or []):
+        db.add(
+            EvalCase(
+                suite_id=suite.id,
+                input_text=row["input"],
+                expected_text=row.get("expected") or "",
+                match_type=row.get("match_type") or "contains",
+                sort_order=i,
+            )
+        )
+    db.commit()
+    db.refresh(suite)
+    return ok(suite_dict(suite))
 
 
 @router.get("/eval/suites")
@@ -253,6 +314,21 @@ def list_comparisons(db: Session = Depends(get_db), ctx=Depends(get_workspace_ct
     return ok([comparison_dict(r) for r in rows])
 
 
+@router.get("/eval/comparisons/trends")
+def get_comparison_trends(
+    suite_id: int | None = None,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    return ok(
+        {
+            "suite_id": suite_id,
+            "series": comparison_trends(db, ctx.workspace_id, suite_id=suite_id, limit=limit),
+        }
+    )
+
+
 @router.get("/eval/comparisons/{comparison_id}")
 def get_comparison(comparison_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     row = db.get(EvalComparison, comparison_id)
@@ -281,18 +357,26 @@ def create_schedule(body: dict, db: Session = Depends(get_db), ctx=Depends(requi
     if not suite or suite.workspace_id != ctx.workspace_id:
         return fail(404, "Suite not found")
     interval = max(1, int(body.get("interval_hours") or 24))
+    cron_expr = (body.get("cron_expression") or "").strip()
+    if cron_expr:
+        try:
+            cron_expr = validate_cron(cron_expr)
+        except ValueError as exc:
+            return fail(400, str(exc))
     now = datetime.utcnow()
     sched = EvalSchedule(
         suite_id=suite_id,
         user_id=ctx.user.user_id,
         workspace_id=ctx.workspace_id,
         interval_hours=interval,
+        cron_expression=cron_expr,
         enabled=1 if body.get("enabled", True) else 0,
         scoring=(body.get("scoring") or "rules").strip().lower(),
         judge_threshold=int(body.get("judge_threshold") or 4),
         webhook_url=(body.get("webhook_url") or "").strip()[:500],
-        next_run_at=now + timedelta(hours=interval),
+        next_run_at=None,
     )
+    sched.next_run_at = compute_schedule_next_run(sched, now)
     db.add(sched)
     db.commit()
     db.refresh(sched)
@@ -313,6 +397,16 @@ def update_schedule(
         sched.enabled = 1 if body["enabled"] else 0
     if "interval_hours" in body:
         sched.interval_hours = max(1, int(body["interval_hours"]))
+    if "cron_expression" in body:
+        cron_expr = str(body.get("cron_expression") or "").strip()
+        if cron_expr:
+            try:
+                sched.cron_expression = validate_cron(cron_expr)
+            except ValueError as exc:
+                return fail(400, str(exc))
+        else:
+            sched.cron_expression = ""
+        sched.next_run_at = compute_schedule_next_run(sched)
     if "scoring" in body:
         sched.scoring = str(body["scoring"]).strip().lower()
     if "judge_threshold" in body:
@@ -359,12 +453,135 @@ async def trigger_schedule(
         )
         now = datetime.utcnow()
         sched.last_run_at = now
-        sched.next_run_at = now + timedelta(hours=max(1, sched.interval_hours or 24))
+        sched.next_run_at = compute_schedule_next_run(sched, now)
         sched.update_time = now
         db.commit()
         return ok({"run": run_dict(run), "schedule": schedule_dict(sched)})
     except ValueError as exc:
         return fail(400, str(exc))
+
+
+@router.get("/eval/suites/{suite_id}/trends")
+def get_suite_trends(
+    suite_id: int,
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    suite = db.get(EvalSuite, suite_id)
+    if not suite or suite.workspace_id != ctx.workspace_id:
+        return fail(404, "Suite not found")
+    return ok({"suite_id": suite_id, "points": suite_trends(db, suite_id, ctx.workspace_id, limit=limit)})
+
+
+@router.get("/eval/alerts")
+def list_alerts(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    rows = (
+        db.query(EvalRegressionAlert)
+        .filter(EvalRegressionAlert.workspace_id == ctx.workspace_id)
+        .order_by(EvalRegressionAlert.update_time.desc())
+        .all()
+    )
+    return ok([alert_dict(r) for r in rows])
+
+
+@router.post("/eval/alerts")
+def create_alert(body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+    suite_id = body.get("suite_id")
+    if not suite_id:
+        return fail(400, "suite_id required")
+    suite = db.get(EvalSuite, suite_id)
+    if not suite or suite.workspace_id != ctx.workspace_id:
+        return fail(404, "Suite not found")
+    row = EvalRegressionAlert(
+        suite_id=suite_id,
+        user_id=ctx.user.user_id,
+        workspace_id=ctx.workspace_id,
+        min_pass_rate=int(body.get("min_pass_rate") or 80),
+        drop_points=int(body.get("drop_points") or 10),
+        webhook_url=(body.get("webhook_url") or "").strip()[:500],
+        pagerduty_routing_key=(body.get("pagerduty_routing_key") or "").strip()[:64],
+        opsgenie_api_key=(body.get("opsgenie_api_key") or "").strip()[:128],
+        email_to=(body.get("email_to") or "").strip()[:255],
+        cooldown_hours=max(1, int(body.get("cooldown_hours") or 6)),
+        enabled=1 if body.get("enabled", True) else 0,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return ok(alert_dict(row))
+
+
+@router.patch("/eval/alerts/{alert_id}")
+def update_alert(
+    alert_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    row = db.get(EvalRegressionAlert, alert_id)
+    if not row or row.workspace_id != ctx.workspace_id:
+        return fail(404, "Alert not found")
+    if "min_pass_rate" in body:
+        row.min_pass_rate = int(body["min_pass_rate"])
+    if "drop_points" in body:
+        row.drop_points = int(body["drop_points"])
+    if "webhook_url" in body:
+        row.webhook_url = str(body["webhook_url"] or "").strip()[:500]
+    if "pagerduty_routing_key" in body:
+        row.pagerduty_routing_key = str(body["pagerduty_routing_key"] or "").strip()[:64]
+    if "opsgenie_api_key" in body and body["opsgenie_api_key"]:
+        row.opsgenie_api_key = str(body["opsgenie_api_key"]).strip()[:128]
+    if "email_to" in body:
+        row.email_to = str(body["email_to"] or "").strip()[:255]
+    if "cooldown_hours" in body:
+        row.cooldown_hours = max(1, int(body["cooldown_hours"]))
+    if "enabled" in body:
+        row.enabled = 1 if body["enabled"] else 0
+    row.update_time = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return ok(alert_dict(row))
+
+
+@router.delete("/eval/alerts/{alert_id}")
+def delete_alert(alert_id: int, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+    row = db.get(EvalRegressionAlert, alert_id)
+    if not row or row.workspace_id != ctx.workspace_id:
+        return fail(404, "Alert not found")
+    db.delete(row)
+    db.commit()
+    return ok({"deleted": alert_id})
+
+
+@router.get("/eval/runs/{run_id}/diff")
+def get_run_diff(
+    run_id: int,
+    baseline_run_id: int | None = None,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    current = db.get(EvalRun, run_id)
+    if not current or current.workspace_id != ctx.workspace_id:
+        return fail(404, "Run not found")
+
+    if baseline_run_id:
+        baseline = db.get(EvalRun, baseline_run_id)
+        if not baseline or baseline.workspace_id != ctx.workspace_id:
+            return fail(404, "Baseline run not found")
+        if baseline.suite_id != current.suite_id:
+            return fail(400, "Runs must belong to the same suite")
+    else:
+        baseline = (
+            db.query(EvalRun)
+            .filter(EvalRun.suite_id == current.suite_id, EvalRun.id != current.id)
+            .order_by(EvalRun.create_time.desc())
+            .first()
+        )
+        if not baseline:
+            return fail(400, "No previous run to compare against")
+
+    return ok(diff_eval_runs(current, baseline))
 
 
 @router.get("/eval/runs/{run_id}")

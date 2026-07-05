@@ -226,12 +226,35 @@ class EvalSchedule(Base):
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     interval_hours = Column(Integer, default=24)
+    cron_expression = Column(String(64), default="")
     enabled = Column(Integer, default=1)
     scoring = Column(String(16), default="rules")
     judge_threshold = Column(Integer, default=4)
     webhook_url = Column(String(500), default="")
     last_run_at = Column(DateTime, nullable=True)
     next_run_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    suite = relationship("EvalSuite")
+
+
+class EvalRegressionAlert(Base):
+    __tablename__ = "eval_regression_alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suite_id = Column(Integer, ForeignKey("eval_suites.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    min_pass_rate = Column(Integer, default=80)
+    drop_points = Column(Integer, default=10)
+    webhook_url = Column(String(500), default="")
+    pagerduty_routing_key = Column(String(64), default="")
+    opsgenie_api_key = Column(String(128), default="")
+    email_to = Column(String(255), default="")
+    cooldown_hours = Column(Integer, default=6)
+    enabled = Column(Integer, default=1)
+    last_alert_at = Column(DateTime, nullable=True)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -301,6 +324,30 @@ class Workspace(Base):
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class WorkspaceQuota(Base):
+    __tablename__ = "workspace_quotas"
+
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), primary_key=True)
+    eval_runs_monthly_limit = Column(Integer, default=0)
+    finetune_jobs_monthly_limit = Column(Integer, default=0)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AbModelRoute(Base):
+    __tablename__ = "ab_model_routes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("llm_providers.id"), nullable=True)
+    base_model = Column(String(120), default="")
+    variant_model = Column(String(120), default="")
+    variant_traffic_pct = Column(Integer, default=50)
+    enabled = Column(Integer, default=1)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"
 
@@ -359,6 +406,22 @@ def migrate_schema():
         for col, ddl in [
             ("webhook_url", "ALTER TABLE finetune_jobs ADD COLUMN webhook_url VARCHAR(500) DEFAULT ''"),
             ("webhook_sent", "ALTER TABLE finetune_jobs ADD COLUMN webhook_sent INTEGER DEFAULT 0"),
+        ]:
+            if col not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+    if "eval_schedules" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("eval_schedules")}
+        if "cron_expression" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE eval_schedules ADD COLUMN cron_expression VARCHAR(64) DEFAULT ''"))
+
+    if "eval_regression_alerts" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("eval_regression_alerts")}
+        for col, ddl in [
+            ("pagerduty_routing_key", "ALTER TABLE eval_regression_alerts ADD COLUMN pagerduty_routing_key VARCHAR(64) DEFAULT ''"),
+            ("opsgenie_api_key", "ALTER TABLE eval_regression_alerts ADD COLUMN opsgenie_api_key VARCHAR(128) DEFAULT ''"),
         ]:
             if col not in cols:
                 with engine.begin() as conn:

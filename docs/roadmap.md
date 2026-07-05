@@ -1,24 +1,20 @@
 # Roadmap
 
-## v1.8 — Schedules, comparison, webhooks (current)
+## v1.11 — Templates, A/B routing, quotas (current)
 
-- [x] Scheduled eval runs — interval-based auto-run with optional webhook on completion
-- [x] Multi-assistant comparison — side-by-side pass rates on the same benchmark suite
-- [x] Fine-tune job webhooks — notify external URL when training completes or fails
+- [x] Eval suite templates — industry benchmark packs (support, healthcare, finance, retail)
+- [x] Fine-tune A/B routing — split live chat traffic between base and fine-tuned models
+- [x] Workspace usage quotas — monthly caps on eval runs and fine-tune jobs
+
+## v1.10 — Diff view, on-call, cost estimates (done)
+
+## v1.9 — Regression alerts, trends, cron (done)
+
+## v1.8 — Schedules, comparison, webhooks (done)
 
 ## v1.7 — Eval judge, CSV import, model apply (done)
 
-- [x] LLM-as-judge scoring — subjective pass/fail with score + reason on benchmark runs
-- [x] Bulk CSV import — eval cases and fine-tune training rows
-- [x] Auto-apply fine-tuned model — set provider `chat_model` from succeeded jobs
-
 ## v1.6 — Evaluation & fine-tune (done)
-
-- [x] Benchmark suites — test cases against assistants with RAG, pass/fail scoring
-- [x] Eval runs — latency, pass rate, per-case results
-- [x] Fine-tune datasets — user/assistant training rows (JSONL export)
-- [x] OpenAI fine-tuning jobs — upload, start, status refresh
-- [x] Evaluation UI at `/evaluation` (Benchmarks + Fine-tune tabs)
 
 ## v1.5 — Multiple model providers + key vault (done)
 
@@ -36,8 +32,8 @@
 
 | Feature | Notes |
 |---------|--------|
-| Eval regression alerts | Slack/email when pass rate drops |
-| Comparison charts | Visual trend over time |
-| Cron expressions | Finer schedule control than hourly intervals |
+| Template marketplace | Community-shared benchmark packs |
+| Quota billing tiers | Stripe integration for limits |
+| A/B experiment analytics | Conversion metrics per variant |
 
-**NovaFlow v1.8** automates quality checks and makes it easy to compare assistants head-to-head.
+**NovaFlow v1.11** ships ready-made benchmarks, production A/B model tests, and workspace guardrails.

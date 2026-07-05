@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -121,6 +122,9 @@ async def run_eval_suite(
     assistant_id: str | None = None,
     webhook_url: str = "",
 ) -> EvalRun:
+    from app.services.ab_routing import check_eval_quota
+
+    check_eval_quota(db, workspace_id)
     assistant = db.get(Assistant, assistant_id or suite.assistant_id)
     if not assistant:
         raise ValueError("Assistant not found")
@@ -174,6 +178,10 @@ async def run_eval_suite(
             event="eval.completed",
         )
 
+    from app.services.eval_alerts import check_regression_alerts
+
+    await check_regression_alerts(db, suite, run)
+
     return run
 
 
@@ -202,7 +210,7 @@ async def _run_cases_for_assistant(
                 f"--- Context ---\n{rag}\n--- End context ---"
             )
         try:
-            output = await stream_chat_sync(system_prompt, user_msg)
+            output = await stream_chat_sync(system_prompt, user_msg, db=db, workspace_id=assistant.workspace_id)
             error = None
         except Exception as exc:
             output = ""
@@ -254,6 +262,7 @@ def schedule_dict(row) -> dict:
         "id": row.id,
         "suite_id": row.suite_id,
         "interval_hours": row.interval_hours,
+        "cron_expression": row.cron_expression or "",
         "enabled": bool(row.enabled),
         "scoring": row.scoring or "rules",
         "judge_threshold": row.judge_threshold or 4,
@@ -262,6 +271,17 @@ def schedule_dict(row) -> dict:
         "next_run_at": row.next_run_at.isoformat() if row.next_run_at else None,
         "create_time": row.create_time.isoformat() if row.create_time else None,
     }
+
+
+def compute_schedule_next_run(sched, base: datetime | None = None) -> datetime:
+    from datetime import timedelta
+
+    from app.services.cron_schedule import next_cron_run
+
+    base = base or datetime.utcnow()
+    if (sched.cron_expression or "").strip():
+        return next_cron_run(sched.cron_expression, base)
+    return base + timedelta(hours=max(1, sched.interval_hours or 24))
 
 
 def comparison_dict(row) -> dict:
@@ -294,7 +314,9 @@ async def run_eval_comparison(
     judge_threshold: int = 4,
 ) -> "EvalComparison":
     from app.database import EvalComparison
+    from app.services.ab_routing import check_eval_quota
 
+    check_eval_quota(db, workspace_id)
     if len(assistant_ids) < 2:
         raise ValueError("Select at least two assistants to compare")
 
