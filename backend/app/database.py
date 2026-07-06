@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -122,6 +123,19 @@ class WorkflowPresence(Base):
     workflow_id = Column(String(32), ForeignKey("workflows.id"), primary_key=True)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     user_name = Column(String(80), default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkflowPresenceSession(Base):
+    __tablename__ = "workflow_presence_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    user_name = Column(String(80), default="")
+    cursor_x = Column(Float, default=0)
+    cursor_y = Column(Float, default=0)
+    selected_id = Column(String(64), default="")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -529,7 +543,7 @@ def migrate_schema():
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
 
-    for table in ("workflow_versions", "workflow_ratings", "workflow_comments", "workflow_schedules", "workflow_presence"):
+    for table in ("workflow_versions", "workflow_ratings", "workflow_comments", "workflow_schedules", "workflow_presence", "workflow_presence_sessions"):
         if table not in insp.get_table_names():
             Base.metadata.tables[table].create(bind=engine, checkfirst=True)
 

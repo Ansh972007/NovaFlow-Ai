@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.database import Workflow, WorkflowPresence, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
+from app.database import Workflow, WorkflowPresence, WorkflowPresenceSession, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
 from app.services.cron_schedule import validate_cron
@@ -234,7 +234,13 @@ def workflow_version_diff(
         new_graph = new_v["graph"]
         to_label = f"v{new_v['version_no']}"
     diff = diff_workflow_graphs(old_v["graph"], new_graph)
-    return ok({"from": f"v{old_v['version_no']}", "to": to_label, **diff})
+    return ok({
+        "from": f"v{old_v['version_no']}",
+        "to": to_label,
+        "from_graph": old_v["graph"],
+        "to_graph": new_graph,
+        **diff,
+    })
 
 
 @router.get("/workflow/{workflow_id}/versions/{version_id}")
@@ -256,26 +262,56 @@ def workflow_version_detail(
 @router.post("/workflow/{workflow_id}/presence")
 def touch_workflow_presence(
     workflow_id: str,
+    body: dict = Body(default_factory=dict),
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
     w = db.get(Workflow, workflow_id)
     if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
-    row = db.get(WorkflowPresence, workflow_id)
     now = datetime.utcnow()
+    row = (
+        db.query(WorkflowPresenceSession)
+        .filter(
+            WorkflowPresenceSession.workflow_id == workflow_id,
+            WorkflowPresenceSession.user_id == ctx.user.user_id,
+        )
+        .first()
+    )
     if row:
-        row.user_id = ctx.user.user_id
         row.user_name = ctx.user.user_name
         row.updated_at = now
+        if "cursor_x" in body:
+            row.cursor_x = float(body.get("cursor_x") or 0)
+        if "cursor_y" in body:
+            row.cursor_y = float(body.get("cursor_y") or 0)
+        if "selected_id" in body:
+            row.selected_id = str(body.get("selected_id") or "")[:64]
     else:
-        row = WorkflowPresence(
+        row = WorkflowPresenceSession(
             workflow_id=workflow_id,
             user_id=ctx.user.user_id,
             user_name=ctx.user.user_name,
+            cursor_x=float(body.get("cursor_x") or 0),
+            cursor_y=float(body.get("cursor_y") or 0),
+            selected_id=str(body.get("selected_id") or "")[:64],
             updated_at=now,
         )
         db.add(row)
+    legacy = db.get(WorkflowPresence, workflow_id)
+    if legacy:
+        legacy.user_id = ctx.user.user_id
+        legacy.user_name = ctx.user.user_name
+        legacy.updated_at = now
+    else:
+        db.add(
+            WorkflowPresence(
+                workflow_id=workflow_id,
+                user_id=ctx.user.user_id,
+                user_name=ctx.user.user_name,
+                updated_at=now,
+            )
+        )
     db.commit()
     return ok({"workflow_id": workflow_id, "user_name": ctx.user.user_name})
 
@@ -289,20 +325,31 @@ def get_workflow_presence(
     w = db.get(Workflow, workflow_id)
     if not w or w.workspace_id != ctx.workspace_id:
         return fail(404, "Workflow not found")
-    row = db.get(WorkflowPresence, workflow_id)
-    if not row:
-        return ok(None)
-    age = (datetime.utcnow() - row.updated_at).total_seconds() if row.updated_at else 9999
-    if age > 90:
-        return ok(None)
-    return ok(
-        {
-            "user_id": row.user_id,
-            "user_name": row.user_name,
-            "is_self": row.user_id == ctx.user.user_id,
-            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-        }
+    cutoff = datetime.utcnow()
+    rows = (
+        db.query(WorkflowPresenceSession)
+        .filter(WorkflowPresenceSession.workflow_id == workflow_id)
+        .all()
     )
+    viewers = []
+    for row in rows:
+        age = (cutoff - row.updated_at).total_seconds() if row.updated_at else 9999
+        if age > 45:
+            continue
+        viewers.append(
+            {
+                "user_id": row.user_id,
+                "user_name": row.user_name,
+                "is_self": row.user_id == ctx.user.user_id,
+                "cursor_x": row.cursor_x or 0,
+                "cursor_y": row.cursor_y or 0,
+                "selected_id": row.selected_id or "",
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+        )
+    others = [v for v in viewers if not v["is_self"]]
+    primary = others[0] if others else None
+    return ok({"viewers": viewers, "primary": primary})
 
 
 @router.get("/workflow/{workflow_id}/versions")

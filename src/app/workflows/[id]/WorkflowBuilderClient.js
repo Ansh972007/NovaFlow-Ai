@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import Logo from "@/components/Logo";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 import WorkflowCanvas, { NODE_META, nodeSubtitle } from "@/components/workflow/WorkflowCanvas";
+import WorkflowDiffSplit from "@/components/workflow/WorkflowDiffSplit";
 import WorkflowInspector from "@/components/workflow/WorkflowInspector";
 import { NODE_ICONS } from "@/components/workflow/WorkflowNodeIcons";
 import { getUserInfo } from "@/lib/api/auth";
@@ -31,6 +32,7 @@ import {
 import { setWorkflowPublic } from "@/lib/api/marketplace";
 
 const ease = [0.16, 1, 0.3, 1];
+const CURSOR_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];
 
 const ADD_NODE_DEFAULTS = {
   transform: { template: "{{input}}" },
@@ -71,7 +73,10 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [versionDiff, setVersionDiff] = useState(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffOverlayActive, setDiffOverlayActive] = useState(false);
+  const [diffSplitActive, setDiffSplitActive] = useState(false);
   const [presence, setPresence] = useState(null);
+  const [presenceViewers, setPresenceViewers] = useState([]);
+  const cursorThrottleRef = useRef(0);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState(null);
   const [libraries, setLibraries] = useState([]);
@@ -151,15 +156,47 @@ export default function WorkflowBuilderClient({ workflowId }) {
 
   useEffect(() => {
     if (!user || user.role === "viewer") return undefined;
-    touchWorkflowPresence(workflowId).catch(() => {});
-    const poll = setInterval(() => {
-      touchWorkflowPresence(workflowId).catch(() => {});
+    const syncPresence = () => {
+      touchWorkflowPresence(workflowId, {
+        cursor_x: cursorThrottleRef.currentX || 0,
+        cursor_y: cursorThrottleRef.currentY || 0,
+        selected_id: selectedId || "",
+      }).catch(() => {});
       getWorkflowPresence(workflowId)
-        .then((p) => setPresence(p && !p.is_self ? p : null))
-        .catch(() => setPresence(null));
-    }, 30000);
+        .then((res) => {
+          const viewers = (res?.viewers || []).filter((v) => !v.is_self);
+          const colored = viewers.map((v, i) => ({
+            ...v,
+            color: CURSOR_COLORS[i % CURSOR_COLORS.length],
+          }));
+          setPresenceViewers(colored);
+          setPresence(res?.primary && !res.primary.is_self ? res.primary : colored[0] || null);
+        })
+        .catch(() => {
+          setPresenceViewers([]);
+          setPresence(null);
+        });
+    };
+    syncPresence();
+    const poll = setInterval(syncPresence, 5000);
     return () => clearInterval(poll);
-  }, [user, workflowId]);
+  }, [user, workflowId, selectedId]);
+
+  const handleCursorMove = useCallback(
+    (x, y) => {
+      cursorThrottleRef.currentX = x;
+      cursorThrottleRef.currentY = y;
+      const now = Date.now();
+      if (now - (cursorThrottleRef.lastSent || 0) < 1200) return;
+      cursorThrottleRef.lastSent = now;
+      touchWorkflowPresence(workflowId, {
+        cursor_x: x,
+        cursor_y: y,
+        selected_id: selectedId || "",
+      }).catch(() => {});
+    },
+    [workflowId, selectedId]
+  );
 
   function updateNode(id, patch) {
     setGraph((prev) => ({
@@ -298,6 +335,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
     setDiffLoading(true);
     setVersionDiff(null);
     setDiffOverlayActive(false);
+    setDiffSplitActive(false);
     setInspectorTab("history");
     try {
       const diff = await getWorkflowVersionDiff(workflowId, versionId, "current");
@@ -567,7 +605,9 @@ export default function WorkflowBuilderClient({ workflowId }) {
 
       {presence && (
         <div className="relative z-20 shrink-0 border-b border-sky-100 bg-sky-50/90 px-4 py-2 text-center text-sm text-sky-800">
-          {presence.user_name} is also viewing this workflow
+          {presenceViewers.length > 1
+            ? `${presenceViewers.map((v) => v.user_name).join(", ")} are also viewing this workflow`
+            : `${presence.user_name} is also viewing this workflow`}
         </div>
       )}
 
@@ -677,6 +717,14 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 <div className="h-12 w-12 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900" />
                 <p className="text-sm text-neutral-500">Loading canvas…</p>
               </div>
+            ) : diffSplitActive && versionDiff ? (
+              <WorkflowDiffSplit
+                fromLabel={versionDiff.from}
+                toLabel={versionDiff.to}
+                fromGraph={versionDiff.from_graph}
+                toGraph={versionDiff.to_graph}
+                overlay={versionDiff.overlay}
+              />
             ) : (
               <WorkflowCanvas
                 key={workflowId}
@@ -694,6 +742,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 flowing={running}
                 readOnly={readOnly}
                 diffOverlay={diffOverlayActive && versionDiff?.overlay ? versionDiff.overlay : null}
+                remoteCursors={presenceViewers}
+                onCursorMove={readOnly ? undefined : handleCursorMove}
               />
             )}
           </motion.div>
@@ -740,6 +790,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
           diffLoading={diffLoading}
           diffOverlayActive={diffOverlayActive}
           onToggleDiffOverlay={setDiffOverlayActive}
+          diffSplitActive={diffSplitActive}
+          onToggleDiffSplit={setDiffSplitActive}
           onCompareVersion={readOnly ? undefined : handleCompareVersion}
           readOnly={readOnly}
         />

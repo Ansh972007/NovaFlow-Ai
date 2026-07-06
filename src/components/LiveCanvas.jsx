@@ -23,6 +23,14 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
     let h = 0;
     let nodes = [];
     let pulses = [];
+    let pageVisible = document.visibilityState !== "hidden";
+
+    const onVisibility = () => {
+      pageVisible = document.visibilityState !== "hidden";
+      if (pageVisible && !frameRef.current) {
+        frameRef.current = requestAnimationFrame(draw);
+      }
+    };
 
     const isViolet = tone === "violet";
 
@@ -108,6 +116,10 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
     }
 
     function draw() {
+      if (!pageVisible) {
+        frameRef.current = 0;
+        return;
+      }
       const colors = palette();
       ctx.clearRect(0, 0, w, h);
 
@@ -241,10 +253,13 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
       window.addEventListener("mousemove", onMove, { passive: true });
       window.addEventListener("mouseleave", onLeave);
     }
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelAnimationFrame(frameRef.current);
+      frameRef.current = 0;
       ro.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
       if (mouseTracking) {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseleave", onLeave);

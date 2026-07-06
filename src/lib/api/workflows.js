@@ -136,8 +136,8 @@ export async function getWorkflowVersionDiff(workflowId, fromId, toId = "current
   });
 }
 
-export async function touchWorkflowPresence(workflowId) {
-  return client.post(`/workflow/${workflowId}/presence`);
+export async function touchWorkflowPresence(workflowId, payload = {}) {
+  return client.post(`/workflow/${workflowId}/presence`, payload);
 }
 
 export async function getWorkflowPresence(workflowId) {

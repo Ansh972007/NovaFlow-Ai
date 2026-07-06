@@ -36,6 +36,9 @@ export default function ChatFlowCanvas({ active = false }) {
 
     const onVisibility = () => {
       pageVisible = document.visibilityState !== "hidden";
+      if (pageVisible && !frameId) {
+        frameId = requestAnimationFrame(render);
+      }
     };
 
     const colors = {
@@ -75,7 +78,8 @@ export default function ChatFlowCanvas({ active = false }) {
     }
 
     function init() {
-      const nodeCount = Math.min(72, Math.max(48, Math.floor(w * h * 0.00007)));
+      const perfScale = window.innerWidth < 768 || navigator.hardwareConcurrency <= 4 ? 0.72 : 1;
+      const nodeCount = Math.min(72, Math.max(40, Math.floor(w * h * 0.00007 * perfScale)));
       nodes = Array.from({ length: nodeCount }, () => ({
         x: rand(0, w),
         y: rand(0, h),
@@ -326,7 +330,7 @@ export default function ChatFlowCanvas({ active = false }) {
 
     function render(time) {
       if (!pageVisible) {
-        frameId = requestAnimationFrame(render);
+        frameId = 0;
         return;
       }
       const t = time * 0.001;

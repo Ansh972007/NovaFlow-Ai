@@ -1,6 +1,10 @@
 import JSEncrypt from "jsencrypt";
 import client from "./client";
 
+let userCache = null;
+let userCacheAt = 0;
+const USER_CACHE_MS = 20000;
+
 export async function getPublicKey() {
   return client.get("/user/public_key");
 }
@@ -24,22 +28,38 @@ export async function encryptPassword(password) {
 
 export async function login(userName, password) {
   const encryptedPassword = await encryptPassword(password);
-  return client.post("/user/login", {
+  const data = await client.post("/user/login", {
     user_name: userName,
     password: encryptedPassword,
   });
+  clearUserCache();
+  return data;
 }
 
 export async function register(userName, password) {
   const encryptedPassword = await encryptPassword(password);
-  return client.post("/user/regist", {
+  const data = await client.post("/user/regist", {
     user_name: userName,
     password: encryptedPassword,
   });
+  clearUserCache();
+  return data;
 }
 
-export async function getUserInfo() {
-  return client.get("/user/info");
+export async function getUserInfo(options = {}) {
+  const { fresh = false } = options;
+  if (!fresh && userCache && Date.now() - userCacheAt < USER_CACHE_MS) {
+    return userCache;
+  }
+  const data = await client.get("/user/info");
+  userCache = data;
+  userCacheAt = Date.now();
+  return data;
+}
+
+export function clearUserCache() {
+  userCache = null;
+  userCacheAt = 0;
 }
 
 export async function changePassword(currentPassword, newPassword) {
@@ -55,5 +75,6 @@ export async function getLdapStatus() {
 }
 
 export async function logout() {
+  clearUserCache();
   return client.post("/user/logout");
 }

@@ -1,6 +1,12 @@
 # Roadmap
 
-## v6.0 — Developer & diff canvas (current)
+## v7.0 — Collaboration & security (current)
+
+- [x] SAML signature verification — IdP cert validation, audience & timestamp checks
+- [x] Side-by-side workflow diff — dual canvas compare (before / after)
+- [x] Co-editing presence — multi-viewer list with live cursor positions on canvas
+
+## v6.0 — Developer & diff canvas (done)
 
 - [x] Visual workflow diff canvas — overlay added/changed/removed nodes on the builder
 - [x] Knowledge URL ingest — fetch web pages into a knowledge base
@@ -8,13 +14,6 @@
 - [x] API playground — test endpoints with session or API key
 
 ## v5.0 — Enterprise intelligence (done)
-
-- [x] Workflow version diff — compare snapshots vs current draft
-- [x] SAML 2.0 SSO — SP-initiated login + metadata endpoint
-- [x] Workflow run webhooks — POST on successful completion
-- [x] Edit presence — see when teammates view a workflow
-- [x] Workspace quotas UI — admin limits for eval & fine-tune
-- [x] Chat transcript export — download session as Markdown
 
 ## v4.0 — Enterprise automation (done)
 
@@ -24,8 +23,8 @@
 
 | Feature | Notes |
 |---------|--------|
-| SAML signature verification | Hardened IdP cert validation |
-| Real-time co-editing | Shared cursor on workflow canvas |
-| Side-by-side diff view | Dual canvas compare mode |
+| Real-time graph merge | Operational transform for simultaneous edits |
+| SAML SLO | Single logout with IdP |
+| Diff export | PDF/JSON export of version comparisons |
 
-**NovaFlow v6.0** adds visual diff overlays, URL knowledge ingest, A/B routing settings, and an API playground.
+**NovaFlow v7.0** adds SAML hardening, side-by-side diff, and live co-editing cursors.

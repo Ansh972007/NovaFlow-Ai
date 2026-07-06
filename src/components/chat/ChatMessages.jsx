@@ -19,7 +19,10 @@ export default function ChatMessages({ messages, streaming, error, assistantName
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    bottomRef.current?.scrollIntoView({
+      behavior: streaming ? "auto" : "smooth",
+      block: "end",
+    });
   }, [messages.length, streaming, error]);
 
   const showThinking =

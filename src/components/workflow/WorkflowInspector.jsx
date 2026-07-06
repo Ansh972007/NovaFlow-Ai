@@ -47,6 +47,8 @@ export default function WorkflowInspector({
   diffLoading = false,
   diffOverlayActive = false,
   onToggleDiffOverlay,
+  diffSplitActive = false,
+  onToggleDiffSplit,
   onCompareVersion,
   readOnly = false,
 }) {
@@ -816,23 +818,44 @@ export default function WorkflowInspector({
               {diffLoading && <p className="mt-3 text-xs text-neutral-500">Computing diff…</p>}
               {versionDiff && (
                 <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50/60 p-4 text-xs">
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                     <p className="font-semibold text-violet-900">
                       {versionDiff.from} → {versionDiff.to}
                     </p>
-                    {onToggleDiffOverlay && (
-                      <button
-                        type="button"
-                        onClick={() => onToggleDiffOverlay(!diffOverlayActive)}
-                        className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
-                          diffOverlayActive
-                            ? "bg-violet-700 text-white"
-                            : "bg-white text-violet-800 ring-1 ring-violet-200"
-                        }`}
-                      >
-                        {diffOverlayActive ? "Hide canvas" : "Show on canvas"}
-                      </button>
-                    )}
+                    <div className="flex shrink-0 flex-wrap gap-1.5">
+                      {onToggleDiffSplit && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onToggleDiffSplit(!diffSplitActive);
+                            if (!diffSplitActive && onToggleDiffOverlay) onToggleDiffOverlay(false);
+                          }}
+                          className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+                            diffSplitActive
+                              ? "bg-violet-700 text-white"
+                              : "bg-white text-violet-800 ring-1 ring-violet-200"
+                          }`}
+                        >
+                          {diffSplitActive ? "Exit split" : "Side-by-side"}
+                        </button>
+                      )}
+                      {onToggleDiffOverlay && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onToggleDiffOverlay(!diffOverlayActive);
+                            if (!diffOverlayActive && onToggleDiffSplit) onToggleDiffSplit(false);
+                          }}
+                          className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+                            diffOverlayActive
+                              ? "bg-violet-700 text-white"
+                              : "bg-white text-violet-800 ring-1 ring-violet-200"
+                          }`}
+                        >
+                          {diffOverlayActive ? "Hide overlay" : "Show overlay"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <ul className="mt-2 space-y-1 text-neutral-700">
                     <li>+{versionDiff.summary?.nodes_added || 0} nodes · −{versionDiff.summary?.nodes_removed || 0} removed · ~{versionDiff.summary?.nodes_changed || 0} changed</li>

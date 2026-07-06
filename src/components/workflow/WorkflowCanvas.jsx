@@ -130,6 +130,8 @@ export default function WorkflowCanvas({
   flowing = false,
   readOnly = false,
   diffOverlay = null,
+  remoteCursors = [],
+  onCursorMove,
 }) {
   const viewportRef = useRef(null);
   const didFitRef = useRef(false);
@@ -324,6 +326,10 @@ export default function WorkflowCanvas({
     if (panning) {
       setPan({ x: e.clientX - panning.ox, y: e.clientY - panning.oy });
       return;
+    }
+    if (onCursorMove && editable) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      onCursorMove(world.x, world.y);
     }
     if (!dragging) return;
     const world = screenToWorld(e.clientX, e.clientY);
@@ -536,6 +542,25 @@ export default function WorkflowCanvas({
             </div>
           );
         })}
+
+        {remoteCursors.map((cursor, i) => (
+          <div
+            key={`${cursor.user_id}-${i}`}
+            className="pointer-events-none absolute z-40"
+            style={{ left: cursor.cursor_x || 0, top: cursor.cursor_y || 0 }}
+          >
+            <div
+              className="h-3 w-3 rounded-full ring-2 ring-white"
+              style={{ backgroundColor: cursor.color || "#8b5cf6" }}
+            />
+            <span
+              className="absolute left-4 top-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-semibold text-white shadow-md"
+              style={{ backgroundColor: cursor.color || "#8b5cf6" }}
+            >
+              {cursor.user_name}
+            </span>
+          </div>
+        ))}
       </div>
 
       {nodes.length === 0 && (
