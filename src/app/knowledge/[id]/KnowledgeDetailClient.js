@@ -11,6 +11,7 @@ import { getUserInfo } from "@/lib/api/auth";
 import {
   FILE_STATUS,
   getKnowledgeFiles,
+  ingestKnowledgeUrl,
   listKnowledge,
   processKnowledgeFiles,
   uploadKnowledgeFile,
@@ -30,6 +31,8 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [ingestUrl, setIngestUrl] = useState("");
+  const [ingesting, setIngesting] = useState(false);
   const [error, setError] = useState("");
 
   const loadFiles = useCallback(async () => {
@@ -105,6 +108,23 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
     }
   }
 
+  async function handleIngestUrl(e) {
+    e.preventDefault();
+    const url = ingestUrl.trim();
+    if (!url) return;
+    setIngesting(true);
+    setError("");
+    try {
+      await ingestKnowledgeUrl(knowledgeId, url);
+      setIngestUrl("");
+      await loadFiles();
+    } catch (err) {
+      setError(err.message || "URL ingest failed");
+    } finally {
+      setIngesting(false);
+    }
+  }
+
   const readyCount = files.filter((f) => f.status === 2).length;
 
   if (!user) {
@@ -164,6 +184,9 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                       <span className="rounded-full bg-violet-50 px-3 py-1 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200/60">
                         OCR: PNG, JPG, WebP
                       </span>
+                      <span className="rounded-full bg-sky-50 px-3 py-1 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-200/60">
+                        URL ingest
+                      </span>
                     </div>
                   )}
                 </div>
@@ -204,6 +227,21 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
               <p className="relative mt-4 rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-800">
                 {error}
               </p>
+            )}
+
+            {writeable && (
+              <form onSubmit={handleIngestUrl} className="relative mt-6 flex flex-col gap-3 sm:flex-row">
+                <input
+                  type="url"
+                  value={ingestUrl}
+                  onChange={(e) => setIngestUrl(e.target.value)}
+                  placeholder="https://docs.example.com/page"
+                  className="input-field min-w-0 flex-1"
+                />
+                <button type="submit" disabled={ingesting || !ingestUrl.trim()} className="btn-primary shrink-0 disabled:opacity-50">
+                  {ingesting ? "Fetching…" : "Ingest URL"}
+                </button>
+              </form>
             )}
           </motion.div>
 

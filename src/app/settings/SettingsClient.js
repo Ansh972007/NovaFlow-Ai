@@ -24,6 +24,7 @@ import { getTeamMembers, updateMemberRole, downloadAuditExport, getAuditEvents }
 import { getWorkspaceQuotas, updateWorkspaceQuotas, getActiveWorkspaceId } from "@/lib/api/workspaces";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { createApiKey, deleteApiKey, listApiKeys } from "@/lib/api/apiKeys";
+import { createAbRoute, deleteAbRoute, listAbRoutes, updateAbRoute } from "@/lib/api/finetune";
 import { resetSetup } from "@/lib/setup/storage";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -68,6 +69,12 @@ export default function SettingsClient() {
   const [quotas, setQuotas] = useState(null);
   const [quotaBusy, setQuotaBusy] = useState(false);
   const [quotaMsg, setQuotaMsg] = useState("");
+  const [abRoutes, setAbRoutes] = useState([]);
+  const [abBase, setAbBase] = useState("");
+  const [abVariant, setAbVariant] = useState("");
+  const [abTraffic, setAbTraffic] = useState(50);
+  const [abBusy, setAbBusy] = useState(false);
+  const [abMsg, setAbMsg] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,6 +127,9 @@ export default function SettingsClient() {
       if (wid) {
         getWorkspaceQuotas(wid).then(setQuotas).catch(() => setQuotas(null));
       }
+      listAbRoutes()
+        .then((rows) => setAbRoutes(Array.isArray(rows) ? rows : rows?.data || []))
+        .catch(() => setAbRoutes([]));
     }
   }, [user]);
 
@@ -156,6 +166,56 @@ export default function SettingsClient() {
       setQuotaMsg(err.message || "Save failed");
     } finally {
       setQuotaBusy(false);
+    }
+  }
+
+  async function handleCreateAbRoute(e) {
+    e.preventDefault();
+    if (!abBase.trim() || !abVariant.trim()) return;
+    setAbBusy(true);
+    setAbMsg("");
+    try {
+      await createAbRoute({
+        base_model: abBase.trim(),
+        variant_model: abVariant.trim(),
+        variant_traffic_pct: Number(abTraffic) || 50,
+        enabled: true,
+      });
+      const rows = await listAbRoutes();
+      setAbRoutes(Array.isArray(rows) ? rows : rows?.data || []);
+      setAbBase("");
+      setAbVariant("");
+      setAbTraffic(50);
+      setAbMsg("A/B route created.");
+    } catch (err) {
+      setAbMsg(err.message || "Create failed");
+    } finally {
+      setAbBusy(false);
+    }
+  }
+
+  async function handleToggleAbRoute(route) {
+    setAbBusy(true);
+    try {
+      await updateAbRoute(route.id, { enabled: !route.enabled });
+      const rows = await listAbRoutes();
+      setAbRoutes(Array.isArray(rows) ? rows : rows?.data || []);
+    } catch (err) {
+      setAbMsg(err.message || "Update failed");
+    } finally {
+      setAbBusy(false);
+    }
+  }
+
+  async function handleDeleteAbRoute(id) {
+    setAbBusy(true);
+    try {
+      await deleteAbRoute(id);
+      setAbRoutes((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      setAbMsg(err.message || "Delete failed");
+    } finally {
+      setAbBusy(false);
     }
   }
 
@@ -796,13 +856,104 @@ export default function SettingsClient() {
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.135, ease }}
+                className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
+              >
+                <h2 className="text-lg font-semibold tracking-tight">A/B model routing</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  Split traffic between a base and variant model for chat and workflow LLM nodes.
+                </p>
+                <form onSubmit={handleCreateAbRoute} className="mt-5 grid gap-4 sm:grid-cols-3">
+                  <label className="block text-sm font-medium sm:col-span-1">
+                    Base model
+                    <input
+                      value={abBase}
+                      onChange={(e) => setAbBase(e.target.value)}
+                      placeholder="gpt-4o-mini"
+                      className="input-field mt-1.5 w-full"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium sm:col-span-1">
+                    Variant model
+                    <input
+                      value={abVariant}
+                      onChange={(e) => setAbVariant(e.target.value)}
+                      placeholder="ft:gpt-4o-mini:custom"
+                      className="input-field mt-1.5 w-full"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium sm:col-span-1">
+                    Variant traffic %
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={abTraffic}
+                      onChange={(e) => setAbTraffic(e.target.value)}
+                      className="input-field mt-1.5 w-full"
+                    />
+                  </label>
+                  {abMsg && <p className="sm:col-span-3 text-sm text-neutral-600">{abMsg}</p>}
+                  <button type="submit" disabled={abBusy} className="btn-primary sm:col-span-3 disabled:opacity-50">
+                    {abBusy ? "Saving…" : "Add route"}
+                  </button>
+                </form>
+                <ul className="mt-6 space-y-2">
+                  {abRoutes.length === 0 ? (
+                    <li className="text-sm text-neutral-500">No A/B routes configured.</li>
+                  ) : (
+                    abRoutes.map((route) => (
+                      <li
+                        key={route.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-200/80 bg-white/60 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-neutral-900">
+                            {route.base_model} → {route.variant_model}
+                          </p>
+                          <p className="mt-0.5 text-xs text-neutral-500">
+                            {route.variant_traffic_pct}% variant · {route.enabled ? "Active" : "Paused"}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            disabled={abBusy}
+                            onClick={() => handleToggleAbRoute(route)}
+                            className="workspace-btn-ghost !py-1.5 text-xs"
+                          >
+                            {route.enabled ? "Pause" : "Enable"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={abBusy}
+                            onClick={() => handleDeleteAbRoute(route.id)}
+                            className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </motion.div>
+            )}
+
+            {user.role === "admin" && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.14, ease }}
                 className="workspace-panel rounded-[1.75rem] p-6 sm:p-7"
               >
                 <h2 className="text-lg font-semibold tracking-tight">API keys</h2>
                 <p className="mt-1 text-sm text-neutral-500">
                   Programmatic access for scripts and integrations. Send{" "}
-                  <code className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs">X-Api-Key: nf_…</code> on requests.
+                  <code className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs">X-Api-Key: nf_…</code> on requests.{" "}
+                  <Link href="/developer" className="font-medium text-neutral-800 underline-offset-2 hover:underline">
+                    Open API playground
+                  </Link>
                 </p>
 
                 {newApiKey && (

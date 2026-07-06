@@ -129,6 +129,7 @@ export default function WorkflowCanvas({
   onSelect,
   flowing = false,
   readOnly = false,
+  diffOverlay = null,
 }) {
   const viewportRef = useRef(null);
   const didFitRef = useRef(false);
@@ -158,6 +159,32 @@ export default function WorkflowCanvas({
     });
     return set;
   }, [edges, selectedId]);
+
+  const diffNodeStatus = useMemo(() => {
+    if (!diffOverlay) return {};
+    const map = {};
+    (diffOverlay.added_ids || []).forEach((id) => {
+      map[id] = "added";
+    });
+    (diffOverlay.changed_ids || []).forEach((id) => {
+      map[id] = "changed";
+    });
+    return map;
+  }, [diffOverlay]);
+
+  const removedNodes = diffOverlay?.removed_nodes || [];
+
+  const edgeDiffStatus = useMemo(() => {
+    if (!diffOverlay) return {};
+    const map = {};
+    (diffOverlay.edges_added || []).forEach((e) => {
+      map[`${e.from}->${e.to}`] = "added";
+    });
+    (diffOverlay.edges_removed || []).forEach((e) => {
+      map[`${e.from}->${e.to}`] = "removed";
+    });
+    return map;
+  }, [diffOverlay]);
 
   const canvasSize = useMemo(() => {
     const padding = 240;
@@ -370,7 +397,24 @@ export default function WorkflowCanvas({
         </button>
       </div>
 
-      {editable && (
+      {diffOverlay && (
+        <div className="pointer-events-none absolute right-4 top-4 z-50 flex flex-wrap gap-2 rounded-xl border border-white/80 bg-white/90 px-3 py-2 text-[10px] font-medium text-neutral-600 backdrop-blur-md">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200" />
+            Added
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-amber-200" />
+            Changed
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full border-2 border-dashed border-red-400 bg-red-50" />
+            Removed
+          </span>
+        </div>
+      )}
+
+      {editable && !diffOverlay && (
         <div className="pointer-events-none absolute left-4 top-4 z-50 max-w-[220px] rounded-xl border border-white/80 bg-white/85 px-3 py-2 text-[10px] leading-relaxed text-neutral-600 backdrop-blur-md">
           <strong className="font-semibold">Tip:</strong> link nodes in the Configure panel
           (Connect from / Connect to). Shift+drag to pan · scroll to zoom.
@@ -391,6 +435,7 @@ export default function WorkflowCanvas({
           selectedId={selectedId}
           nodeMeta={nodeMetaMap}
           flowing={flowing}
+          edgeDiffStatus={edgeDiffStatus}
         />
 
         {nodes.map((node) => {
@@ -399,6 +444,14 @@ export default function WorkflowCanvas({
           const isSelected = node.id === selectedId;
           const isConnected = connectedIds.has(node.id);
           const isDragging = dragging?.id === node.id;
+          const diffStatus = diffNodeStatus[node.id];
+
+          const diffRing =
+            diffStatus === "added"
+              ? "ring-4 ring-emerald-400/80"
+              : diffStatus === "changed"
+                ? "ring-4 ring-amber-400/80"
+                : "";
 
           return (
             <div
@@ -432,7 +485,7 @@ export default function WorkflowCanvas({
                 transition={{ type: "spring", stiffness: 420, damping: 28 }}
                 className={`workflow-node-circle ${meta.accent} absolute left-1/2 z-10 flex -translate-x-1/2 cursor-grab flex-col items-center justify-center rounded-full border-2 shadow-lg active:cursor-grabbing ${
                   isDragging ? "z-30" : isSelected ? "z-20" : "z-10"
-                } ${isConnected && !isSelected ? "workflow-node-connected" : ""}`}
+                } ${isConnected && !isSelected ? "workflow-node-connected" : ""} ${diffRing}`}
                 style={{ top: WF.CY - WF.R, width: WF.D, height: WF.D }}
               >
                 <span
@@ -453,6 +506,33 @@ export default function WorkflowCanvas({
                 <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-400">{meta.label}</p>
                 <p className="mt-0.5 truncate text-xs font-semibold text-neutral-900">{nodeSubtitle(node)}</p>
               </motion.div>
+            </div>
+          );
+        })}
+
+        {removedNodes.map((node) => {
+          const Icon = NODE_ICONS[node.type] || NODE_ICONS.output;
+          return (
+            <div
+              key={`removed-${node.id}`}
+              className="pointer-events-none absolute opacity-55"
+              style={{ left: node.x || 0, top: node.y || 0, width: WF.W, height: WF.TOTAL_H }}
+            >
+              <div
+                className="absolute left-1/2 z-10 flex -translate-x-1/2 flex-col items-center justify-center rounded-full border-2 border-dashed border-red-400 bg-red-50/80 shadow-md ring-4 ring-red-300/50"
+                style={{ top: WF.CY - WF.R, width: WF.D, height: WF.D }}
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100/80 text-red-600">
+                  <Icon size={22} />
+                </span>
+              </div>
+              <div
+                className="absolute left-1/2 w-[130px] -translate-x-1/2 text-center"
+                style={{ top: WF.CY + WF.R + 10 }}
+              >
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-red-500">Removed</p>
+                <p className="mt-0.5 truncate text-xs font-semibold text-red-700">{nodeSubtitle(node)}</p>
+              </div>
             </div>
           );
         })}

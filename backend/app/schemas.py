@@ -66,6 +66,12 @@ class ProcessFiles(BaseModel):
     chunk_overlap: int = 100
 
 
+class KnowledgeUrlIngest(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    chunk_size: int = 1000
+    chunk_overlap: int = 100
+
+
 class WorkflowCreate(BaseModel):
     name: str = Field(max_length=80)
     desc: str = ""

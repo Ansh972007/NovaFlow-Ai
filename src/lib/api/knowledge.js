@@ -56,6 +56,10 @@ export async function retryKnowledgeFile(data) {
   return client.post("/knowledge/retry", data);
 }
 
+export async function ingestKnowledgeUrl(knowledgeId, url) {
+  return client.post(`/knowledge/ingest-url/${knowledgeId}`, { url });
+}
+
 /** Search indexed chunks (Q&A preview) */
 export async function searchKnowledgeChunks(knowledgeId, keyword, { page = 1, limit = 6 } = {}) {
   if (!keyword?.trim()) return { data: [], total: 0 };

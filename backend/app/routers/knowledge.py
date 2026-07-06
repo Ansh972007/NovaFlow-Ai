@@ -1,14 +1,17 @@
+import re
 import shutil
 import uuid
 from datetime import datetime
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.config import EMBEDDING_MODELS
 from app.database import KnowledgeBase, KnowledgeFile, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
-from app.schemas import KnowledgeCreate, ProcessFiles, fail, ok
+from app.schemas import KnowledgeCreate, KnowledgeUrlIngest, ProcessFiles, fail, ok
 from app.services.knowledge import kb_upload_dir, process_file_record, search_chunks
 
 router = APIRouter(tags=["Knowledge"])
@@ -159,3 +162,64 @@ def get_chunks(
 @router.post("/knowledge/retry")
 def retry_file():
     return ok(None)
+
+
+def _url_to_filename(url: str) -> str:
+    parsed = urlparse(url)
+    path = (parsed.path or "").rstrip("/").split("/")[-1]
+    if path and "." in path:
+        return path[:120]
+    host = (parsed.netloc or "page").replace(":", "_")
+    return f"{host}.txt"[:120]
+
+
+@router.post("/knowledge/ingest-url/{knowledge_id}")
+async def ingest_url(
+    knowledge_id: int,
+    body: KnowledgeUrlIngest,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    kb = db.get(KnowledgeBase, knowledge_id)
+    if not kb or kb.workspace_id != ctx.workspace_id:
+        return fail(404, "Knowledge base not found")
+    url = body.url.strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return fail(400, "URL must start with http:// or https://")
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            res = await client.get(url, headers={"User-Agent": "NovaFlow-KB-Ingest/1.0"})
+            res.raise_for_status()
+            content_type = (res.headers.get("content-type") or "").lower()
+            if "html" in content_type or "<html" in (res.text or "")[:200].lower():
+                text = re.sub(r"<script[^>]*>[\s\S]*?</script>", " ", res.text or "", flags=re.I)
+                text = re.sub(r"<style[^>]*>[\s\S]*?</style>", " ", text, flags=re.I)
+                text = re.sub(r"<[^>]+>", " ", text)
+                text = re.sub(r"\s+", " ", text).strip()
+            else:
+                text = (res.text or "").strip()
+    except httpx.HTTPStatusError as exc:
+        return fail(400, f"Fetch failed: HTTP {exc.response.status_code}")
+    except Exception as exc:
+        return fail(400, f"Fetch failed: {exc}")
+    if not text:
+        return fail(400, "No text content found at URL")
+    text = text[:500_000]
+    safe_name = _url_to_filename(url)
+    dest_dir = kb_upload_dir(knowledge_id)
+    dest = dest_dir / f"{uuid.uuid4().hex}_{safe_name}"
+    header = f"Source: {url}\nFetched: {datetime.utcnow().isoformat()}Z\n\n"
+    dest.write_text(header + text, encoding="utf-8")
+    rel = f"{knowledge_id}/{dest.name}"
+    record = KnowledgeFile(
+        knowledge_id=knowledge_id,
+        file_name=safe_name,
+        file_path=rel,
+        status=5,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    process_file_record(db, record, body.chunk_size, body.chunk_overlap)
+    return ok({"id": record.id, "file_name": safe_name, "file_path": rel, "url": url})

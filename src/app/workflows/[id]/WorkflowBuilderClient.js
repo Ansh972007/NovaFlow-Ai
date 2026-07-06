@@ -70,6 +70,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [runWebhookUrl, setRunWebhookUrl] = useState("");
   const [versionDiff, setVersionDiff] = useState(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [diffOverlayActive, setDiffOverlayActive] = useState(false);
   const [presence, setPresence] = useState(null);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState(null);
@@ -296,10 +297,12 @@ export default function WorkflowBuilderClient({ workflowId }) {
   async function handleCompareVersion(versionId) {
     setDiffLoading(true);
     setVersionDiff(null);
+    setDiffOverlayActive(false);
     setInspectorTab("history");
     try {
       const diff = await getWorkflowVersionDiff(workflowId, versionId, "current");
       setVersionDiff(diff);
+      setDiffOverlayActive(true);
     } catch (err) {
       setError(err.message || "Diff failed");
     } finally {
@@ -690,6 +693,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 onSelect={setSelectedId}
                 flowing={running}
                 readOnly={readOnly}
+                diffOverlay={diffOverlayActive && versionDiff?.overlay ? versionDiff.overlay : null}
               />
             )}
           </motion.div>
@@ -734,6 +738,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
           onRunWebhookUrlChange={readOnly ? undefined : setRunWebhookUrl}
           versionDiff={versionDiff}
           diffLoading={diffLoading}
+          diffOverlayActive={diffOverlayActive}
+          onToggleDiffOverlay={setDiffOverlayActive}
           onCompareVersion={readOnly ? undefined : handleCompareVersion}
           readOnly={readOnly}
         />

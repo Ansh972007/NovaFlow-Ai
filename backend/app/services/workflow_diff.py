@@ -45,6 +45,8 @@ def diff_workflow_graphs(old_graph: dict, new_graph: dict) -> dict[str, Any]:
     edges_added = [e for e in new_edges if _edge_key(e) not in old_edge_keys]
     edges_removed = [e for e in old_edges if _edge_key(e) not in new_edge_keys]
 
+    removed_full = [old_nodes[nid] for nid in old_nodes if nid not in new_nodes]
+
     return {
         "summary": {
             "nodes_added": len(nodes_added),
@@ -58,4 +60,11 @@ def diff_workflow_graphs(old_graph: dict, new_graph: dict) -> dict[str, Any]:
         "nodes_changed": nodes_changed,
         "edges_added": edges_added,
         "edges_removed": edges_removed,
+        "overlay": {
+            "added_ids": [n["id"] for n in nodes_added],
+            "changed_ids": [c["id"] for c in nodes_changed],
+            "removed_nodes": removed_full,
+            "edges_added": edges_added,
+            "edges_removed": edges_removed,
+        },
     }

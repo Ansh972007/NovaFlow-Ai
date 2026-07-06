@@ -57,3 +57,7 @@ export async function createAbRoute(payload) {
 export async function deleteAbRoute(id) {
   return client.delete(`/finetune/ab-routes/${id}`);
 }
+
+export async function updateAbRoute(id, payload) {
+  return client.patch(`/finetune/ab-routes/${id}`, payload);
+}

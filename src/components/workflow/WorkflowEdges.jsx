@@ -19,6 +19,7 @@ export default function WorkflowEdges({
   selectedId,
   nodeMeta,
   flowing = false,
+  edgeDiffStatus = {},
 }) {
   return (
     <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
@@ -33,8 +34,14 @@ export default function WorkflowEdges({
         const d = edgePath(sx, sy, ex, ey);
         const selected = selectedId && (selectedId === e.from || selectedId === e.to);
         const hot = flowing || selected;
+        const edgeKey = `${e.from}->${e.to}`;
+        const diffKind = edgeDiffStatus[edgeKey];
         const fromType = nodeMeta[from.id]?.ring || from.type || "output";
         const dark = EDGE_DARK[fromType] || EDGE_DARK.output;
+        const strokeColor =
+          diffKind === "added" ? "#059669" : diffKind === "removed" ? "#dc2626" : dark.line;
+        const packetColor =
+          diffKind === "added" ? "#10b981" : diffKind === "removed" ? "#f87171" : dark.packet;
         const delay = `${i * 0.2}s`;
         const dur = flowing ? "1.15s" : hot ? "1.9s" : "3.4s";
         const dashClass = flowing ? "wf-edge-dash-flowing" : hot ? "wf-edge-dash-active" : "wf-edge-dash-idle";
@@ -44,8 +51,8 @@ export default function WorkflowEdges({
             <path
               d={d}
               fill="none"
-              stroke={dark.line}
-              strokeWidth={hot ? 2.75 : 2.25}
+              stroke={strokeColor}
+              strokeWidth={hot || diffKind ? 2.75 : 2.25}
               strokeLinecap="round"
               strokeDasharray={hot ? "11 7" : "9 7"}
               className={dashClass}
@@ -53,7 +60,7 @@ export default function WorkflowEdges({
             />
 
             {/* Data packet: source → next node */}
-            <circle r={hot ? 3.5 : 3} fill={dark.packet} className="wf-edge-packet">
+            <circle r={hot ? 3.5 : 3} fill={packetColor} className="wf-edge-packet">
               <animateMotion dur={dur} repeatCount="indefinite" path={d} begin={delay} />
             </circle>
             <circle r="1.75" fill="#fff" opacity="0.9">
