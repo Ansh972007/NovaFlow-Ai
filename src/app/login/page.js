@@ -8,6 +8,7 @@ import LiveBackground from "@/components/LiveBackground";
 import CursorGlow from "@/components/CursorGlow";
 import { login, register, getLdapStatus } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
+import { getOAuthProviders } from "@/lib/api/oauth";
 import { getSamlStatus } from "@/lib/api/saml";
 
 function LoginForm() {
