@@ -2,15 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { subscribeScroll } from "@/lib/runtime/scrollBus";
 
 export default function BackToTop() {
   const [visible, setVisible] = useState(false);
 
-  useEffect(() => {
-    const onScroll = () => setVisible(window.scrollY > 600);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+  useEffect(() => subscribeScroll((y) => setVisible(y > 600)), []);
 
   return (
     <AnimatePresence>

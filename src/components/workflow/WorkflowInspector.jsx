@@ -50,6 +50,8 @@ export default function WorkflowInspector({
   diffSplitActive = false,
   onToggleDiffSplit,
   onCompareVersion,
+  onExportDiffJson,
+  onExportDiffMd,
   readOnly = false,
 }) {
   const [connectTarget, setConnectTarget] = useState("");
@@ -853,6 +855,24 @@ export default function WorkflowInspector({
                           }`}
                         >
                           {diffOverlayActive ? "Hide overlay" : "Show overlay"}
+                        </button>
+                      )}
+                      {onExportDiffJson && (
+                        <button
+                          type="button"
+                          onClick={onExportDiffJson}
+                          className="rounded-lg bg-white px-2.5 py-1 text-[10px] font-semibold text-violet-800 ring-1 ring-violet-200"
+                        >
+                          Export JSON
+                        </button>
+                      )}
+                      {onExportDiffMd && (
+                        <button
+                          type="button"
+                          onClick={onExportDiffMd}
+                          className="rounded-lg bg-white px-2.5 py-1 text-[10px] font-semibold text-violet-800 ring-1 ring-violet-200"
+                        >
+                          Export report
                         </button>
                       )}
                     </div>

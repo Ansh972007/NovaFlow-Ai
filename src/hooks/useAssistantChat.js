@@ -111,6 +111,9 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
 
   useEffect(() => {
     setMessages(initialMessages);
+    setError("");
+    setStreaming(false);
+    botMsgIdRef.current = null;
   }, [sessionId, initialMessages]);
 
   useEffect(() => {

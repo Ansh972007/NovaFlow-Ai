@@ -6,6 +6,9 @@ import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
+import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
+import WorkspaceTabs, { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
 import { SuiteTrendChart, ComparisonTrendChart } from "@/components/evaluation/EvalTrendCharts";
 import { getUserInfo } from "@/lib/api/auth";
 import { getAssistantsPage } from "@/lib/api/apps";
@@ -515,52 +518,46 @@ export default function EvaluationClient() {
   }
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
+    return <WorkspaceLoading message="Loading evaluation…" />;
   }
+
+  const evalTabs = [
+    { id: "benchmark", label: "Benchmarks", count: suites.length },
+    { id: "compare", label: "Compare" },
+    { id: "trends", label: "Trends" },
+    { id: "schedules", label: "Schedules", count: schedules.length },
+    { id: "alerts", label: "Alerts", count: alerts.length },
+    { id: "finetune", label: "Fine-tune", count: datasets.length },
+  ];
 
   return (
     <div className="relative min-h-screen overflow-hidden">
       <WorkspaceLiveBackground />
       <div className="relative z-10">
         <AppHeader user={user} />
-        <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+        <main className="workspace-page-main mx-auto max-w-6xl px-4 py-10 sm:px-6">
           <WorkspaceHero
             eyebrow="Quality"
             title="Evaluation &"
             titleHighlight="fine-tune"
             description="Benchmark assistants with test cases and launch OpenAI fine-tuning jobs from training datasets."
-          />
+            badge={readOnly ? undefined : <span className="workspace-badge-live">Quality lab</span>}
+          >
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <WorkspaceStatCard label="Suites" value={String(suites.length)} hint="Benchmark collections" />
+              <WorkspaceStatCard label="Schedules" value={String(schedules.length)} hint="Automated runs" />
+              <WorkspaceStatCard label="Datasets" value={String(datasets.length)} hint="Fine-tune training" />
+              <WorkspaceStatCard
+                label="Jobs"
+                value={String(jobs.length)}
+                hint={quotas ? `Eval used: ${quotas.eval_runs_this_month || 0}` : "Fine-tune jobs"}
+              />
+            </div>
+          </WorkspaceHero>
 
-          <div className="mt-8 flex flex-wrap gap-2">
-            {[
-              { id: "benchmark", label: "Benchmarks" },
-              { id: "compare", label: "Compare" },
-              { id: "trends", label: "Trends" },
-              { id: "schedules", label: "Schedules" },
-              { id: "alerts", label: "Alerts" },
-              { id: "finetune", label: "Fine-tune" },
-            ].map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                  tab === t.id ? "bg-neutral-900 text-white" : "bg-white/70 text-neutral-600 ring-1 ring-black/5"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <WorkspaceTabs tabs={evalTabs} active={tab} onChange={setTab} className="mt-8" />
 
-          {error && (
-            <p className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
-          )}
+          {error && <WorkspaceAlert type="error" className="mt-4">{error}</WorkspaceAlert>}
 
           {tab === "benchmark" && (
             <div className="mt-6 grid gap-6 lg:grid-cols-2">

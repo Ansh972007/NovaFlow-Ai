@@ -1,83 +1,106 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
+import { getPointer } from "@/lib/runtime/pointerBus";
+import { isPageVisible, subscribeVisibility } from "@/lib/runtime/pageVisibility";
+import { subscribeAnimationFrame } from "@/lib/runtime/rafLoop";
 
 function rand(min, max) {
   return Math.random() * (max - min) + min;
 }
 
-export default function LiveCanvas({ variant = "light", mouseTracking = true, tone = "neutral" }) {
+function palette(variant, tone) {
+  const isDark = variant === "dark";
+  const isViolet = tone === "violet";
+
+  if (isDark && isViolet) {
+    return {
+      node: "rgba(196,181,253,0.95)",
+      nodeGlow: "rgba(139,92,246,0.38)",
+      line: "rgba(139,92,246,0.22)",
+      lineBright: "rgba(167,139,250,0.68)",
+      pulse: "rgba(224,231,255,0.95)",
+      cursor: "rgba(139,92,246,0.28)",
+    };
+  }
+  if (isDark) {
+    return {
+      node: "rgba(255,255,255,0.75)",
+      nodeGlow: "rgba(255,255,255,0.2)",
+      line: "rgba(255,255,255,0.12)",
+      lineBright: "rgba(255,255,255,0.45)",
+      pulse: "rgba(255,255,255,0.95)",
+      cursor: "rgba(255,255,255,0.12)",
+    };
+  }
+  if (isViolet) {
+    return {
+      node: "rgba(91,33,182,0.5)",
+      nodeGlow: "rgba(139,92,246,0.16)",
+      line: "rgba(99,102,241,0.11)",
+      lineBright: "rgba(124,58,237,0.32)",
+      pulse: "rgba(91,33,182,0.8)",
+      cursor: "rgba(139,92,246,0.11)",
+    };
+  }
+  return {
+    node: "rgba(10,10,10,0.55)",
+    nodeGlow: "rgba(10,10,10,0.12)",
+    line: "rgba(10,10,10,0.1)",
+    lineBright: "rgba(10,10,10,0.28)",
+    pulse: "rgba(10,10,10,0.85)",
+    cursor: "rgba(0,0,0,0.08)",
+  };
+}
+
+function LiveCanvas({ variant = "light", mouseTracking = true, tone = "neutral" }) {
   const canvasRef = useRef(null);
-  const mouseRef = useRef({ x: -9999, y: -9999 });
-  const frameRef = useRef(null);
+  const canvasRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
     const isDark = variant === "dark";
     const isSubtle = variant === "subtle";
+    const isViolet = tone === "violet";
+    const colors = palette(variant, tone);
+
+    const density = isDark && isViolet ? 0.000055 : isViolet ? 0.000042 : isSubtle ? 0.00005 : 0.00008;
+    const maxDist = isDark && isViolet ? 175 : isViolet ? 155 : isSubtle ? 160 : 210;
+    const maxDistSq = maxDist * maxDist;
+    const cellSize = maxDist;
 
     let w = 0;
     let h = 0;
     let nodes = [];
     let pulses = [];
-    let pageVisible = document.visibilityState !== "hidden";
+    let running = isPageVisible();
+    let gridCols = 1;
+    let gridRows = 1;
+    let buckets = [];
 
-    const onVisibility = () => {
-      pageVisible = document.visibilityState !== "hidden";
-      if (pageVisible && !frameRef.current) {
-        frameRef.current = requestAnimationFrame(draw);
+    function ensureGrid() {
+      gridCols = Math.max(1, Math.ceil(w / cellSize));
+      gridRows = Math.max(1, Math.ceil(h / cellSize));
+      const size = gridCols * gridRows;
+      if (buckets.length !== size) {
+        buckets = Array.from({ length: size }, () => []);
       }
-    };
-
-    const isViolet = tone === "violet";
-
-    const density = isDark && isViolet ? 0.000055 : isViolet ? 0.000042 : isSubtle ? 0.00005 : 0.00008;
-    const maxDist = isDark && isViolet ? 175 : isViolet ? 155 : isSubtle ? 160 : 210;
-    const nodeCount = () => Math.min(100, Math.max(40, Math.floor(w * h * density)));
-
-    function palette() {
-      if (isDark && isViolet) {
-        return {
-          node: "rgba(196,181,253,0.95)",
-          nodeGlow: "rgba(139,92,246,0.38)",
-          line: "rgba(139,92,246,0.22)",
-          lineBright: "rgba(167,139,250,0.68)",
-          pulse: "rgba(224,231,255,0.95)",
-          cursor: "rgba(139,92,246,0.28)",
-        };
-      }
-      if (isDark) {
-        return {
-          node: "rgba(255,255,255,0.75)",
-          nodeGlow: "rgba(255,255,255,0.2)",
-          line: "rgba(255,255,255,0.12)",
-          lineBright: "rgba(255,255,255,0.45)",
-          pulse: "rgba(255,255,255,0.95)",
-          cursor: "rgba(255,255,255,0.12)",
-        };
-      }
-      if (isViolet) {
-        return {
-          node: "rgba(91,33,182,0.5)",
-          nodeGlow: "rgba(139,92,246,0.16)",
-          line: "rgba(99,102,241,0.11)",
-          lineBright: "rgba(124,58,237,0.32)",
-          pulse: "rgba(91,33,182,0.8)",
-          cursor: "rgba(139,92,246,0.11)",
-        };
-      }
-      return {
-        node: "rgba(10,10,10,0.55)",
-        nodeGlow: "rgba(10,10,10,0.12)",
-        line: "rgba(10,10,10,0.1)",
-        lineBright: "rgba(10,10,10,0.28)",
-        pulse: "rgba(10,10,10,0.85)",
-        cursor: "rgba(0,0,0,0.08)",
-      };
     }
+
+    function clearGrid() {
+      for (let i = 0; i < buckets.length; i++) buckets[i].length = 0;
+    }
+
+    function cellIndex(x, y) {
+      const cx = Math.min(gridCols - 1, Math.max(0, Math.floor(x / cellSize)));
+      const cy = Math.min(gridRows - 1, Math.max(0, Math.floor(y / cellSize)));
+      return cy * gridCols + cx;
+    }
+
+    const nodeCount = () => Math.min(100, Math.max(40, Math.floor(w * h * density)));
 
     function initNodes() {
       const count = nodeCount();
@@ -90,15 +113,27 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
         phase: rand(0, Math.PI * 2),
       }));
       pulses = [];
+      ensureGrid();
+    }
+
+    function updateCanvasRect() {
+      const rect = canvas.getBoundingClientRect();
+      canvasRectRef.current = {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
     }
 
     function resize() {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       w = canvas.offsetWidth;
       h = canvas.offsetHeight;
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      updateCanvasRect();
       initNodes();
     }
 
@@ -116,15 +151,14 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
     }
 
     function draw() {
-      if (!pageVisible) {
-        frameRef.current = 0;
-        return;
-      }
-      const colors = palette();
+      if (!running) return;
+
       ctx.clearRect(0, 0, w, h);
 
-      const mx = mouseRef.current.x;
-      const my = mouseRef.current.y;
+      const { clientX, clientY, active: pointerActive } = getPointer();
+      const rect = canvasRectRef.current;
+      const mx = mouseTracking && pointerActive ? clientX - rect.left : -9999;
+      const my = mouseTracking && pointerActive ? clientY - rect.top : -9999;
 
       for (const n of nodes) {
         n.x += n.vx;
@@ -137,13 +171,15 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
         if (mouseTracking && mx > 0) {
           const dx = mx - n.x;
           const dy = my - n.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist < 280) {
+          const distSq = dx * dx + dy * dy;
+          if (distSq < 78400 && distSq > 1) {
+            const dist = Math.sqrt(distSq);
             const force = (280 - dist) / 280;
             n.vx -= (dx / dist) * force * 0.035;
             n.vy -= (dy / dist) * force * 0.035;
           }
-          if (dist < 120) {
+          if (distSq < 14400) {
+            const dist = Math.sqrt(distSq);
             n.vx += (dx / dist) * 0.008;
             n.vy += (dy / dist) * 0.008;
           }
@@ -153,32 +189,56 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
         n.vy *= 0.998;
       }
 
+      clearGrid();
       for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i];
-          const b = nodes[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > maxDist) continue;
+        buckets[cellIndex(nodes[i].x, nodes[i].y)].push(i);
+      }
 
-          const alpha = 1 - dist / maxDist;
-          const nearMouse =
-            mouseTracking &&
-            mx > 0 &&
-            (Math.hypot(mx - a.x, my - a.y) < 200 ||
-              Math.hypot(mx - b.x, my - b.y) < 200);
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        const acx = Math.floor(a.x / cellSize);
+        const acy = Math.floor(a.y / cellSize);
 
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = nearMouse ? colors.lineBright : colors.line;
-          ctx.globalAlpha = alpha * (nearMouse ? 1 : 0.75);
-          ctx.lineWidth = nearMouse ? 1.8 : 0.8;
-          ctx.stroke();
-          ctx.globalAlpha = 1;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const ncx = acx + dx;
+            const ncy = acy + dy;
+            if (ncx < 0 || ncy < 0 || ncx >= gridCols || ncy >= gridRows) continue;
 
-          spawnPulse(i, j, nearMouse);
+            const bucket = buckets[ncy * gridCols + ncx];
+            for (let bi = 0; bi < bucket.length; bi++) {
+              const j = bucket[bi];
+              if (j <= i) continue;
+
+              const b = nodes[j];
+              const ddx = a.x - b.x;
+              const ddy = a.y - b.y;
+              const distSq = ddx * ddx + ddy * ddy;
+              if (distSq > maxDistSq) continue;
+
+              const dist = Math.sqrt(distSq);
+              const alpha = 1 - dist / maxDist;
+              let nearMouse = false;
+              if (mouseTracking && mx > 0) {
+                const dax = mx - a.x;
+                const day = my - a.y;
+                const dbx = mx - b.x;
+                const dby = my - b.y;
+                nearMouse = dax * dax + day * day < 40000 || dbx * dbx + dby * dby < 40000;
+              }
+
+              ctx.beginPath();
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(b.x, b.y);
+              ctx.strokeStyle = nearMouse ? colors.lineBright : colors.line;
+              ctx.globalAlpha = alpha * (nearMouse ? 1 : 0.75);
+              ctx.lineWidth = nearMouse ? 1.8 : 0.8;
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+
+              spawnPulse(i, j, nearMouse);
+            }
+          }
         }
       }
 
@@ -197,8 +257,9 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
       pulses = pulses.filter((p) => p.t <= 1);
 
       for (const n of nodes) {
-        const near =
-          mouseTracking && mx > 0 && Math.hypot(mx - n.x, my - n.y) < 180;
+        const dx = mx - n.x;
+        const dy = my - n.y;
+        const near = mouseTracking && mx > 0 && dx * dx + dy * dy < 32400;
         const pulse = 0.65 + Math.sin(n.phase) * 0.35;
 
         ctx.beginPath();
@@ -231,39 +292,30 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
             : "rgba(0,0,0,0.25)";
         ctx.fill();
       }
-
-      frameRef.current = requestAnimationFrame(draw);
     }
 
-    const onMove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    };
-    const onLeave = () => {
-      mouseRef.current = { x: -9999, y: -9999 };
-    };
+    let unsubFrame = null;
+
+    const unsubVisibility = subscribeVisibility((visible) => {
+      running = visible;
+      if (visible) {
+        if (!unsubFrame) unsubFrame = subscribeAnimationFrame(draw);
+      } else if (unsubFrame) {
+        unsubFrame();
+        unsubFrame = null;
+      }
+    });
 
     resize();
-    draw();
+    unsubFrame = subscribeAnimationFrame(draw);
 
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
-    if (mouseTracking) {
-      window.addEventListener("mousemove", onMove, { passive: true });
-      window.addEventListener("mouseleave", onLeave);
-    }
-    document.addEventListener("visibilitychange", onVisibility);
-
     return () => {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = 0;
+      if (unsubFrame) unsubFrame();
+      unsubVisibility();
       ro.disconnect();
-      document.removeEventListener("visibilitychange", onVisibility);
-      if (mouseTracking) {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseleave", onLeave);
-      }
     };
   }, [variant, mouseTracking, tone]);
 
@@ -275,3 +327,5 @@ export default function LiveCanvas({ variant = "light", mouseTracking = true, to
     />
   );
 }
+
+export default memo(LiveCanvas);

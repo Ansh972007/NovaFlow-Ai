@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, useScroll, useSpring } from "framer-motion";
+import { subscribeScroll } from "@/lib/runtime/scrollBus";
 
 export default function ScrollProgress() {
   const { scrollYProgress } = useScroll();
@@ -18,11 +19,7 @@ export default function ScrollProgress() {
 export function useNavbarScroll() {
   const [scrolled, setScrolled] = useState(false);
 
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+  useEffect(() => subscribeScroll((y) => setScrolled(y > 20)), []);
 
   return scrolled;
 }

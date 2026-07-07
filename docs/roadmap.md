@@ -1,6 +1,15 @@
 # Roadmap
 
-## v7.0 — Collaboration & security (current)
+## v8.0 — Unified workspace UI & diff export (current)
+
+- [x] Shared workspace design system — `WorkspacePageShell`, tabs, stat cards, alerts, loading
+- [x] Enhanced chat UI — `AppHeader`, new chat fix, sidebar cleanup
+- [x] Tabbed settings — Overview, Security, Models, Integrations, Team
+- [x] Polished all workspace pages — Apps, Knowledge, Workflows, Agents, Evaluation, Developer, Marketplace, Setup, Docs
+- [x] Performance runtime — shared pointer/scroll buses, rAF loop, canvas optimizations
+- [x] Workflow diff export — download JSON or Markdown report from version compare
+
+## v7.0 — Collaboration & security (done)
 
 - [x] SAML signature verification — IdP cert validation, audience & timestamp checks
 - [x] Side-by-side workflow diff — dual canvas compare (before / after)
@@ -13,18 +22,12 @@
 - [x] A/B model routing UI — manage traffic split in Settings
 - [x] API playground — test endpoints with session or API key
 
-## v5.0 — Enterprise intelligence (done)
-
-## v4.0 — Enterprise automation (done)
-
-## v3.0 — Governance & community (done)
-
 ## Future enhancements
 
 | Feature | Notes |
 |---------|--------|
 | Real-time graph merge | Operational transform for simultaneous edits |
 | SAML SLO | Single logout with IdP |
-| Diff export | PDF/JSON export of version comparisons |
+| Diff PDF export | Printable comparison reports |
 
-**NovaFlow v7.0** adds SAML hardening, side-by-side diff, and live co-editing cursors.
+**NovaFlow v8.0** unifies the workspace UI and adds workflow diff export.

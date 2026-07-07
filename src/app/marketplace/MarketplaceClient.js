@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
+import WorkspaceTabs from "@/components/workspace/WorkspaceTabs";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
@@ -213,12 +215,7 @@ export default function MarketplaceClient() {
   }
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading marketplace…</span>
-      </div>
-    );
+    return <WorkspaceLoading message="Loading marketplace…" />;
   }
 
   const showCommunity = tab === "all" || tab === "community";
@@ -238,7 +235,7 @@ export default function MarketplaceClient() {
       <div className="relative z-10">
         <AppHeader user={user} />
 
-        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+        <main className="workspace-page-main mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
           <WorkspaceHero
             eyebrow="Discover & share"
             title="Workflow"
@@ -293,27 +290,16 @@ export default function MarketplaceClient() {
             transition={{ delay: 0.2, ease }}
             className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
           >
-            <div className="flex flex-wrap gap-2">
-              {[
+            <WorkspaceTabs
+              tabs={[
                 { id: "all", label: "All" },
-                { id: "community", label: "Community" },
-                { id: "templates", label: "Templates" },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setTab(t.id)}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
-                    tab === t.id
-                      ? "bg-neutral-900 text-white shadow-sm"
-                      : "border border-black/10 bg-white/80 text-neutral-600 hover:border-black/20"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="relative w-full sm:max-w-xs">
+                { id: "community", label: "Community", count: items.length },
+                { id: "templates", label: "Templates", count: templates.length },
+              ]}
+              active={tab}
+              onChange={setTab}
+            />
+            <div className="workspace-search-wrap w-full sm:max-w-xs">
               <svg
                 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
                 width="16"
@@ -330,7 +316,7 @@ export default function MarketplaceClient() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search workflows & templates…"
-                className="w-full rounded-xl border border-black/10 bg-white/90 py-2.5 pl-9 pr-3 text-sm shadow-sm backdrop-blur-sm"
+                className="workspace-search-input"
               />
             </div>
           </motion.div>

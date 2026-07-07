@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import AppHeader from "@/components/AppHeader";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { AppsIcon, BotIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
 import {
@@ -105,21 +105,12 @@ export default function AppsClient() {
   }
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
+    return null;
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <WorkspaceLiveBackground />
-      <div className="relative z-10">
-        <AppHeader user={user} />
-
-        <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12">
+    <>
+    <WorkspacePageShell user={user} maxWidth="max-w-5xl">
           <WorkspaceHero
             eyebrow="Workspace"
             title="AI"
@@ -151,13 +142,7 @@ export default function AppsClient() {
           </WorkspaceHero>
 
           {error && (
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="mt-6 rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-800"
-            >
-              {error}
-            </motion.p>
+            <WorkspaceAlert type="error" className="mt-6">{error}</WorkspaceAlert>
           )}
 
           <motion.section
@@ -251,8 +236,7 @@ export default function AppsClient() {
               </ul>
             )}
           </motion.section>
-        </main>
-      </div>
+    </WorkspacePageShell>
 
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-md">
@@ -309,6 +293,6 @@ export default function AppsClient() {
           </motion.form>
         </div>
       )}
-    </div>
+    </>
   );
 }

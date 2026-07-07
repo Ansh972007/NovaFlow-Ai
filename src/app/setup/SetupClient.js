@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Logo from "@/components/Logo";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { getUserInfo } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
 import { createAssistant, setAssistantStatus, setAssistantKnowledge } from "@/lib/api/apps";
@@ -109,31 +111,27 @@ export default function SetupClient() {
   }
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
+    return <WorkspaceLoading message="Loading setup…" />;
   }
 
   return (
     <div className="relative min-h-screen overflow-hidden">
       <WorkspaceLiveBackground />
       <div className="relative z-10 mx-auto flex min-h-screen max-w-lg flex-col px-4 py-10 sm:px-6">
-        <Logo size="sm" />
+        <Logo size="sm" href="/dashboard" />
 
-        <div className="mt-8 flex gap-2">
+        <div className="setup-step-bar mt-8">
           {STEPS.map((label, i) => (
             <div
               key={label}
-              className={`h-1 flex-1 rounded-full transition-colors ${
-                i <= step ? "bg-foreground" : "bg-border"
-              }`}
+              className={`setup-step-segment ${i <= step ? "setup-step-segment--active" : ""}`}
               title={label}
             />
           ))}
         </div>
+        <p className="mt-3 text-center text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+          Step {step + 1} of {STEPS.length} · {STEPS[step]}
+        </p>
 
         <AnimatePresence mode="wait">
           {step === 0 && (
@@ -190,7 +188,7 @@ export default function SetupClient() {
                   </span>
                 </div>
               </div>
-              {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
+              {error && <WorkspaceAlert type="error" className="mt-4">{error}</WorkspaceAlert>}
               <div className="mt-auto flex gap-3 pt-8">
                 <button type="button" onClick={() => setStep(0)} className="text-sm text-muted">
                   Back
@@ -225,9 +223,7 @@ export default function SetupClient() {
                     key={t.id}
                     type="button"
                     onClick={() => selectTemplate(t.id)}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
-                      templateId === t.id ? "border-foreground bg-surface" : "border-border hover:bg-surface/50"
-                    }`}
+                    className={`setup-template-card ${templateId === t.id ? "setup-template-card--active" : ""}`}
                   >
                     <span className="text-xl">{t.icon}</span>
                     <div>
@@ -242,7 +238,7 @@ export default function SetupClient() {
                 <input
                   value={assistantName}
                   onChange={(e) => setAssistantName(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-border px-3 py-2 text-sm outline-none"
+                  className="input-field mt-1.5 w-full"
                 />
               </label>
               <label className="mt-3 block text-sm font-medium">
@@ -250,7 +246,7 @@ export default function SetupClient() {
                 <input
                   value={kbName}
                   onChange={(e) => setKbName(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-border px-3 py-2 text-sm outline-none"
+                  className="input-field mt-1.5 w-full"
                 />
               </label>
               {error && <p className="mt-3 text-sm text-red-700">{error}</p>}

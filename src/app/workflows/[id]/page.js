@@ -1,4 +1,9 @@
-import WorkflowBuilderClient from "./WorkflowBuilderClient";
+import dynamic from "next/dynamic";
+import WorkspacePageLoading from "@/components/WorkspacePageLoading";
+
+const WorkflowBuilderClient = dynamic(() => import("./WorkflowBuilderClient"), {
+  loading: () => <WorkspacePageLoading />,
+});
 
 export const metadata = {
   title: "Workflow Builder — NovaFlow AI",

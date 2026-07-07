@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import KnowledgeListClient from "./KnowledgeListClient";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspacePageLoading from "@/components/WorkspacePageLoading";
 
 export const metadata = {
   title: "Knowledge — NovaFlow AI",
@@ -9,14 +9,7 @@ export const metadata = {
 
 export default function KnowledgePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="relative flex min-h-screen items-center justify-center">
-          <WorkspaceLiveBackground />
-          <span className="relative z-10 text-muted">Loading knowledge…</span>
-        </div>
-      }
-    >
+    <Suspense fallback={<WorkspacePageLoading message="Loading knowledge…" />}>
       <KnowledgeListClient />
     </Suspense>
   );

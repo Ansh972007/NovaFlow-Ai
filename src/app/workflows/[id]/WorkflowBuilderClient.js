@@ -29,6 +29,10 @@ import {
   setWorkflowStatus,
   updateWorkflow,
 } from "@/lib/api/workflows";
+import {
+  downloadWorkflowDiffJson,
+  downloadWorkflowDiffMarkdown,
+} from "@/lib/workflow/diffExport";
 import { setWorkflowPublic } from "@/lib/api/marketplace";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -793,6 +797,12 @@ export default function WorkflowBuilderClient({ workflowId }) {
           diffSplitActive={diffSplitActive}
           onToggleDiffSplit={setDiffSplitActive}
           onCompareVersion={readOnly ? undefined : handleCompareVersion}
+          onExportDiffJson={
+            versionDiff ? () => downloadWorkflowDiffJson(versionDiff, name) : undefined
+          }
+          onExportDiffMd={
+            versionDiff ? () => downloadWorkflowDiffMarkdown(versionDiff, name) : undefined
+          }
           readOnly={readOnly}
         />
       </div>

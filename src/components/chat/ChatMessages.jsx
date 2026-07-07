@@ -11,7 +11,7 @@ const suggestions = [
 ];
 
 const messageVariants = {
-  hidden: { opacity: 0, y: 12, scale: 0.98 },
+  hidden: { opacity: 0, y: 10, scale: 0.98 },
   visible: { opacity: 1, y: 0, scale: 1 },
 };
 
@@ -29,18 +29,18 @@ export default function ChatMessages({ messages, streaming, error, assistantName
     streaming && messages.length > 0 && messages[messages.length - 1]?.role === "user";
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
+    <div className="chat-messages-scroll flex flex-1 flex-col overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
         {messages.length === 0 && !error ? (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-              className="flex flex-1 flex-col items-center justify-center py-12 text-center"
-            >
-              <div className="relative mb-6 flex h-20 w-20 items-center justify-center">
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            className="flex flex-1 flex-col items-center justify-center py-8 text-center"
+          >
+            <div className="workspace-panel w-full max-w-lg rounded-[1.5rem] p-8 sm:p-10">
+              <div className="relative mx-auto mb-6 flex h-20 w-20 items-center justify-center">
                 <div className="chat-empty-ring-outer absolute inset-0 rounded-2xl" />
                 <div className="chat-empty-ring absolute inset-1 rounded-2xl" />
                 <motion.div
@@ -52,36 +52,21 @@ export default function ChatMessages({ messages, streaming, error, assistantName
                 </motion.div>
               </div>
 
-              <motion.h2
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.15 }}
-                className="text-2xl font-semibold tracking-tight text-neutral-900"
-              >
+              <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">
                 {assistantName || "NovaFlow Assistant"}
-              </motion.h2>
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.25 }}
-                className="mt-2 max-w-sm text-sm text-neutral-500"
-              >
-                Blueprint-ready AI workspace. Ask anything or pick a starter below.
-              </motion.p>
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-neutral-500">
+                Ask anything — your assistant is ready. Pick a starter or type below.
+              </p>
 
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.35 }}
-                className="mt-10 flex w-full max-w-lg flex-wrap justify-center gap-2.5"
-              >
+              <div className="mt-8 flex flex-wrap justify-center gap-2.5">
                 {suggestions.map((text, i) => (
                   <motion.button
                     key={text}
                     type="button"
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 + i * 0.06 }}
+                    transition={{ delay: 0.08 + i * 0.05 }}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => onSuggest?.(text)}
@@ -90,9 +75,10 @@ export default function ChatMessages({ messages, streaming, error, assistantName
                     {text}
                   </motion.button>
                 ))}
-              </motion.div>
-            </motion.div>
-          ) : null}
+              </div>
+            </div>
+          </motion.div>
+        ) : null}
 
         <AnimatePresence initial={false}>
           {messages.map((msg) => (
@@ -101,26 +87,26 @@ export default function ChatMessages({ messages, streaming, error, assistantName
               variants={messageVariants}
               initial="hidden"
               animate="visible"
-              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               {msg.role === "assistant" && (
-                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-900 text-[9px] font-bold text-white shadow-md">
+                <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-900 text-[10px] font-bold text-white shadow-md">
                   NF
                 </div>
               )}
 
-              <div className={`max-w-[85%] sm:max-w-[78%] ${msg.role === "user" ? "text-right" : ""}`}>
+              <div className={`max-w-[88%] sm:max-w-[80%] ${msg.role === "user" ? "text-right" : ""}`}>
                 {msg.role === "assistant" && (
-                  <p className="mb-1.5 text-[11px] font-medium tracking-wide text-neutral-400 uppercase">
+                  <p className="mb-1.5 text-[10px] font-semibold tracking-[0.14em] text-neutral-400 uppercase">
                     {assistantName || "Assistant"}
                   </p>
                 )}
                 <div
-                  className={`inline-block px-4 py-3 text-sm leading-relaxed sm:text-[15px] ${
+                  className={`inline-block text-left text-sm leading-relaxed sm:text-[15px] ${
                     msg.role === "user"
-                      ? "chat-bubble-user text-left"
-                      : `chat-bubble-assistant text-neutral-800${msg.streaming ? " chat-bubble-streaming" : ""}`
+                      ? "chat-bubble-user px-4 py-3"
+                      : `chat-bubble-assistant px-4 py-3.5 text-neutral-800${msg.streaming ? " chat-bubble-streaming" : ""}`
                   }`}
                 >
                   <p className="whitespace-pre-wrap break-words">
@@ -154,10 +140,10 @@ export default function ChatMessages({ messages, streaming, error, assistantName
               exit={{ opacity: 0 }}
               className="flex gap-3"
             >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-200 bg-white text-[9px] font-bold text-neutral-500">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-neutral-200/80 bg-white/90 text-[10px] font-bold text-neutral-500 shadow-sm">
                 NF
               </div>
-              <div className="chat-bubble-assistant flex items-center gap-2 px-4 py-3 text-sm text-neutral-500">
+              <div className="chat-bubble-assistant flex items-center gap-2 px-4 py-3.5 text-sm text-neutral-500">
                 <span className="flex gap-1">
                   {[0, 1, 2].map((i) => (
                     <span
@@ -177,7 +163,7 @@ export default function ChatMessages({ messages, streaming, error, assistantName
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-700 backdrop-blur-sm"
+            className="rounded-xl border border-red-200/80 bg-red-50/95 px-4 py-3 text-sm text-red-700 shadow-sm"
           >
             {error}
           </motion.div>

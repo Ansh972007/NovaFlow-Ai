@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import {
   Area,
   AreaChart,
@@ -21,23 +22,34 @@ function shortDate(iso) {
   return d.toLocaleDateString([], { weekday: "short" });
 }
 
-export default function AnalyticsCharts({ series = [], assistants = [], abRouting = null }) {
-  const chartData = (series || []).map((row) => ({
-    ...row,
-    label: shortDate(row.date),
-    total: (row.chat || 0) + (row.workflow_chat || 0) + (row.workflow_run || 0),
-  }));
+export default memo(function AnalyticsCharts({ series = [], assistants = [], abRouting = null }) {
+  const chartData = useMemo(
+    () =>
+      (series || []).map((row) => ({
+        ...row,
+        label: shortDate(row.date),
+        total: (row.chat || 0) + (row.workflow_chat || 0) + (row.workflow_run || 0),
+      })),
+    [series]
+  );
 
-  const topApps = (assistants || []).slice(0, 6);
+  const topApps = useMemo(() => (assistants || []).slice(0, 6), [assistants]);
 
-  const abData = abRouting
-    ? [
-        { name: "Base model", value: abRouting.base_count || 0, fill: "#171717" },
-        { name: "Variant", value: abRouting.variant_count || 0, fill: "#047857" },
-      ].filter((d) => d.value > 0)
-    : [];
+  const abData = useMemo(
+    () =>
+      abRouting
+        ? [
+            { name: "Base model", value: abRouting.base_count || 0, fill: "#171717" },
+            { name: "Variant", value: abRouting.variant_count || 0, fill: "#047857" },
+          ].filter((d) => d.value > 0)
+        : [],
+    [abRouting]
+  );
 
-  const abTotal = (abRouting?.base_count || 0) + (abRouting?.variant_count || 0);
+  const abTotal = useMemo(
+    () => (abRouting?.base_count || 0) + (abRouting?.variant_count || 0),
+    [abRouting]
+  );
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -191,4 +203,4 @@ export default function AnalyticsCharts({ series = [], assistants = [], abRoutin
       )}
     </div>
   );
-}
+});

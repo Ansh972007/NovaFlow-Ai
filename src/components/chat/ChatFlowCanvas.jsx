@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
+import { getPointer, subscribePointer } from "@/lib/runtime/pointerBus";
+import { isPageVisible, subscribeVisibility } from "@/lib/runtime/pageVisibility";
+import { subscribeAnimationFrame } from "@/lib/runtime/rafLoop";
 
 function rand(min, max) {
   return Math.random() * (max - min) + min;
@@ -10,11 +13,11 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-export default function ChatFlowCanvas({ active = false }) {
+function ChatFlowCanvas({ active = false }) {
   const canvasRef = useRef(null);
-  const mouseRef = useRef({ x: -9999, y: -9999, active: false });
   const smoothRef = useRef({ x: -9999, y: -9999 });
   const activeRef = useRef(active);
+  const parentRectRef = useRef({ left: 0, top: 0, width: 0, height: 0 });
 
   useEffect(() => {
     activeRef.current = active;
@@ -31,15 +34,15 @@ export default function ChatFlowCanvas({ active = false }) {
     let streams = [];
     let pulses = [];
     let ripples = [];
-    let frameId = 0;
-    let pageVisible = document.visibilityState !== "hidden";
+    let running = isPageVisible();
+    let gridCols = 1;
+    let gridRows = 1;
+    let buckets = [];
+    let lastRipple = 0;
 
-    const onVisibility = () => {
-      pageVisible = document.visibilityState !== "hidden";
-      if (pageVisible && !frameId) {
-        frameId = requestAnimationFrame(render);
-      }
-    };
+    const maxDist = 195;
+    const maxDistSq = maxDist * maxDist;
+    const cellSize = maxDist;
 
     const colors = {
       node: "rgba(10,10,10,0.62)",
@@ -52,6 +55,25 @@ export default function ChatFlowCanvas({ active = false }) {
       cursor: "rgba(0,0,0,0.1)",
     };
 
+    function ensureGrid() {
+      gridCols = Math.max(1, Math.ceil(w / cellSize));
+      gridRows = Math.max(1, Math.ceil(h / cellSize));
+      const size = gridCols * gridRows;
+      if (buckets.length !== size) {
+        buckets = Array.from({ length: size }, () => []);
+      }
+    }
+
+    function clearGrid() {
+      for (let i = 0; i < buckets.length; i++) buckets[i].length = 0;
+    }
+
+    function cellIndex(x, y) {
+      const cx = Math.min(gridCols - 1, Math.max(0, Math.floor(x / cellSize)));
+      const cy = Math.min(gridRows - 1, Math.max(0, Math.floor(y / cellSize)));
+      return cy * gridCols + cx;
+    }
+
     function fieldAt(x, y, t, mx, my) {
       let ax =
         Math.sin(y * 0.0055 + t * 0.9) * 0.55 +
@@ -63,8 +85,9 @@ export default function ChatFlowCanvas({ active = false }) {
       if (mx > 0 && my > 0) {
         const dx = mx - x;
         const dy = my - y;
-        const dist = Math.hypot(dx, dy);
-        if (dist < 280 && dist > 1) {
+        const distSq = dx * dx + dy * dy;
+        if (distSq < 78400 && distSq > 1) {
+          const dist = Math.sqrt(distSq);
           const force = (280 - dist) / 280;
           ax += (-dy / dist) * force * 1.35;
           ay += (dx / dist) * force * 1.35;
@@ -77,8 +100,17 @@ export default function ChatFlowCanvas({ active = false }) {
       return { ax: ax / mag, ay: ay / mag };
     }
 
+    function getPerfScale() {
+      const cores = navigator.hardwareConcurrency || 8;
+      const mem = navigator.deviceMemory || 8;
+      if (window.innerWidth < 768) return 0.72;
+      if (cores <= 4 || mem <= 4) return 0.72;
+      if (cores <= 8 || mem <= 8) return 0.86;
+      return 1;
+    }
+
     function init() {
-      const perfScale = window.innerWidth < 768 || navigator.hardwareConcurrency <= 4 ? 0.72 : 1;
+      const perfScale = getPerfScale();
       const nodeCount = Math.min(72, Math.max(40, Math.floor(w * h * 0.00007 * perfScale)));
       nodes = Array.from({ length: nodeCount }, () => ({
         x: rand(0, w),
@@ -90,7 +122,7 @@ export default function ChatFlowCanvas({ active = false }) {
         orbit: rand(12, 28),
       }));
 
-      const streamCount = Math.min(420, Math.max(220, Math.floor(w * h * 0.00028)));
+      const streamCount = Math.min(420, Math.max(220, Math.floor(w * h * 0.00028 * perfScale)));
       streams = Array.from({ length: streamCount }, () => ({
         x: rand(0, w),
         y: rand(0, h),
@@ -99,6 +131,19 @@ export default function ChatFlowCanvas({ active = false }) {
       }));
 
       pulses = [];
+      ensureGrid();
+    }
+
+    function updateParentRect() {
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      parentRectRef.current = {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
     }
 
     function resize() {
@@ -113,6 +158,7 @@ export default function ChatFlowCanvas({ active = false }) {
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      updateParentRect();
       init();
     }
 
@@ -153,32 +199,60 @@ export default function ChatFlowCanvas({ active = false }) {
     }
 
     function drawStreams(t, mx, my, boost) {
+      const spdMul = activeRef.current ? 1.25 : 1;
+
       for (const s of streams) {
         const { ax, ay } = fieldAt(s.x, s.y, t, mx, my);
-        const spd = s.speed * (activeRef.current ? 1.25 : 1);
-        s.x += ax * spd;
-        s.y += ay * spd;
+        s.x += ax * s.speed * spdMul;
+        s.y += ay * s.speed * spdMul;
 
         if (s.x < 0) s.x = w;
-        if (s.x > w) s.x = 0;
+        else if (s.x > w) s.x = 0;
         if (s.y < 0) s.y = h;
-        if (s.y > h) s.y = 0;
+        else if (s.y > h) s.y = 0;
 
         s.trail.push({ x: s.x, y: s.y });
         if (s.trail.length > 10) s.trail.shift();
+      }
 
-        const near = mx > 0 && Math.hypot(mx - s.x, my - s.y) < 180;
+      ctx.lineWidth = 0.65;
+      ctx.strokeStyle = colors.stream;
+      ctx.beginPath();
+      let farTrails = false;
+      const farAlpha = 0.16 * boost * 0.7;
+
+      for (const s of streams) {
+        const dx = mx - s.x;
+        const dy = my - s.y;
+        const near = mx > 0 && dx * dx + dy * dy < 32400;
+        if (near || s.trail.length <= 2) continue;
+        ctx.moveTo(s.trail[0].x, s.trail[0].y);
+        for (let ti = 1; ti < s.trail.length; ti++) {
+          ctx.lineTo(s.trail[ti].x, s.trail[ti].y);
+        }
+        farTrails = true;
+      }
+      if (farTrails) {
+        ctx.globalAlpha = farAlpha;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      for (const s of streams) {
+        const dx = mx - s.x;
+        const dy = my - s.y;
+        const near = mx > 0 && dx * dx + dy * dy < 32400;
         const alpha = (near ? 0.38 : 0.16) * boost;
 
-        if (s.trail.length > 2) {
+        if (near && s.trail.length > 2) {
           ctx.beginPath();
           ctx.moveTo(s.trail[0].x, s.trail[0].y);
           for (let ti = 1; ti < s.trail.length; ti++) {
             ctx.lineTo(s.trail[ti].x, s.trail[ti].y);
           }
-          ctx.strokeStyle = near ? colors.streamBright : colors.stream;
+          ctx.strokeStyle = colors.streamBright;
           ctx.globalAlpha = alpha * (0.4 + (s.trail.length / 10) * 0.6);
-          ctx.lineWidth = near ? 1.1 : 0.65;
+          ctx.lineWidth = 1.1;
           ctx.stroke();
           ctx.globalAlpha = 1;
         }
@@ -192,9 +266,7 @@ export default function ChatFlowCanvas({ active = false }) {
       }
     }
 
-    function drawNetwork(t, mx, my, boost) {
-      const maxDist = 195;
-
+    function drawNetwork(t, mx, my, boost, pointerActive) {
       for (const n of nodes) {
         n.x += n.vx * (activeRef.current ? 1.15 : 1);
         n.y += n.vy * (activeRef.current ? 1.15 : 1);
@@ -203,16 +275,18 @@ export default function ChatFlowCanvas({ active = false }) {
         if (n.x < 0 || n.x > w) n.vx *= -1;
         if (n.y < 0 || n.y > h) n.vy *= -1;
 
-        if (mouseRef.current.active && mx > 0) {
+        if (pointerActive && mx > 0) {
           const dx = mx - n.x;
           const dy = my - n.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist < 300 && dist > 1) {
+          const distSq = dx * dx + dy * dy;
+          if (distSq < 90000 && distSq > 1) {
+            const dist = Math.sqrt(distSq);
             const force = (300 - dist) / 300;
             n.vx -= (dx / dist) * force * 0.04;
             n.vy -= (dy / dist) * force * 0.04;
           }
-          if (dist < 130) {
+          if (distSq < 16900) {
+            const dist = Math.sqrt(distSq);
             n.vx += (dx / dist) * 0.012;
             n.vy += (dy / dist) * 0.012;
           }
@@ -222,40 +296,65 @@ export default function ChatFlowCanvas({ active = false }) {
         n.vy *= 0.997;
       }
 
+      clearGrid();
       for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i];
-          const b = nodes[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > maxDist) continue;
+        buckets[cellIndex(nodes[i].x, nodes[i].y)].push(i);
+      }
 
-          const alpha = 1 - dist / maxDist;
-          const nearMouse =
-            mouseRef.current.active &&
-            mx > 0 &&
-            (Math.hypot(mx - a.x, my - a.y) < 210 || Math.hypot(mx - b.x, my - b.y) < 210);
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        const acx = Math.floor(a.x / cellSize);
+        const acy = Math.floor(a.y / cellSize);
 
-          const mx2 = (a.x + b.x) / 2;
-          const my2 = (a.y + b.y) / 2;
-          const perpX = -(b.y - a.y);
-          const perpY = b.x - a.x;
-          const len = Math.hypot(perpX, perpY) || 1;
-          const wave = Math.sin(t * 1.8 + i * 0.3 + j * 0.2) * 36;
-          const cx = mx2 + (perpX / len) * wave;
-          const cy = my2 + (perpY / len) * wave;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const ncx = acx + dx;
+            const ncy = acy + dy;
+            if (ncx < 0 || ncy < 0 || ncx >= gridCols || ncy >= gridRows) continue;
 
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.quadraticCurveTo(cx, cy, b.x, b.y);
-          ctx.strokeStyle = nearMouse ? colors.lineBright : colors.line;
-          ctx.globalAlpha = alpha * (nearMouse ? 1 : 0.8) * boost;
-          ctx.lineWidth = nearMouse ? 1.6 : 0.85;
-          ctx.stroke();
-          ctx.globalAlpha = 1;
+            const bucket = buckets[ncy * gridCols + ncx];
+            for (let bi = 0; bi < bucket.length; bi++) {
+              const j = bucket[bi];
+              if (j <= i) continue;
 
-          spawnPulse(i, j, nearMouse);
+              const b = nodes[j];
+              const ddx = a.x - b.x;
+              const ddy = a.y - b.y;
+              const distSq = ddx * ddx + ddy * ddy;
+              if (distSq > maxDistSq) continue;
+
+              const dist = Math.sqrt(distSq);
+              const alpha = 1 - dist / maxDist;
+              let nearMouse = false;
+              if (pointerActive && mx > 0) {
+                const dax = mx - a.x;
+                const day = my - a.y;
+                const dbx = mx - b.x;
+                const dby = my - b.y;
+                nearMouse = dax * dax + day * day < 44100 || dbx * dbx + dby * dby < 44100;
+              }
+
+              const mx2 = (a.x + b.x) / 2;
+              const my2 = (a.y + b.y) / 2;
+              const perpX = -(b.y - a.y);
+              const perpY = b.x - a.x;
+              const len = Math.hypot(perpX, perpY) || 1;
+              const wave = Math.sin(t * 1.8 + i * 0.3 + j * 0.2) * 36;
+              const cx = mx2 + (perpX / len) * wave;
+              const cy = my2 + (perpY / len) * wave;
+
+              ctx.beginPath();
+              ctx.moveTo(a.x, a.y);
+              ctx.quadraticCurveTo(cx, cy, b.x, b.y);
+              ctx.strokeStyle = nearMouse ? colors.lineBright : colors.line;
+              ctx.globalAlpha = alpha * (nearMouse ? 1 : 0.8) * boost;
+              ctx.lineWidth = nearMouse ? 1.6 : 0.85;
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+
+              spawnPulse(i, j, nearMouse);
+            }
+          }
         }
       }
 
@@ -277,7 +376,9 @@ export default function ChatFlowCanvas({ active = false }) {
       pulses = pulses.filter((p) => p.t <= 1);
 
       for (const n of nodes) {
-        const near = mouseRef.current.active && mx > 0 && Math.hypot(mx - n.x, my - n.y) < 200;
+        const dx = mx - n.x;
+        const dy = my - n.y;
+        const near = pointerActive && mx > 0 && dx * dx + dy * dy < 40000;
         const pulse = 0.65 + Math.sin(n.phase) * 0.35;
 
         ctx.beginPath();
@@ -298,8 +399,8 @@ export default function ChatFlowCanvas({ active = false }) {
       }
     }
 
-    function drawCursor(mx, my, boost) {
-      if (!mouseRef.current.active || mx <= 0) return;
+    function drawCursor(mx, my, boost, pointerActive) {
+      if (!pointerActive || mx <= 0) return;
 
       const grad = ctx.createRadialGradient(mx, my, 0, mx, my, 320);
       grad.addColorStop(0, colors.cursor);
@@ -329,15 +430,17 @@ export default function ChatFlowCanvas({ active = false }) {
     }
 
     function render(time) {
-      if (!pageVisible) {
-        frameId = 0;
-        return;
-      }
+      if (!running) return;
+
+      const { clientX, clientY, active: pointerActive } = getPointer();
+      const rect = parentRectRef.current;
+      const rawX = pointerActive ? clientX - rect.left : -9999;
+      const rawY = pointerActive ? clientY - rect.top : -9999;
+
       const t = time * 0.001;
-      const raw = mouseRef.current;
       const smooth = smoothRef.current;
-      smooth.x = lerp(smooth.x, raw.x, raw.active ? 0.14 : 0.05);
-      smooth.y = lerp(smooth.y, raw.y, raw.active ? 0.14 : 0.05);
+      smooth.x = lerp(smooth.x, rawX, pointerActive ? 0.14 : 0.05);
+      smooth.y = lerp(smooth.y, rawY, pointerActive ? 0.14 : 0.05);
       const mx = smooth.x;
       const my = smooth.y;
       const boost = activeRef.current ? 1.3 : 1;
@@ -346,8 +449,8 @@ export default function ChatFlowCanvas({ active = false }) {
 
       drawAurora(t, boost);
       drawStreams(t, mx, my, boost);
-      drawNetwork(t, mx, my, boost);
-      drawCursor(mx, my, boost);
+      drawNetwork(t, mx, my, boost, pointerActive);
+      drawCursor(mx, my, boost, pointerActive);
 
       ripples = ripples.filter((rip) => {
         rip.r += rip.speed;
@@ -360,60 +463,57 @@ export default function ChatFlowCanvas({ active = false }) {
         ctx.stroke();
         return rip.r < Math.max(w, h) * 0.8;
       });
-
-      frameId = requestAnimationFrame(render);
     }
 
-    let lastRipple = 0;
-    const onMove = (e) => {
-      const rect = canvas.parentElement?.getBoundingClientRect();
-      if (!rect) return;
-      mouseRef.current = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-        active: true,
-      };
-      const now = performance.now();
-      if (now - lastRipple > 180) {
-        ripples.push({
-          x: mouseRef.current.x,
-          y: mouseRef.current.y,
-          r: 10,
-          alpha: 0.28,
-          speed: 2.8,
-        });
-        lastRipple = now;
-      }
-    };
-
-    const onLeave = () => {
-      mouseRef.current.active = false;
-    };
-
     const onClick = (e) => {
-      const rect = canvas.parentElement?.getBoundingClientRect();
-      if (!rect) return;
+      const rect = parentRectRef.current;
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       ripples.push({ x, y, r: 14, alpha: 0.42, speed: 3.5 });
       ripples.push({ x, y, r: 8, alpha: 0.28, speed: 2.2 });
     };
 
+    const unsubPointer = subscribePointer((cx, cy, pointerActive) => {
+      if (!pointerActive) return;
+      const rect = parentRectRef.current;
+      const now = performance.now();
+      if (now - lastRipple > 180) {
+        ripples.push({
+          x: cx - rect.left,
+          y: cy - rect.top,
+          r: 10,
+          alpha: 0.28,
+          speed: 2.8,
+        });
+        lastRipple = now;
+      }
+    });
+
+    let unsubFrame = null;
+
+    const unsubVisibility = subscribeVisibility((visible) => {
+      running = visible;
+      if (visible) {
+        if (!unsubFrame) unsubFrame = subscribeAnimationFrame(render);
+      } else if (unsubFrame) {
+        unsubFrame();
+        unsubFrame = null;
+      }
+    });
+
     resize();
-    frameId = requestAnimationFrame(render);
-    window.addEventListener("resize", resize);
-    window.addEventListener("mousemove", onMove, { passive: true });
+    unsubFrame = subscribeAnimationFrame(render);
+
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas.parentElement || canvas);
     window.addEventListener("mousedown", onClick);
-    document.addEventListener("mouseleave", onLeave);
-    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", resize);
-      window.removeEventListener("mousemove", onMove);
-      document.removeEventListener("visibilitychange", onVisibility);
+      if (unsubFrame) unsubFrame();
+      unsubPointer();
+      unsubVisibility();
+      ro.disconnect();
       window.removeEventListener("mousedown", onClick);
-      document.removeEventListener("mouseleave", onLeave);
     };
   }, []);
 
@@ -421,3 +521,5 @@ export default function ChatFlowCanvas({ active = false }) {
     <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden />
   );
 }
+
+export default memo(ChatFlowCanvas);

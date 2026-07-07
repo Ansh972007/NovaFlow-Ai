@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import AppHeader from "@/components/AppHeader";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import { WorkspaceStatCard, WorkspaceSkeletonGrid } from "@/components/workspace/WorkspaceTabs";
 import { KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
 import {
@@ -87,21 +87,12 @@ export default function KnowledgeListClient() {
   }
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
+    return null;
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <WorkspaceLiveBackground />
-      <div className="relative z-10">
-        <AppHeader user={user} />
-
-        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+    <>
+    <WorkspacePageShell user={user} maxWidth="max-w-6xl">
           <WorkspaceHero
             eyebrow="Knowledge"
             title="Document"
@@ -113,7 +104,13 @@ export default function KnowledgeListClient() {
                 + New library
               </button>
             }
-          />
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              <WorkspaceStatCard label="Libraries" value={loading ? "…" : String(total)} hint="Document collections" />
+              <WorkspaceStatCard label="Published" value={loading ? "…" : String(items.filter((k) => k.state === 1).length)} hint="Ready for RAG" />
+              <WorkspaceStatCard label="Status" value={loading ? "…" : total ? "Active" : "Empty"} hint="Upload docs to get started" />
+            </div>
+          </WorkspaceHero>
 
           <motion.section
             initial={{ opacity: 0, y: 16 }}
@@ -128,11 +125,7 @@ export default function KnowledgeListClient() {
             )}
 
             {loading ? (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="workspace-panel h-44 animate-pulse rounded-2xl" />
-                ))}
-              </div>
+              <WorkspaceSkeletonGrid count={6} />
             ) : items.length === 0 ? (
               <div className="workspace-empty rounded-[1.75rem] p-12 text-center sm:p-16">
                 <div className="workspace-icon-tile mx-auto h-14 w-14">
@@ -190,8 +183,7 @@ export default function KnowledgeListClient() {
               </div>
             )}
           </motion.section>
-        </main>
-      </div>
+    </WorkspacePageShell>
 
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-md">
@@ -274,6 +266,6 @@ export default function KnowledgeListClient() {
           </motion.div>
         </div>
       )}
-    </div>
+    </>
   );
 }

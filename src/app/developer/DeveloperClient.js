@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import AppHeader from "@/components/AppHeader";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
+import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import WorkspaceBackLink from "@/components/workspace/WorkspaceBackLink";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
+import { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
 import { getUserInfo } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
 import { getApiBaseUrl } from "@/lib/api/config";
@@ -87,146 +90,147 @@ export default function DeveloperClient() {
     if (preset.method === "GET") setBody("");
   }
 
-  if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
-  }
-
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <WorkspaceLiveBackground />
-      <div className="relative z-10">
-        <AppHeader user={user} />
-        <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-12">
-          <Link
-            href="/settings"
-            className="group mb-8 inline-flex items-center gap-2 text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-900"
-          >
-            <span className="transition-transform group-hover:-translate-x-1">←</span>
-            Settings
+    <WorkspacePageShell user={user} maxWidth="max-w-5xl">
+      <WorkspaceBackLink href="/settings">Back to settings</WorkspaceBackLink>
+
+      <WorkspaceHero
+        eyebrow="Developer"
+        title="API"
+        titleHighlight="playground"
+        description={
+          <>
+            Send test requests to{" "}
+            <code className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs">{getApiBaseUrl()}/api/v1</code>.
+            Uses your session by default, or paste an API key.
+          </>
+        }
+        badge={
+          health?.ok ? (
+            <span className="workspace-badge-live">API online</span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-red-200/80 bg-red-50/90 px-2.5 py-0.5 text-[10px] font-bold uppercase text-red-700">
+              Offline
+            </span>
+          )
+        }
+        actions={
+          <Link href="/settings" className="workspace-btn-ghost shrink-0">
+            Manage API keys
           </Link>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <WorkspaceStatCard
+            label="Base URL"
+            value={health?.ok ? "Ready" : "Check API"}
+            hint={`${getApiBaseUrl()}/api/v1`}
+            status={health?.ok ? "online" : "offline"}
+          />
+          <WorkspaceStatCard label="Method" value={method} hint="Current request type" />
+          <WorkspaceStatCard
+            label="Last response"
+            value={response ? `HTTP ${response.status}` : "—"}
+            hint={response ? `${response.ms} ms` : "Send a request"}
+          />
+        </div>
+      </WorkspaceHero>
 
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ ease }}
-            className="workspace-hero rounded-[1.75rem] p-7 sm:p-9"
-          >
-            <p className="workspace-section-label">Developer</p>
-            <h1 className="mt-1 font-serif text-3xl tracking-tight sm:text-4xl">API playground</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-neutral-500">
-              Send test requests to <code className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs">{getApiBaseUrl()}/api/v1</code>.
-              Uses your session by default, or paste an API key to test programmatic access.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
-              <span
-                className={`rounded-full px-3 py-1 ring-1 ${
-                  health?.ok ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-red-50 text-red-700 ring-red-200"
-                }`}
+      <motion.form
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.06, ease }}
+        onSubmit={sendRequest}
+        className="workspace-panel mt-8 space-y-5 rounded-[1.75rem] p-6 sm:p-7"
+      >
+        <div>
+          <p className="workspace-section-label">Quick presets</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => applyPreset(p)}
+                className="workspace-btn-ghost !py-1.5 text-xs"
               >
-                API {health?.ok ? "online" : "offline"}
-              </span>
-            </div>
-          </motion.div>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          <motion.form
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.06, ease }}
-            onSubmit={sendRequest}
-            className="workspace-panel mt-8 space-y-5 rounded-[1.75rem] p-6 sm:p-7"
-          >
-            <div className="flex flex-wrap gap-2">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.label}
-                  type="button"
-                  onClick={() => applyPreset(p)}
-                  className="workspace-btn-ghost !py-1.5 text-xs"
-                >
-                  {p.label}
-                </button>
+        <label className="block text-sm font-medium">
+          API key (optional)
+          <input
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="nf_… overrides session auth"
+            className="input-field mt-1.5 w-full font-mono text-xs"
+          />
+        </label>
+
+        <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
+          <label className="block text-sm font-medium">
+            Method
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className="input-field mt-1.5 w-full">
+              {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
               ))}
-            </div>
+            </select>
+          </label>
+          <label className="block text-sm font-medium">
+            Path
+            <input
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              placeholder="/workflow"
+              className="input-field mt-1.5 w-full font-mono text-xs"
+            />
+          </label>
+        </div>
 
-            <label className="block text-sm font-medium">
-              API key (optional)
-              <input
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="nf_… overrides session auth"
-                className="input-field mt-1.5 w-full font-mono text-xs"
-              />
-            </label>
+        {method !== "GET" && method !== "HEAD" && (
+          <label className="block text-sm font-medium">
+            JSON body
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={6}
+              className="input-field mt-1.5 w-full font-mono text-xs"
+            />
+          </label>
+        )}
 
-            <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
-              <label className="block text-sm font-medium">
-                Method
-                <select value={method} onChange={(e) => setMethod(e.target.value)} className="input-field mt-1.5 w-full">
-                  {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-medium">
-                Path
-                <input
-                  value={path}
-                  onChange={(e) => setPath(e.target.value)}
-                  placeholder="/workflow"
-                  className="input-field mt-1.5 w-full font-mono text-xs"
-                />
-              </label>
-            </div>
+        {error && <WorkspaceAlert type="error">{error}</WorkspaceAlert>}
 
-            {method !== "GET" && method !== "HEAD" && (
-              <label className="block text-sm font-medium">
-                JSON body
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  rows={6}
-                  className="input-field mt-1.5 w-full font-mono text-xs"
-                />
-              </label>
-            )}
+        <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">
+          {busy ? "Sending…" : "Send request"}
+        </button>
+      </motion.form>
 
-            {error && <p className="text-sm text-red-600">{error}</p>}
-
-            <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">
-              {busy ? "Sending…" : "Send request"}
-            </button>
-          </motion.form>
-
-          {response && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="workspace-panel mt-6 rounded-[1.75rem] p-6 sm:p-7"
+      {response && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="workspace-panel mt-6 rounded-[1.75rem] p-6 sm:p-7"
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                response.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+              }`}
             >
-              <div className="flex flex-wrap items-center gap-3">
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    response.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
-                  }`}
-                >
-                  HTTP {response.status}
-                </span>
-                <span className="text-xs text-neutral-500">{response.ms} ms</span>
-              </div>
-              <pre className="mt-4 max-h-[420px] overflow-auto rounded-xl bg-neutral-950 p-4 text-xs leading-relaxed text-emerald-100">
-                {JSON.stringify(response.data, null, 2)}
-              </pre>
-            </motion.div>
-          )}
-        </main>
-      </div>
-    </div>
+              HTTP {response.status}
+            </span>
+            <span className="text-xs text-neutral-500">{response.ms} ms</span>
+          </div>
+          <div className="workspace-output-panel mt-4">
+            <pre>{JSON.stringify(response.data, null, 2)}</pre>
+          </div>
+        </motion.div>
+      )}
+    </WorkspacePageShell>
   );
 }

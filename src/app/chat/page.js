@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import ChatPageClient from "./ChatPageClient";
+import WorkspacePageLoading from "@/components/WorkspacePageLoading";
 
 export const metadata = {
   title: "Chat — NovaFlow AI",
@@ -8,13 +9,7 @@ export const metadata = {
 
 export default function ChatPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center text-muted">
-          Loading chat…
-        </div>
-      }
-    >
+    <Suspense fallback={<WorkspacePageLoading />}>
       <ChatPageClient />
     </Suspense>
   );

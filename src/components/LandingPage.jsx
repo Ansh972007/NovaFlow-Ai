@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
+import { subscribePointer } from "@/lib/runtime/pointerBus";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ScrollProgress from "@/components/ScrollProgress";
@@ -76,12 +77,13 @@ export default function LandingPage() {
   const mockY = useTransform(springY, [-1, 1], [10, -10]);
 
   useEffect(() => {
-    const onMove = (e) => {
-      mouseX.set((e.clientX / window.innerWidth) * 2 - 1);
-      mouseY.set((e.clientY / window.innerHeight) * 2 - 1);
-    };
-    window.addEventListener("mousemove", onMove, { passive: true });
-    return () => window.removeEventListener("mousemove", onMove);
+    const w = () => window.innerWidth;
+    const h = () => window.innerHeight;
+    return subscribePointer((clientX, clientY, active) => {
+      if (!active) return;
+      mouseX.set((clientX / w()) * 2 - 1);
+      mouseY.set((clientY / h()) * 2 - 1);
+    });
   }, [mouseX, mouseY]);
 
   return (

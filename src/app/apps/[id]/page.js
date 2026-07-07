@@ -1,4 +1,9 @@
-import AssistantDetailClient from "./AssistantDetailClient";
+import dynamic from "next/dynamic";
+import WorkspacePageLoading from "@/components/WorkspacePageLoading";
+
+const AssistantDetailClient = dynamic(() => import("./AssistantDetailClient"), {
+  loading: () => <WorkspacePageLoading />,
+});
 
 export async function generateMetadata({ params }) {
   const { id } = await params;

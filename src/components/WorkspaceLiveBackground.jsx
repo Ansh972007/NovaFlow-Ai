@@ -1,10 +1,11 @@
 "use client";
 
+import { memo } from "react";
 import CursorGlow from "@/components/CursorGlow";
 import ChatLiveBackground from "@/components/chat/ChatLiveBackground";
 
 /** Shared live flow background for workspace pages (dashboard, knowledge, apps, etc.). */
-export default function WorkspaceLiveBackground({ active = false, className = "fixed inset-0 z-0" }) {
+function WorkspaceLiveBackground({ active = false, className = "fixed inset-0 z-0" }) {
   return (
     <>
       <ChatLiveBackground className={className} active={active} variant="full" />
@@ -12,3 +13,5 @@ export default function WorkspaceLiveBackground({ active = false, className = "f
     </>
   );
 }
+
+export default memo(WorkspaceLiveBackground);

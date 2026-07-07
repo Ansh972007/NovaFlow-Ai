@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { WF, nodeCenter, portPoints, edgePath } from "./workflowLayout";
 
 const EDGE_DARK = {
@@ -13,7 +14,7 @@ export function getNodeCenter(node, _legacy) {
   return nodeCenter(node);
 }
 
-export default function WorkflowEdges({
+export default memo(function WorkflowEdges({
   edges,
   nodeMap,
   selectedId,
@@ -76,6 +77,6 @@ export default function WorkflowEdges({
       })}
     </svg>
   );
-}
+});
 
 export { WF as NODE_LAYOUT, EDGE_DARK };

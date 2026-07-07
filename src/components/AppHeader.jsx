@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import Logo from "./Logo";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import { logout } from "@/lib/api/auth";
@@ -37,7 +37,7 @@ function isActive(pathname, href) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export default function AppHeader({ user, links = [] }) {
+function AppHeader({ user, links = [] }) {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -205,3 +205,5 @@ export default function AppHeader({ user, links = [] }) {
     </header>
   );
 }
+
+export default memo(AppHeader);

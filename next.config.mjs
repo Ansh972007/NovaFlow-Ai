@@ -2,7 +2,7 @@
 const nextConfig = {
   output: "standalone",
   experimental: {
-    optimizePackageImports: ["framer-motion", "recharts"],
+    optimizePackageImports: ["framer-motion", "recharts", "axios"],
   },
 };
 

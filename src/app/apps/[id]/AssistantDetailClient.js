@@ -6,6 +6,9 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
+import WorkspaceBackLink from "@/components/workspace/WorkspaceBackLink";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { BotIcon, KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
 import {
@@ -126,12 +129,7 @@ export default function AssistantDetailClient({ assistantId }) {
   }
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
+    return <WorkspaceLoading message="Loading assistant…" />;
   }
 
   const readOnly = user.role === "viewer";
@@ -142,14 +140,8 @@ export default function AssistantDetailClient({ assistantId }) {
       <div className="relative z-10">
         <AppHeader user={user} />
 
-        <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-12">
-          <Link
-            href="/apps"
-            className="group mb-8 inline-flex items-center gap-2 text-sm font-medium text-neutral-500 hover:text-neutral-900"
-          >
-            <span className="transition-transform group-hover:-translate-x-1">←</span>
-            All assistants
-          </Link>
+        <main className="workspace-page-main mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-12">
+          <WorkspaceBackLink href="/apps">All assistants</WorkspaceBackLink>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -206,26 +198,18 @@ export default function AssistantDetailClient({ assistantId }) {
             </div>
           </motion.div>
 
-          {error && (
-            <p className="mt-4 rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-800">
-              {error}
-            </p>
-          )}
+          {error && <WorkspaceAlert type="error" className="mt-4">{error}</WorkspaceAlert>}
 
           {readOnly && (
-            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-800">
+            <WorkspaceAlert type="warn" className="mt-4">
               Viewer access — you can inspect this assistant but cannot edit it.
-            </p>
+            </WorkspaceAlert>
           )}
 
           {saved && (
-            <motion.p
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/90 px-4 py-3 text-sm text-emerald-800"
-            >
+            <WorkspaceAlert type="success" className="mt-4">
               Changes saved — RAG links active in chat.
-            </motion.p>
+            </WorkspaceAlert>
           )}
 
           <form onSubmit={handleSave} className="mt-8 space-y-6">

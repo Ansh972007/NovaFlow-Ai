@@ -6,6 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
+import WorkspaceBackLink from "@/components/workspace/WorkspaceBackLink";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { FileIcon, KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
 import {
@@ -128,12 +131,7 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
   const readyCount = files.filter((f) => f.status === 2).length;
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
+    return <WorkspaceLoading message="Loading library…" />;
   }
 
   return (
@@ -142,14 +140,8 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
       <div className="relative z-10">
         <AppHeader user={user} />
 
-        <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12">
-          <Link
-            href="/knowledge"
-            className="group mb-8 inline-flex items-center gap-2 text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-900"
-          >
-            <span className="transition-transform group-hover:-translate-x-1">←</span>
-            All libraries
-          </Link>
+        <main className="workspace-page-main mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12">
+          <WorkspaceBackLink href="/knowledge">All libraries</WorkspaceBackLink>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -223,11 +215,7 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
               </div>
             )}
 
-            {error && (
-              <p className="relative mt-4 rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-800">
-                {error}
-              </p>
-            )}
+            {error && <WorkspaceAlert type="error" className="relative mt-4">{error}</WorkspaceAlert>}
 
             {writeable && (
               <form onSubmit={handleIngestUrl} className="relative mt-6 flex flex-col gap-3 sm:flex-row">

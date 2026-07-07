@@ -3,6 +3,7 @@ import secrets
 from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.database import Workflow, WorkflowPresence, WorkflowPresenceSession, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
@@ -19,7 +20,7 @@ from app.services.workflow import (
     snapshot_workflow_version,
     workflow_dict,
 )
-from app.services.workflow_diff import diff_workflow_graphs
+from app.services.workflow_diff import diff_workflow_graphs, format_diff_markdown
 from app.services.workflow_scheduler import compute_schedule_next_run, schedule_dict
 
 router = APIRouter(tags=["Workflow"])
@@ -241,6 +242,64 @@ def workflow_version_diff(
         "to_graph": new_graph,
         **diff,
     })
+
+
+@router.get("/workflow/{workflow_id}/versions/diff/export")
+def workflow_version_diff_export(
+    workflow_id: str,
+    from_id: int = Query(...),
+    to_id: str = Query("current"),
+    format: str = Query("json", pattern="^(json|md)$"),
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    w = db.get(Workflow, workflow_id)
+    if not w or w.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    old_v = get_workflow_version(db, workflow_id, from_id)
+    if not old_v:
+        return fail(404, "From version not found")
+    if to_id == "current":
+        try:
+            new_graph = json.loads(w.graph_json or "{}")
+        except json.JSONDecodeError:
+            new_graph = {"nodes": [], "edges": []}
+        to_label = "current"
+    else:
+        new_v = get_workflow_version(db, workflow_id, int(to_id))
+        if not new_v:
+            return fail(404, "To version not found")
+        new_graph = new_v["graph"]
+        to_label = f"v{new_v['version_no']}"
+    diff = diff_workflow_graphs(old_v["graph"], new_graph)
+    from_label = f"v{old_v['version_no']}"
+    payload = {
+        "workflow_id": workflow_id,
+        "workflow_name": w.name,
+        "from": from_label,
+        "to": to_label,
+        **diff,
+    }
+    safe_name = (w.name or "workflow").replace(" ", "-")[:40]
+    filename_base = f"novaflow-diff-{safe_name}-{from_label}-to-{to_label}".replace("/", "-")
+
+    if format == "md":
+        body = format_diff_markdown(
+            diff,
+            workflow_name=w.name or "Workflow",
+            from_label=from_label,
+            to_label=to_label,
+        )
+        return PlainTextResponse(
+            body,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.md"'},
+        )
+
+    return JSONResponse(
+        payload,
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.json"'},
+    )
 
 
 @router.get("/workflow/{workflow_id}/versions/{version_id}")

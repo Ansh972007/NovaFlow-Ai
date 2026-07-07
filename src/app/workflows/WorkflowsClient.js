@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import AppHeader from "@/components/AppHeader";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import { WorkspaceSkeletonList } from "@/components/workspace/WorkspaceTabs";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { getUserInfo } from "@/lib/api/auth";
 import {
   createWorkflow,
@@ -101,12 +102,7 @@ export default function WorkflowsClient() {
   }
 
   if (!user) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center">
-        <WorkspaceLiveBackground />
-        <span className="relative z-10 text-neutral-500">Loading…</span>
-      </div>
-    );
+    return null;
   }
 
   const displayTemplates = templates.length
@@ -118,12 +114,8 @@ export default function WorkflowsClient() {
       ];
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <WorkspaceLiveBackground />
-      <div className="relative z-10">
-        <AppHeader user={user} />
-
-        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+    <>
+      <WorkspacePageShell user={user} maxWidth="max-w-6xl">
           <WorkspaceHero
             eyebrow="Automate"
             title="Workflow"
@@ -168,7 +160,7 @@ export default function WorkflowsClient() {
           >
             <p className="workspace-section-label mb-5">Your workflows</p>
             {loading ? (
-              <p className="text-sm text-neutral-500">Loading…</p>
+              <WorkspaceSkeletonList count={4} height="h-20" />
             ) : workflows.length === 0 ? (
               <div className="workspace-empty rounded-2xl p-10 text-center">
                 <p className="font-medium">No workflows yet</p>
@@ -252,8 +244,7 @@ export default function WorkflowsClient() {
               ))}
             </div>
           </motion.section>
-        </main>
-      </div>
+      </WorkspacePageShell>
 
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
@@ -282,7 +273,7 @@ export default function WorkflowsClient() {
                 ))}
               </select>
             </label>
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+            {error && <WorkspaceAlert type="error" className="mt-3">{error}</WorkspaceAlert>}
             <div className="mt-6 flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="workspace-btn-ghost">
                 Cancel
@@ -294,6 +285,6 @@ export default function WorkflowsClient() {
           </form>
         </div>
       )}
-    </div>
+    </>
   );
 }

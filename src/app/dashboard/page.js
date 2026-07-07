@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
-import AnalyticsCharts from "@/components/dashboard/AnalyticsCharts";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { getUserInfo } from "@/lib/api/auth";
 import { getOnlineApps, getAssistants } from "@/lib/api/apps";
@@ -16,6 +16,10 @@ import { listKnowledge } from "@/lib/api/knowledge";
 import { loadSessions } from "@/lib/chat/storage";
 import { isSetupComplete } from "@/lib/setup/storage";
 import { truncate } from "@/lib/utils";
+
+const AnalyticsCharts = dynamic(() => import("@/components/dashboard/AnalyticsCharts"), {
+  ssr: false,
+});
 
 const ease = [0.16, 1, 0.3, 1];
 
