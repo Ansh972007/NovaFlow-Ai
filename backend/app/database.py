@@ -413,10 +413,47 @@ class FineTuneJob(Base):
     error_message = Column(Text, default="")
     webhook_url = Column(String(500), default="")
     webhook_sent = Column(Integer, default=0)
+    auto_eval_suite_id = Column(Integer, ForeignKey("eval_suites.id"), nullable=True)
+    auto_eval_run_id = Column(Integer, nullable=True)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     dataset = relationship("FineTuneDataset", back_populates="jobs")
+
+
+class DevProject(Base):
+    __tablename__ = "dev_projects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False)
+    description = Column(Text, default="")
+    status = Column(String(24), default="active")
+    integrations_json = Column(Text, default="{}")
+    workflow_ids_json = Column(Text, default="[]")
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkspaceIntegration(Base):
+    __tablename__ = "workspace_integrations"
+
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), primary_key=True)
+    telegram_bot_token_enc = Column(Text, default="")
+    telegram_bot_username = Column(String(64), default="")
+    telegram_default_chat_id = Column(String(32), default="")
+    smtp_host = Column(String(255), default="")
+    smtp_port = Column(Integer, default=587)
+    smtp_user = Column(String(255), default="")
+    smtp_password_enc = Column(Text, default="")
+    smtp_from = Column(String(255), default="")
+    gmail_preset = Column(Integer, default=0)
+    public_base_url = Column(String(500), default="")
+    telegram_webhook_workflow_id = Column(String(32), default="")
+    telegram_webhook_url = Column(String(500), default="")
+    telegram_webhook_registered_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Workspace(Base):
@@ -512,6 +549,25 @@ def migrate_schema():
         for col, ddl in [
             ("webhook_url", "ALTER TABLE finetune_jobs ADD COLUMN webhook_url VARCHAR(500) DEFAULT ''"),
             ("webhook_sent", "ALTER TABLE finetune_jobs ADD COLUMN webhook_sent INTEGER DEFAULT 0"),
+            ("auto_eval_suite_id", "ALTER TABLE finetune_jobs ADD COLUMN auto_eval_suite_id INTEGER"),
+            ("auto_eval_run_id", "ALTER TABLE finetune_jobs ADD COLUMN auto_eval_run_id INTEGER"),
+        ]:
+            if col not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+    if "dev_projects" not in insp.get_table_names():
+        Base.metadata.tables["dev_projects"].create(bind=engine, checkfirst=True)
+
+    if "workspace_integrations" not in insp.get_table_names():
+        Base.metadata.tables["workspace_integrations"].create(bind=engine, checkfirst=True)
+    elif "workspace_integrations" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("workspace_integrations")}
+        for col, ddl in [
+            ("public_base_url", "ALTER TABLE workspace_integrations ADD COLUMN public_base_url VARCHAR(500) DEFAULT ''"),
+            ("telegram_webhook_workflow_id", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_workflow_id VARCHAR(32) DEFAULT ''"),
+            ("telegram_webhook_url", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_url VARCHAR(500) DEFAULT ''"),
+            ("telegram_webhook_registered_at", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_registered_at DATETIME"),
         ]:
             if col not in cols:
                 with engine.begin() as conn:

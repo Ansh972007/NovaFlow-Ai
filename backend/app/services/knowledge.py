@@ -270,23 +270,33 @@ def set_assistant_knowledge(db: Session, assistant_id: str, knowledge_ids: list[
     db.commit()
 
 
-def rag_context_for_assistant(db: Session, assistant_id: str, query: str, limit: int = 5) -> str:
+def rag_hits_for_assistant(db: Session, assistant_id: str, query: str, limit: int = 5) -> list[dict]:
     kid_list = get_assistant_knowledge_ids(db, assistant_id)
     if not kid_list or not query.strip():
-        return ""
+        return []
 
     hits = []
     per_kb = max(2, limit // max(len(kid_list), 1))
     for kid in kid_list:
         chunks = search_chunks_semantic(db, kid, query.strip(), per_kb)
+        for chunk in chunks:
+            chunk["knowledge_id"] = kid
         hits.extend(chunks)
 
     if not hits:
-        return ""
+        return []
 
     hits.sort(key=lambda h: h.get("score", 0), reverse=True)
+    return hits[:limit]
+
+
+def rag_context_for_assistant(db: Session, assistant_id: str, query: str, limit: int = 5) -> str:
+    hits = rag_hits_for_assistant(db, assistant_id, query, limit)
+    if not hits:
+        return ""
+
     parts = []
-    for i, hit in enumerate(hits[:limit], 1):
+    for i, hit in enumerate(hits, 1):
         source = hit.get("file_name") or "document"
         text = (hit.get("text") or "")[:1200]
         parts.append(f"[{i}] ({source})\n{text}")

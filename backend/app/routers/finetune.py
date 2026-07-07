@@ -136,6 +136,7 @@ async def create_job(body: dict, db: Session = Depends(get_db), ctx=Depends(requ
             body.get("provider_id"),
             (body.get("base_model") or "gpt-4o-mini-2024-07-18").strip(),
             webhook_url=(body.get("webhook_url") or "").strip(),
+            auto_eval_suite_id=int(body["auto_eval_suite_id"]) if body.get("auto_eval_suite_id") else None,
         )
         return ok(job_dict(job))
     except ValueError as exc:

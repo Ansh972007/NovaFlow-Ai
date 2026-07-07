@@ -42,6 +42,7 @@ const ADD_NODE_DEFAULTS = {
   transform: { template: "{{input}}" },
   condition: { keyword: "", then_text: "{{input}}", else_text: "" },
   http: { url: "", method: "GET", body: "" },
+  notify: { channel: "telegram", to: "{{chat_id}}", subject: "NovaFlow", message: "{{output}}" },
   retrieve: { knowledge_id: null, limit: 5 },
   llm: { prompt: "You are a helpful assistant." },
   output: { label: "Output" },
@@ -92,6 +93,11 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const selected = useMemo(
     () => graph.nodes?.find((n) => n.id === selectedId) || null,
     [graph.nodes, selectedId]
+  );
+
+  const hasNotifyNode = useMemo(
+    () => (graph.nodes || []).some((n) => n.type === "notify"),
+    [graph.nodes]
   );
 
   const load = useCallback(async () => {
@@ -694,7 +700,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
             <div className="shrink-0 border-t border-black/[0.04] p-3">
               <p className="workspace-section-label mb-2">Add node</p>
               <div className="flex flex-wrap gap-1.5">
-                {["loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "retrieve", "llm", "output"].map((type) => (
+                {["loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "notify", "retrieve", "llm", "output"].map((type) => (
                   <button
                     key={type}
                     type="button"
@@ -804,6 +810,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
             versionDiff ? () => downloadWorkflowDiffMarkdown(versionDiff, name) : undefined
           }
           readOnly={readOnly}
+          workflowId={workflowId}
+          hasNotifyNode={hasNotifyNode}
         />
       </div>
     </div>

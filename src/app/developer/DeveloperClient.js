@@ -20,6 +20,14 @@ const PRESETS = [
   { label: "List workflows", method: "GET", path: "/workflow?page=1&limit=10" },
   { label: "List knowledge", method: "GET", path: "/knowledge?page_num=1&page_size=10" },
   { label: "List API keys", method: "GET", path: "/api-keys" },
+  { label: "Integration settings", method: "GET", path: "/integrations/settings" },
+  { label: "Integration health", method: "GET", path: "/integrations/health" },
+  { label: "Telegram webhook status", method: "GET", path: "/integrations/telegram/webhook-status" },
+  { label: "List projects", method: "GET", path: "/projects" },
+  { label: "Model Lab pipelines", method: "GET", path: "/model-lab/pipelines" },
+  { label: "Prompt drift", method: "GET", path: "/model-lab/drift" },
+  { label: "Test Telegram notify", method: "POST", path: "/integrations/notify/test", body: '{\n  "channel": "telegram",\n  "to": "YOUR_CHAT_ID",\n  "message": "Hello from API"\n}' },
+  { label: "Train + eval", method: "POST", path: "/model-lab/train-and-eval", body: '{\n  "dataset_id": 1,\n  "base_model": "gpt-4o-mini-2024-07-18",\n  "auto_eval_suite_id": 1\n}' },
 ];
 
 export default function DeveloperClient() {
@@ -87,7 +95,8 @@ export default function DeveloperClient() {
   function applyPreset(preset) {
     setMethod(preset.method);
     setPath(preset.path);
-    if (preset.method === "GET") setBody("");
+    if (preset.body) setBody(preset.body);
+    else if (preset.method === "GET") setBody("");
   }
 
   return (

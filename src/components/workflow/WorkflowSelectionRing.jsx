@@ -8,6 +8,7 @@ const RING_COLORS = {
   transform: { stroke: "#f59e0b", glow: "rgba(245,158,11,0.35)", dot: "#fbbf24" },
   condition: { stroke: "#f43f5e", glow: "rgba(244,63,94,0.35)", dot: "#fb7185" },
   http: { stroke: "#06b6d4", glow: "rgba(6,182,212,0.35)", dot: "#22d3ee" },
+  notify: { stroke: "#14b8a6", glow: "rgba(20,184,166,0.35)", dot: "#2dd4bf" },
   loop: { stroke: "#6366f1", glow: "rgba(99,102,241,0.35)", dot: "#818cf8" },
   parallel: { stroke: "#d946ef", glow: "rgba(217,70,239,0.35)", dot: "#e879f9" },
   human: { stroke: "#f97316", glow: "rgba(249,115,22,0.35)", dot: "#fb923c" },

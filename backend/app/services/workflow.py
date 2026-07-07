@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowPendingRun, WorkflowRun, WorkflowVersion
+from app.services.integrations import send_notification
 from app.services.knowledge import search_chunks_semantic
 from app.services.llm import stream_chat, stream_chat_sync
 
@@ -105,6 +106,59 @@ TEMPLATES = {
                 {"id": "output", "type": "output", "x": 480, "y": 140, "data": {"label": "Results"}},
             ],
             "edges": [{"from": "trigger", "to": "loop"}, {"from": "loop", "to": "output"}],
+        },
+    },
+    "telegram_qa": {
+        "name": "Telegram Q&A bot",
+        "desc": "Answer questions and reply via Telegram",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Telegram message"}},
+                {"id": "llm", "type": "llm", "x": 260, "y": 140, "data": {"prompt": "You are a helpful project assistant. Answer concisely."}},
+                {"id": "notify", "type": "notify", "x": 460, "y": 140, "data": {"channel": "telegram", "to": "{{chat_id}}", "message": "{{output}}"}},
+                {"id": "output", "type": "output", "x": 660, "y": 140, "data": {"label": "Sent"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "llm"},
+                {"from": "llm", "to": "notify"},
+                {"from": "notify", "to": "output"},
+            ],
+        },
+    },
+    "daily_digest": {
+        "name": "Daily digest email",
+        "desc": "Retrieve knowledge and email a summary",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Schedule"}},
+                {"id": "retrieve", "type": "retrieve", "x": 220, "y": 140, "data": {"knowledge_id": None, "limit": 6}},
+                {"id": "llm", "type": "llm", "x": 400, "y": 140, "data": {"prompt": "Write a concise daily digest for the team."}},
+                {"id": "notify", "type": "notify", "x": 580, "y": 140, "data": {"channel": "email", "to": "team@example.com", "subject": "Daily digest", "message": "{{output}}"}},
+                {"id": "output", "type": "output", "x": 760, "y": 140, "data": {"label": "Emailed"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "retrieve"},
+                {"from": "retrieve", "to": "llm"},
+                {"from": "llm", "to": "notify"},
+                {"from": "notify", "to": "output"},
+            ],
+        },
+    },
+    "eval_alert": {
+        "name": "Eval alert webhook",
+        "desc": "Format eval results and notify via webhook",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Eval payload"}},
+                {"id": "transform", "type": "transform", "x": 240, "y": 140, "data": {"template": "Eval alert:\n{{input}}"}},
+                {"id": "notify", "type": "notify", "x": 440, "y": 140, "data": {"channel": "webhook", "to": "https://hooks.example.com/eval", "subject": "Eval regression", "message": "{{output}}"}},
+                {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Notified"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "transform"},
+                {"from": "transform", "to": "notify"},
+                {"from": "notify", "to": "output"},
+            ],
         },
     },
 }
@@ -255,7 +309,7 @@ def _topo_order(graph: dict) -> list[dict]:
 
 def _apply_template(template: str, context: dict) -> str:
     text = template or ""
-    for key in ("input", "retrieved", "output", "http", "transform"):
+    for key in ("input", "retrieved", "output", "http", "transform", "chat_id"):
         text = text.replace(f"{{{{{key}}}}}", str(context.get(key) or ""))
     return text
 
@@ -296,7 +350,12 @@ def log_usage(
 
 
 async def run_workflow(
-    db: Session, workflow: Workflow, user_id: int, user_input: str, workspace_id: int | None = None
+    db: Session,
+    workflow: Workflow,
+    user_id: int,
+    user_input: str,
+    workspace_id: int | None = None,
+    extra_context: dict | None = None,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -304,7 +363,12 @@ async def run_workflow(
     except json.JSONDecodeError:
         graph = {"nodes": [], "edges": []}
 
-    context, steps, pause_node = await _execute_graph(db, user_id, graph, user_input.strip(), workspace_id=workspace_id)
+    initial_context = {"input": user_input, "retrieved": "", "output": ""}
+    if extra_context:
+        initial_context.update(extra_context)
+    context, steps, pause_node = await _execute_graph(
+        db, user_id, graph, user_input.strip(), workspace_id=workspace_id, initial_context=initial_context
+    )
     if pause_node:
         pending = WorkflowPendingRun(
             workflow_id=workflow.id,
@@ -545,7 +609,7 @@ async def _execute_graph(
     initial_steps: list | None = None,
 ) -> tuple[dict, list[dict], str | None]:
     context = dict(initial_context) if initial_context else {"input": user_input, "retrieved": "", "output": ""}
-    if not initial_context:
+    if user_input:
         context["input"] = user_input
     steps: list[dict] = list(initial_steps or [])
     llm_messages: tuple[str, str] | None = None
@@ -620,6 +684,29 @@ async def _execute_graph(
                 except Exception as exc:
                     step["output"] = str(exc)[:500]
                     step["status"] = "error"
+        elif ntype == "notify":
+            channel = (data.get("channel") or "telegram").strip().lower()
+            to_addr = _apply_template(data.get("to") or "", context).strip()
+            subject = _apply_template(data.get("subject") or "NovaFlow notification", context)
+            body_text = _apply_template(data.get("message") or "{{output}}", context)
+            bot_token = (data.get("bot_token") or "").strip()
+            result = await send_notification(
+                channel,
+                to_addr,
+                subject,
+                body_text,
+                bot_token=bot_token,
+                db=db,
+                workspace_id=workspace_id,
+            )
+            detail = result.get("detail") or ("sent" if result.get("ok") else "failed")
+            if result.get("ok"):
+                context["output"] = detail
+                step["output"] = detail
+                step["status"] = "ok"
+            else:
+                step["output"] = detail
+                step["status"] = "error"
         elif ntype == "llm":
             prompt = data.get("prompt") or "You are a helpful assistant."
             user_msg = context.get("transform") or context["input"]

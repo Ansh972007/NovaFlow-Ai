@@ -126,6 +126,50 @@ export default function ChatMessages({ messages, streaming, error, assistantName
                   {msg.streaming && msg.content && (
                     <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-neutral-400 align-middle" />
                   )}
+                  {msg.role === "assistant" && msg.receipt && !msg.streaming && (
+                    <details className="mt-3 border-t border-black/[0.06] pt-3 text-left">
+                      <summary className="cursor-pointer text-[11px] font-semibold tracking-wide text-neutral-500 uppercase">
+                        AI Receipt
+                      </summary>
+                      <div className="mt-2 space-y-2 text-xs text-neutral-600">
+                        <p>
+                          <span className="font-medium text-neutral-800">Model:</span>{" "}
+                          {msg.receipt.model || "—"}
+                        </p>
+                        {msg.receipt.ab_variant && (
+                          <p>
+                            <span className="font-medium text-neutral-800">A/B:</span>{" "}
+                            {msg.receipt.ab_variant} ({msg.receipt.ab_model})
+                          </p>
+                        )}
+                        <p>
+                          <span className="font-medium text-neutral-800">RAG:</span>{" "}
+                          {msg.receipt.rag_used
+                            ? `${msg.receipt.source_count} source(s)`
+                            : "Not used"}
+                        </p>
+                        {msg.receipt.sources?.length > 0 && (
+                          <p className="text-neutral-500">{msg.receipt.sources.join(" · ")}</p>
+                        )}
+                        {msg.receipt.chunks?.length > 0 && (
+                          <ul className="space-y-1.5">
+                            {msg.receipt.chunks.slice(0, 3).map((c, i) => (
+                              <li
+                                key={i}
+                                className="rounded-lg bg-neutral-50 px-2.5 py-2 text-[11px] leading-relaxed"
+                              >
+                                <span className="font-medium">{c.file_name}</span>
+                                {c.score != null && (
+                                  <span className="text-neutral-400"> · score {c.score}</span>
+                                )}
+                                <p className="mt-0.5 text-neutral-500">{c.preview}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </details>
+                  )}
                 </div>
               </div>
             </motion.div>

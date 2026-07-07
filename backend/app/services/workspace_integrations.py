@@ -1,0 +1,181 @@
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from app.config import (
+    SMTP_FROM,
+    SMTP_HOST,
+    SMTP_PASSWORD,
+    SMTP_PORT,
+    SMTP_USER,
+    TELEGRAM_BOT_TOKEN,
+)
+from app.crypto import decrypt_secret, encrypt_secret
+from app.database import WorkspaceIntegration
+
+
+def _mask_secret(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "••••"
+    return "••••" + value[-4:]
+
+
+def get_or_create(db: Session, workspace_id: int) -> WorkspaceIntegration:
+    row = db.get(WorkspaceIntegration, workspace_id)
+    if not row:
+        row = WorkspaceIntegration(workspace_id=workspace_id)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def resolve_telegram_token(db: Session, workspace_id: int | None, override: str = "") -> str:
+    if override:
+        return override.strip()
+    if workspace_id:
+        row = db.get(WorkspaceIntegration, workspace_id)
+        if row and row.telegram_bot_token_enc:
+            token = decrypt_secret(row.telegram_bot_token_enc)
+            if token:
+                return token
+    return (TELEGRAM_BOT_TOKEN or "").strip()
+
+
+def resolve_smtp_config(db: Session, workspace_id: int | None) -> dict[str, Any]:
+    host = SMTP_HOST
+    port = SMTP_PORT
+    user = SMTP_USER
+    password = SMTP_PASSWORD
+    from_addr = SMTP_FROM
+
+    if workspace_id:
+        row = db.get(WorkspaceIntegration, workspace_id)
+        if row:
+            if row.smtp_host:
+                host = row.smtp_host
+            if row.smtp_port:
+                port = int(row.smtp_port)
+            if row.smtp_user:
+                user = row.smtp_user
+            if row.smtp_password_enc:
+                password = decrypt_secret(row.smtp_password_enc) or password
+            if row.smtp_from:
+                from_addr = row.smtp_from
+
+    return {
+        "host": (host or "").strip(),
+        "port": port or 587,
+        "user": (user or "").strip(),
+        "password": password or "",
+        "from_addr": (from_addr or user or "novaflow@localhost").strip(),
+    }
+
+
+def integrations_dict(db: Session, workspace_id: int) -> dict:
+    row = get_or_create(db, workspace_id)
+    token = decrypt_secret(row.telegram_bot_token_enc or "")
+    password = decrypt_secret(row.smtp_password_enc or "")
+    smtp = resolve_smtp_config(db, workspace_id)
+
+    return {
+        "workspace_id": workspace_id,
+        "public_base_url": row.public_base_url or "",
+        "telegram": {
+            "configured": bool(token or TELEGRAM_BOT_TOKEN),
+            "bot_token_masked": _mask_secret(token) if token else ("" if not TELEGRAM_BOT_TOKEN else "env"),
+            "bot_username": row.telegram_bot_username or "",
+            "default_chat_id": row.telegram_default_chat_id or "",
+            "source": "workspace" if token else ("env" if TELEGRAM_BOT_TOKEN else "none"),
+            "webhook_workflow_id": row.telegram_webhook_workflow_id or "",
+            "webhook_url": row.telegram_webhook_url or "",
+            "webhook_registered_at": row.telegram_webhook_registered_at.isoformat()
+            if row.telegram_webhook_registered_at
+            else None,
+        },
+        "email": {
+            "configured": bool(smtp.get("host") and (smtp.get("user") or smtp.get("from_addr"))),
+            "gmail_preset": bool(row.gmail_preset),
+            "smtp_host": row.smtp_host or smtp.get("host") or "",
+            "smtp_port": row.smtp_port or smtp.get("port") or 587,
+            "smtp_user": row.smtp_user or smtp.get("user") or "",
+            "smtp_from": row.smtp_from or smtp.get("from_addr") or "",
+            "smtp_password_masked": _mask_secret(password) if password else ("" if not SMTP_PASSWORD else "env"),
+            "source": "workspace" if row.smtp_host or row.smtp_user else ("env" if SMTP_HOST else "none"),
+        },
+    }
+
+
+def update_integrations(db: Session, workspace_id: int, body: dict) -> dict:
+    row = get_or_create(db, workspace_id)
+
+    if "public_base_url" in body:
+        row.public_base_url = str(body.get("public_base_url") or "").strip()[:500]
+
+    tg = body.get("telegram") if isinstance(body.get("telegram"), dict) else {}
+    if tg:
+        if "bot_username" in tg:
+            row.telegram_bot_username = str(tg.get("bot_username") or "").strip()[:64]
+        if "default_chat_id" in tg:
+            row.telegram_default_chat_id = str(tg.get("default_chat_id") or "").strip()[:32]
+        if "bot_token" in tg:
+            token = str(tg.get("bot_token") or "").strip()
+            if token:
+                row.telegram_bot_token_enc = encrypt_secret(token)
+            elif tg.get("clear_token"):
+                row.telegram_bot_token_enc = ""
+
+    email = body.get("email") if isinstance(body.get("email"), dict) else {}
+    if email:
+        if "gmail_preset" in email:
+            row.gmail_preset = 1 if email.get("gmail_preset") else 0
+            if row.gmail_preset:
+                row.smtp_host = "smtp.gmail.com"
+                row.smtp_port = 587
+        if "smtp_host" in email:
+            row.smtp_host = str(email.get("smtp_host") or "").strip()[:255]
+        if "smtp_port" in email:
+            row.smtp_port = max(1, min(65535, int(email.get("smtp_port") or 587)))
+        if "smtp_user" in email:
+            row.smtp_user = str(email.get("smtp_user") or "").strip()[:255]
+        if "smtp_from" in email:
+            row.smtp_from = str(email.get("smtp_from") or "").strip()[:255]
+        if "smtp_password" in email:
+            pwd = str(email.get("smtp_password") or "").strip()
+            if pwd:
+                row.smtp_password_enc = encrypt_secret(pwd)
+            elif email.get("clear_password"):
+                row.smtp_password_enc = ""
+
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return integrations_dict(db, workspace_id)
+
+
+def record_telegram_webhook(
+    db: Session,
+    workspace_id: int,
+    workflow_id: str,
+    webhook_url: str,
+) -> None:
+    row = get_or_create(db, workspace_id)
+    row.telegram_webhook_workflow_id = workflow_id[:32]
+    row.telegram_webhook_url = webhook_url[:500]
+    row.telegram_webhook_registered_at = datetime.utcnow()
+    row.updated_at = datetime.utcnow()
+    db.commit()
+
+
+def resolve_public_base_url(db: Session, workspace_id: int, override: str = "") -> str:
+    if override:
+        return override.rstrip("/")
+    row = db.get(WorkspaceIntegration, workspace_id)
+    if row and row.public_base_url:
+        return row.public_base_url.rstrip("/")
+    from app.config import PORT
+
+    return f"http://localhost:{PORT}"

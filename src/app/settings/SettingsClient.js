@@ -31,6 +31,14 @@ import { getTeamMembers, updateMemberRole, downloadAuditExport, getAuditEvents }
 import { getWorkspaceQuotas, updateWorkspaceQuotas, getActiveWorkspaceId } from "@/lib/api/workspaces";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { createApiKey, deleteApiKey, listApiKeys } from "@/lib/api/apiKeys";
+import {
+  getIntegrationSettings,
+  updateIntegrationSettings,
+  getIntegrationHealth,
+  verifyTelegramBot,
+  testEmailIntegration,
+  testNotify,
+} from "@/lib/api/integrations";
 import { createAbRoute, deleteAbRoute, listAbRoutes, updateAbRoute } from "@/lib/api/finetune";
 import { resetSetup } from "@/lib/setup/storage";
 
@@ -84,6 +92,17 @@ const SECTION_ICONS = {
   ab: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
       <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+    </svg>
+  ),
+  telegram: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+    </svg>
+  ),
+  email: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M22 6l-10 7L2 6" />
     </svg>
   ),
   quota: (
@@ -145,6 +164,21 @@ export default function SettingsClient() {
   const [abBusy, setAbBusy] = useState(false);
   const [abMsg, setAbMsg] = useState("");
 
+  const [integrationSettings, setIntegrationSettings] = useState(null);
+  const [integrationHealth, setIntegrationHealth] = useState(null);
+  const [tgToken, setTgToken] = useState("");
+  const [tgChatId, setTgChatId] = useState("");
+  const [tgUsername, setTgUsername] = useState("");
+  const [smtpHost, setSmtpHost] = useState("smtp.gmail.com");
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpFrom, setSmtpFrom] = useState("");
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [gmailPreset, setGmailPreset] = useState(true);
+  const [integrationBusy, setIntegrationBusy] = useState(false);
+  const [integrationMsg, setIntegrationMsg] = useState("");
+  const [publicBaseUrl, setPublicBaseUrl] = useState("");
+
   const isAdmin = user?.role === "admin";
 
   const load = useCallback(async () => {
@@ -201,6 +235,26 @@ export default function SettingsClient() {
     listAbRoutes()
       .then((rows) => setAbRoutes(Array.isArray(rows) ? rows : rows?.data || []))
       .catch(() => setAbRoutes([]));
+    getIntegrationSettings()
+      .then((s) => {
+        setIntegrationSettings(s);
+        if (s?.telegram) {
+          setTgChatId(s.telegram.default_chat_id || "");
+          setTgUsername(s.telegram.bot_username || "");
+        }
+        if (s?.email) {
+          setGmailPreset(!!s.email.gmail_preset);
+          setSmtpHost(s.email.smtp_host || "smtp.gmail.com");
+          setSmtpPort(s.email.smtp_port || 587);
+          setSmtpUser(s.email.smtp_user || "");
+          setSmtpFrom(s.email.smtp_from || "");
+        }
+        setPublicBaseUrl(s?.public_base_url || "");
+      })
+      .catch(() => setIntegrationSettings(null));
+    getIntegrationHealth()
+      .then(setIntegrationHealth)
+      .catch(() => setIntegrationHealth(null));
   }, [isAdmin]);
 
   async function handleRoleChange(memberId, role) {
@@ -321,6 +375,136 @@ export default function SettingsClient() {
       setApiKeyMsg(err.message || "Delete failed");
     } finally {
       setApiKeyBusy(false);
+    }
+  }
+
+  async function reloadIntegrations() {
+    const [s, h] = await Promise.all([
+      getIntegrationSettings().catch(() => null),
+      getIntegrationHealth().catch(() => null),
+    ]);
+    if (s) {
+      setIntegrationSettings(s);
+      setTgChatId(s.telegram?.default_chat_id || "");
+      setTgUsername(s.telegram?.bot_username || "");
+      if (s.email) {
+        setGmailPreset(!!s.email.gmail_preset);
+        setSmtpHost(s.email.smtp_host || "smtp.gmail.com");
+        setSmtpPort(s.email.smtp_port || 587);
+        setSmtpUser(s.email.smtp_user || "");
+        setSmtpFrom(s.email.smtp_from || "");
+      }
+    }
+    setIntegrationHealth(h);
+  }
+
+  async function handleSaveIntegrations(e) {
+    e?.preventDefault();
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const payload = {
+        public_base_url: publicBaseUrl.trim(),
+        telegram: {
+          default_chat_id: tgChatId.trim(),
+          bot_username: tgUsername.trim(),
+        },
+        email: {
+          gmail_preset: gmailPreset,
+          smtp_host: gmailPreset ? "smtp.gmail.com" : smtpHost.trim(),
+          smtp_port: Number(smtpPort) || 587,
+          smtp_user: smtpUser.trim(),
+          smtp_from: smtpFrom.trim() || smtpUser.trim(),
+        },
+      };
+      if (tgToken.trim()) payload.telegram.bot_token = tgToken.trim();
+      if (smtpPassword.trim()) payload.email.smtp_password = smtpPassword.trim();
+      await updateIntegrationSettings(payload);
+      setTgToken("");
+      setSmtpPassword("");
+      await reloadIntegrations();
+      setIntegrationMsg("Integration settings saved to workspace.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Save failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleVerifyTelegram() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const res = await verifyTelegramBot(tgToken.trim() ? { bot_token: tgToken.trim() } : {});
+      const bot = res?.bot;
+      setIntegrationMsg(bot ? `Connected: @${bot.username}` : "Telegram bot verified.");
+      if (bot?.username) setTgUsername(bot.username);
+      await reloadIntegrations();
+    } catch (err) {
+      setIntegrationMsg(err.message || "Telegram verification failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleTestTelegram() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      await testNotify({
+        channel: "telegram",
+        to: tgChatId.trim(),
+        message: "NovaFlow Telegram test from Settings",
+        bot_token: tgToken.trim() || undefined,
+      });
+      setIntegrationMsg("Telegram test message sent.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Telegram test failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleTestEmail() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      await testEmailIntegration({
+        to: smtpUser.trim() || smtpFrom.trim(),
+        subject: "NovaFlow Gmail/SMTP test",
+        message: "Your workspace email integration is working.",
+      });
+      setIntegrationMsg("Test email sent.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Email test failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleClearTelegramToken() {
+    setIntegrationBusy(true);
+    try {
+      await updateIntegrationSettings({ telegram: { clear_token: true } });
+      await reloadIntegrations();
+      setIntegrationMsg("Telegram token cleared.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Clear failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleClearSmtpPassword() {
+    setIntegrationBusy(true);
+    try {
+      await updateIntegrationSettings({ email: { clear_password: true } });
+      await reloadIntegrations();
+      setIntegrationMsg("SMTP password cleared.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Clear failed");
+    } finally {
+      setIntegrationBusy(false);
     }
   }
 
@@ -520,9 +704,18 @@ export default function SettingsClient() {
               />
               {isAdmin ? (
                 <SettingsStatCard
-                  label="Team"
-                  value={String(team.length)}
-                  hint={`${apiKeys.length} API key${apiKeys.length !== 1 ? "s" : ""} active`}
+                  label="Integrations"
+                  value={
+                    integrationHealth?.telegram_ready && integrationHealth?.email_ready
+                      ? "Ready"
+                      : integrationHealth?.telegram_ready || integrationHealth?.email_ready
+                        ? "Partial"
+                        : "Setup"
+                  }
+                  hint={`TG: ${integrationHealth?.telegram_ready ? "on" : "off"} · Email: ${integrationHealth?.email_ready ? "on" : "off"}`}
+                  status={
+                    integrationHealth?.telegram_ready || integrationHealth?.email_ready ? "online" : undefined
+                  }
                 />
               ) : (
                 <SettingsStatCard label="Role" value={user.role || "Member"} hint="Contact admin for elevated access" />
@@ -1019,6 +1212,269 @@ export default function SettingsClient() {
 
               {activeTab === "integrations" && isAdmin && (
                 <>
+                  <SettingsSection
+                    icon={SECTION_ICONS.health}
+                    title="Integration status"
+                    description="Live readiness for Telegram and email across workflows, projects, and alerts."
+                    delay={0.01}
+                  >
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-black/[0.06] bg-white/70 p-4">
+                        <p className="text-xs font-semibold text-neutral-500">Telegram</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {integrationHealth?.telegram_ready ? "Ready" : "Not configured"}
+                        </p>
+                        <p className="text-xs text-neutral-400">Source: {integrationSettings?.telegram?.source || "—"}</p>
+                      </div>
+                      <div className="rounded-xl border border-black/[0.06] bg-white/70 p-4">
+                        <p className="text-xs font-semibold text-neutral-500">Email / Gmail</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {integrationHealth?.email_ready ? "Ready" : "Not configured"}
+                        </p>
+                        <p className="text-xs text-neutral-400">Source: {integrationSettings?.email?.source || "—"}</p>
+                      </div>
+                    </div>
+                    <label className="mt-4 block">
+                      <span className="text-xs font-semibold text-neutral-600">Public API base URL</span>
+                      <input
+                        value={publicBaseUrl}
+                        onChange={(e) => setPublicBaseUrl(e.target.value)}
+                        placeholder="https://api.yourdomain.com"
+                        className="input-field mt-2 w-full font-mono text-sm"
+                      />
+                      <span className="mt-1 block text-xs text-neutral-500">
+                        Used for Telegram webhook registration in production
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={integrationBusy}
+                      onClick={handleSaveIntegrations}
+                      className="btn-secondary mt-3 text-xs"
+                    >
+                      Save public URL
+                    </button>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.telegram}
+                    title="Telegram bot"
+                    description={
+                      <>
+                        Add your bot token from{" "}
+                        <a
+                          href="https://t.me/BotFather"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-neutral-800 underline-offset-2 hover:underline"
+                        >
+                          @BotFather
+                        </a>
+                        . Used by workflow notify nodes and project bots. Stored encrypted per workspace.
+                      </>
+                    }
+                    delay={0.02}
+                  >
+                    <SettingsMessage
+                      type={
+                        integrationMsg.includes("saved") ||
+                        integrationMsg.includes("sent") ||
+                        integrationMsg.includes("Connected")
+                          ? "success"
+                          : integrationMsg
+                            ? "error"
+                            : "info"
+                      }
+                    >
+                      {integrationMsg ||
+                        (integrationSettings?.telegram?.configured
+                          ? `Bot configured (${integrationSettings.telegram.source})${integrationSettings.telegram.bot_token_masked ? ` · ${integrationSettings.telegram.bot_token_masked}` : ""}`
+                          : "No Telegram bot configured yet.")}
+                    </SettingsMessage>
+
+                    <form onSubmit={handleSaveIntegrations} className="mt-5 space-y-4">
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Bot token</span>
+                        <input
+                          type="password"
+                          value={tgToken}
+                          onChange={(e) => setTgToken(e.target.value)}
+                          placeholder={
+                            integrationSettings?.telegram?.bot_token_masked
+                              ? `Saved ${integrationSettings.telegram.bot_token_masked} — enter to replace`
+                              : "123456:ABC-DEF..."
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="text-xs font-semibold text-neutral-600">Bot username</span>
+                          <input
+                            value={tgUsername}
+                            onChange={(e) => setTgUsername(e.target.value)}
+                            placeholder="@myprojectbot"
+                            className="input-field mt-2 w-full text-sm"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-semibold text-neutral-600">Default chat ID</span>
+                          <input
+                            value={tgChatId}
+                            onChange={(e) => setTgChatId(e.target.value)}
+                            placeholder="-1001234567890"
+                            className="input-field mt-2 w-full font-mono text-sm"
+                          />
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" disabled={integrationBusy} className="btn-primary disabled:opacity-50">
+                          {integrationBusy ? "Saving…" : "Save Telegram"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleVerifyTelegram}
+                          className="btn-secondary disabled:opacity-50"
+                        >
+                          Verify bot
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy || !tgChatId.trim()}
+                          onClick={handleTestTelegram}
+                          className="workspace-btn-ghost disabled:opacity-50"
+                        >
+                          Send test
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleClearTelegramToken}
+                          className="workspace-btn-ghost workspace-btn-danger text-xs"
+                        >
+                          Clear token
+                        </button>
+                      </div>
+                    </form>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.email}
+                    title="Gmail & email (SMTP)"
+                    description="Use a Gmail app password or any SMTP server for digests, eval alerts, and workflow notify nodes."
+                    delay={0.04}
+                  >
+                    <label className="flex items-center gap-2 text-sm text-neutral-700">
+                      <input
+                        type="checkbox"
+                        checked={gmailPreset}
+                        onChange={(e) => {
+                          setGmailPreset(e.target.checked);
+                          if (e.target.checked) {
+                            setSmtpHost("smtp.gmail.com");
+                            setSmtpPort(587);
+                          }
+                        }}
+                      />
+                      Gmail preset (smtp.gmail.com:587)
+                    </label>
+
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      {!gmailPreset && (
+                        <>
+                          <label className="block">
+                            <span className="text-xs font-semibold text-neutral-600">SMTP host</span>
+                            <input
+                              value={smtpHost}
+                              onChange={(e) => setSmtpHost(e.target.value)}
+                              className="input-field mt-2 w-full text-sm"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="text-xs font-semibold text-neutral-600">SMTP port</span>
+                            <input
+                              type="number"
+                              value={smtpPort}
+                              onChange={(e) => setSmtpPort(e.target.value)}
+                              className="input-field mt-2 w-full text-sm"
+                            />
+                          </label>
+                        </>
+                      )}
+                      <label className="block sm:col-span-2">
+                        <span className="text-xs font-semibold text-neutral-600">Email / username</span>
+                        <input
+                          value={smtpUser}
+                          onChange={(e) => setSmtpUser(e.target.value)}
+                          placeholder="you@gmail.com"
+                          className="input-field mt-2 w-full text-sm"
+                        />
+                      </label>
+                      <label className="block sm:col-span-2">
+                        <span className="text-xs font-semibold text-neutral-600">From address</span>
+                        <input
+                          value={smtpFrom}
+                          onChange={(e) => setSmtpFrom(e.target.value)}
+                          placeholder="Optional — defaults to username"
+                          className="input-field mt-2 w-full text-sm"
+                        />
+                      </label>
+                      <label className="block sm:col-span-2">
+                        <span className="text-xs font-semibold text-neutral-600">App password / SMTP password</span>
+                        <input
+                          type="password"
+                          value={smtpPassword}
+                          onChange={(e) => setSmtpPassword(e.target.value)}
+                          placeholder={
+                            integrationSettings?.email?.smtp_password_masked
+                              ? `Saved ${integrationSettings.email.smtp_password_masked} — enter to replace`
+                              : "Gmail app password"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={integrationBusy}
+                        onClick={handleSaveIntegrations}
+                        className="btn-primary disabled:opacity-50"
+                      >
+                        Save email settings
+                      </button>
+                      <button
+                        type="button"
+                        disabled={integrationBusy}
+                        onClick={handleTestEmail}
+                        className="btn-secondary disabled:opacity-50"
+                      >
+                        Send test email
+                      </button>
+                      <button
+                        type="button"
+                        disabled={integrationBusy}
+                        onClick={handleClearSmtpPassword}
+                        className="workspace-btn-ghost workspace-btn-danger text-xs"
+                      >
+                        Clear password
+                      </button>
+                    </div>
+                    <p className="mt-3 text-xs text-neutral-500">
+                      Status:{" "}
+                      {integrationSettings?.email?.configured
+                        ? `Configured (${integrationSettings.email.source})`
+                        : "Not configured"}
+                      {integrationSettings?.email?.smtp_password_masked
+                        ? ` · password ${integrationSettings.email.smtp_password_masked}`
+                        : ""}
+                    </p>
+                  </SettingsSection>
+
                   <SettingsSection
                     icon={SECTION_ICONS.keys}
                     title="API keys"

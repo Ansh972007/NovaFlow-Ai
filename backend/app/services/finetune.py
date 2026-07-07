@@ -39,6 +39,8 @@ def job_dict(job: FineTuneJob) -> dict:
         "error_message": job.error_message or "",
         "webhook_url": job.webhook_url or "",
         "webhook_sent": bool(job.webhook_sent),
+        "auto_eval_suite_id": job.auto_eval_suite_id,
+        "auto_eval_run_id": job.auto_eval_run_id,
         "create_time": job.create_time.isoformat() if job.create_time else None,
         "update_time": job.update_time.isoformat() if job.update_time else None,
     }
@@ -98,6 +100,7 @@ async def start_finetune_job(
     provider_id: int | None,
     base_model: str,
     webhook_url: str = "",
+    auto_eval_suite_id: int | None = None,
 ) -> FineTuneJob:
     from app.services.ab_routing import check_finetune_quota
 
@@ -115,6 +118,7 @@ async def start_finetune_job(
         status="uploading",
         webhook_url=(webhook_url or "").strip()[:500],
         webhook_sent=0,
+        auto_eval_suite_id=auto_eval_suite_id,
     )
     db.add(job)
     db.commit()
@@ -180,7 +184,42 @@ async def refresh_finetune_job(db: Session, job: FineTuneJob) -> FineTuneJob:
     db.refresh(job)
     if job.status != prev_status:
         await send_finetune_webhook_if_needed(db, job)
+        if job.status in {"succeeded", "completed"} and job.auto_eval_suite_id and not job.auto_eval_run_id:
+            await run_auto_eval_for_job(db, job)
     return job
+
+
+async def run_auto_eval_for_job(db: Session, job: FineTuneJob) -> None:
+    from app.database import EvalSuite
+    from app.services.evaluation import run_dict, run_eval_suite
+
+    suite = db.get(EvalSuite, job.auto_eval_suite_id)
+    if not suite or suite.workspace_id != job.workspace_id:
+        return
+    try:
+        run = await run_eval_suite(
+            db,
+            suite,
+            job.user_id,
+            job.workspace_id or 0,
+            assistant_id=suite.assistant_id,
+        )
+        job.auto_eval_run_id = run.id
+        job.update_time = datetime.utcnow()
+        db.commit()
+        if job.webhook_url and not job.webhook_sent:
+            from app.services.webhooks import post_webhook
+
+            await post_webhook(
+                job.webhook_url,
+                {
+                    "event": "finetune_auto_eval",
+                    "job": job_dict(job),
+                    "eval_run": run_dict(run),
+                },
+            )
+    except Exception:
+        pass
 
 
 TERMINAL_FINETUNE = {"succeeded", "failed", "cancelled", "completed"}

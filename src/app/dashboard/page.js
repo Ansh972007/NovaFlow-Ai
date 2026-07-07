@@ -13,6 +13,9 @@ import { getOnlineApps, getAssistants } from "@/lib/api/apps";
 import { getAnalyticsSummary, getAnalyticsTimeseries, getAnalyticsAssistants, getAbRoutingAnalytics } from "@/lib/api/analytics";
 import { checkBackendHealth } from "@/lib/api/health";
 import { listKnowledge } from "@/lib/api/knowledge";
+import { getIntegrationHealth } from "@/lib/api/integrations";
+import { listProjects } from "@/lib/api/projects";
+import { listPipelines, getPromptDrift } from "@/lib/api/modelLab";
 import { loadSessions } from "@/lib/chat/storage";
 import { isSetupComplete } from "@/lib/setup/storage";
 import { truncate } from "@/lib/utils";
@@ -44,6 +47,30 @@ const modules = [
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/model-lab",
+    label: "Model Lab",
+    desc: "Knowledge → train → auto-eval pipelines",
+    accent: "from-indigo-800 to-indigo-600",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        <circle cx="12" cy="12" r="4" />
+      </svg>
+    ),
+  },
+  {
+    href: "/projects",
+    label: "Projects",
+    desc: "Telegram, email & workflow project hub",
+    accent: "from-sky-800 to-sky-600",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+        <path d="M3 7h18M3 12h18M3 17h12" />
+        <rect x="3" y="3" width="18" height="18" rx="2" />
       </svg>
     ),
   },
@@ -142,6 +169,12 @@ export default function DashboardPage() {
   const [chartSeries, setChartSeries] = useState([]);
   const [topAssistants, setTopAssistants] = useState([]);
   const [abRouting, setAbRouting] = useState(null);
+  const [workspacePulse, setWorkspacePulse] = useState({
+    integrations: null,
+    projects: 0,
+    activeJobs: 0,
+    driftWarnings: 0,
+  });
   const [stats, setStats] = useState([
     { value: "0", label: "Chat sessions", hint: "Local history" },
     { value: "0", label: "Assistants", hint: "Published & draft" },
@@ -185,17 +218,30 @@ export default function DashboardPage() {
         }
 
         try {
-          const [summary, ts, usage, ab] = await Promise.all([
+          const [summary, ts, usage, ab, integ, projects, pipes, drift] = await Promise.all([
             getAnalyticsSummary(),
             getAnalyticsTimeseries(7).catch(() => null),
             getAnalyticsAssistants(7).catch(() => null),
             getAbRoutingAnalytics(30).catch(() => null),
+            getIntegrationHealth().catch(() => null),
+            listProjects().catch(() => []),
+            listPipelines().catch(() => []),
+            getPromptDrift().catch(() => null),
           ]);
           analytics = summary;
           setRecentRuns(summary?.recent_runs || []);
           setChartSeries(ts?.series || []);
           setTopAssistants(usage?.items || []);
           setAbRouting(ab);
+          const activeJobs = (pipes || []).filter(
+            (p) => !["succeeded", "failed", "cancelled", "completed"].includes(p.status)
+          );
+          setWorkspacePulse({
+            integrations: integ,
+            projects: (projects || []).length,
+            activeJobs: activeJobs.length,
+            driftWarnings: (drift?.warning_count || 0) + (drift?.critical_count || 0),
+          });
         } catch {
           analytics = null;
         }
@@ -308,6 +354,45 @@ export default function DashboardPage() {
               </div>
             )}
           </motion.section>
+
+          {user && (
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.26, ease }}
+              className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+            >
+              <Link href="/settings" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Integrations</p>
+                <p className="mt-1 text-lg font-semibold">
+                  {workspacePulse.integrations?.telegram_ready && workspacePulse.integrations?.email_ready
+                    ? "All ready"
+                    : workspacePulse.integrations?.telegram_ready || workspacePulse.integrations?.email_ready
+                      ? "Partial"
+                      : "Setup needed"}
+                </p>
+                <p className="mt-0.5 text-xs text-neutral-500">
+                  TG {workspacePulse.integrations?.telegram_ready ? "on" : "off"} · Email{" "}
+                  {workspacePulse.integrations?.email_ready ? "on" : "off"}
+                </p>
+              </Link>
+              <Link href="/projects" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Projects</p>
+                <p className="mt-1 text-lg font-semibold">{workspacePulse.projects}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">Dev integration hubs</p>
+              </Link>
+              <Link href="/model-lab" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Model Lab</p>
+                <p className="mt-1 text-lg font-semibold">{workspacePulse.activeJobs}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">Active training jobs</p>
+              </Link>
+              <Link href="/evaluation" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Drift radar</p>
+                <p className="mt-1 text-lg font-semibold">{workspacePulse.driftWarnings}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">Warnings + critical</p>
+              </Link>
+            </motion.section>
+          )}
 
           {user && (
             <motion.section

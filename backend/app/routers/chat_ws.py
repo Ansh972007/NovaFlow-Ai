@@ -8,8 +8,9 @@ from app.crypto import decode_token
 from app.database import Assistant, SessionLocal, User, Workflow
 from app.deps import effective_role
 from app.services.tenancy import ensure_personal_workspace, get_membership
-from app.services.knowledge import rag_context_for_assistant
+from app.services.knowledge import rag_context_for_assistant, rag_hits_for_assistant
 from app.services.llm import stream_chat
+from app.services.receipt import build_chat_receipt
 from app.services.workflow import log_usage, resolve_workflow_llm_messages, run_workflow_with_progress
 
 router = APIRouter(tags=["Chat"])
@@ -63,14 +64,17 @@ async def _stream_reply(
     system: str,
     user_msg: str,
     workspace_id: int | None = None,
+    receipt_extra: dict | None = None,
 ):
     from app.services.ab_routing import pick_ab_model
     from app.services.workspace_settings import get_chat_config
 
     ab_meta = None
+    model_name = ""
     if workspace_id:
         cfg = get_chat_config(db)
-        ab_meta = pick_ab_model(db, workspace_id, cfg.get("model") or "")
+        model_name = cfg.get("model") or ""
+        ab_meta = pick_ab_model(db, workspace_id, model_name)
 
     await websocket.send_json({"type": "start"})
     buffer = ""
@@ -80,7 +84,14 @@ async def _stream_reply(
             {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
         )
         await asyncio.sleep(0)
-    await websocket.send_json({"type": "end", "message": {"content": buffer}})
+    receipt = build_chat_receipt(
+        model=ab_meta.get("model") if ab_meta else model_name,
+        rag_hits=(receipt_extra or {}).get("rag_hits"),
+        ab_meta=ab_meta,
+        chars=len(buffer),
+        event_type=event_type,
+    )
+    await websocket.send_json({"type": "end", "message": {"content": buffer}, "receipt": receipt})
     await websocket.send_json({"type": "close"})
     meta = {"chars": len(buffer)}
     if ab_meta:
@@ -142,7 +153,9 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
             if not str(user_msg).strip():
                 continue
 
-            rag = rag_context_for_assistant(db, assistant_id, str(user_msg).strip())
+            query = str(user_msg).strip()
+            rag_hits = rag_hits_for_assistant(db, assistant_id, query)
+            rag = rag_context_for_assistant(db, assistant_id, query)
             system_prompt = assistant.prompt
             if rag:
                 system_prompt = (
@@ -158,8 +171,9 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 assistant_id,
                 "chat",
                 system_prompt,
-                str(user_msg).strip(),
+                query,
                 wid,
+                receipt_extra={"rag_hits": rag_hits},
             )
     except WebSocketDisconnect:
         pass

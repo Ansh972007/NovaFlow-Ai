@@ -70,7 +70,8 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
             );
           });
         },
-        onStreamEnd: (chunk) => {
+        onStreamEnd: (chunk, data) => {
+          const receipt = data?.receipt || null;
           setMessages((prev) => {
             const id = botMsgIdRef.current;
             if (!id) return prev;
@@ -80,6 +81,7 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
                     ...m,
                     content: m.content + (chunk || ""),
                     streaming: false,
+                    receipt,
                   }
                 : m
             );

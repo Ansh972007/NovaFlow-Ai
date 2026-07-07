@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { NODE_META } from "./WorkflowCanvas";
+import WorkflowTelegramPanel from "./WorkflowTelegramPanel";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -53,6 +54,8 @@ export default function WorkflowInspector({
   onExportDiffJson,
   onExportDiffMd,
   readOnly = false,
+  workflowId = "",
+  hasNotifyNode = false,
 }) {
   const [connectTarget, setConnectTarget] = useState("");
   const [connectSource, setConnectSource] = useState("");
@@ -213,6 +216,12 @@ export default function WorkflowInspector({
                           )}
                         </div>
                       )}
+                      {(hasNotifyNode || workflowId) && (
+                        <WorkflowTelegramPanel
+                          workflowId={workflowId}
+                          published={workflowStatus === 1}
+                        />
+                      )}
                     </>
                   ) : (
                     <p className="mt-2 text-xs text-neutral-500">Publish to enable webhooks and marketplace sharing.</p>
@@ -331,7 +340,7 @@ export default function WorkflowInspector({
                     <label className="mt-6 block">
                       <span className="text-xs font-semibold text-neutral-600">Template</span>
                       <p className="mt-1 text-[11px] text-neutral-400">
-                        Use {"{{input}}"}, {"{{retrieved}}"}, {"{{output}}"}, {"{{http}}"}
+                        Use {"{{input}}"}, {"{{retrieved}}"}, {"{{output}}"}, {"{{http}}"}, {"{{chat_id}}"}
                       </p>
                       <textarea
                         value={selected.data?.template || ""}
@@ -413,6 +422,65 @@ export default function WorkflowInspector({
                           className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
                         />
                       </label>
+                    </>
+                  )}
+
+                  {selected.type === "notify" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Channel</span>
+                        <select
+                          value={selected.data?.channel || "telegram"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { channel: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        >
+                          <option value="telegram">Telegram</option>
+                          <option value="email">Email</option>
+                          <option value="webhook">Webhook</option>
+                        </select>
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">To / URL / Chat ID</span>
+                        <input
+                          value={selected.data?.to || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { to: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          placeholder="{{chat_id}} or team@example.com"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Subject (email)</span>
+                        <input
+                          value={selected.data?.subject || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { subject: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Message</span>
+                        <textarea
+                          value={selected.data?.message || "{{output}}"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { message: e.target.value } })}
+                          disabled={readOnly}
+                          rows={4}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      {selected.data?.channel === "telegram" && (
+                        <label className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">Bot token (optional)</span>
+                          <input
+                            value={selected.data?.bot_token || ""}
+                            onChange={(e) => onUpdateNode(selected.id, { data: { bot_token: e.target.value } })}
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                            placeholder="Uses workspace bot token from Settings if empty"
+                          />
+                        </label>
+                      )}
                     </>
                   )}
 

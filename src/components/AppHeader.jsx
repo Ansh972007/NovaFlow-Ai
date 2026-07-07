@@ -19,6 +19,8 @@ const NAV_GROUPS = [
     label: "Build",
     links: [
       { href: "/knowledge", label: "Knowledge" },
+      { href: "/model-lab", label: "Model Lab" },
+      { href: "/projects", label: "Projects" },
       { href: "/apps", label: "Apps" },
       { href: "/workflows", label: "Workflows" },
       { href: "/agents", label: "Agents" },

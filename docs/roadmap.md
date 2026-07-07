@@ -1,6 +1,32 @@
 # Roadmap
 
-## v8.0 — Unified workspace UI & diff export (current)
+## v9.2 — Integration wiring & project depth (current)
+
+- [x] Telegram webhook panel in Workflow Builder — register, copy URL, public base URL
+- [x] Webhook persistence in DB + live status from Telegram API
+- [x] Projects detail page — run workflows, test integrations, linked workflow list
+- [x] Dashboard workspace pulse — integrations, projects, Model Lab jobs, drift warnings
+- [x] Model Lab — system prompt, webhook URL, auto-poll active jobs
+- [x] Settings — public API URL, clear credentials, integration status cards
+- [x] Developer playground — v9 API presets
+
+## v9.1 — Integration credentials in Settings (done)
+
+- [x] Workspace DB storage for Telegram bot token and Gmail/SMTP (encrypted)
+- [x] Settings → Integrations UI — configure, verify, and test Telegram & email
+- [x] Workflows, eval alerts, and projects use workspace credentials from DB
+
+## v9.0 — Integrations, Model Lab & quality radar (done)
+
+- [x] Notify workflow node — Telegram, email, webhook channels
+- [x] Dev workflow templates — Telegram Q&A, daily digest, eval alert
+- [x] Telegram webhook trigger — inbound messages run published workflows
+- [x] Model Lab — knowledge → dataset → train → auto-eval pipeline
+- [x] Dev Projects hub — map integrations and workflows per project
+- [x] AI Receipt — per-response audit (model, RAG sources/chunks) in chat
+- [x] Prompt drift radar — eval regression detection in Evaluation UI
+
+## v8.0 — Unified workspace UI & diff export (done)
 
 - [x] Shared workspace design system — `WorkspacePageShell`, tabs, stat cards, alerts, loading
 - [x] Enhanced chat UI — `AppHeader`, new chat fix, sidebar cleanup
@@ -30,4 +56,4 @@
 | SAML SLO | Single logout with IdP |
 | Diff PDF export | Printable comparison reports |
 
-**NovaFlow v8.0** unifies the workspace UI and adds workflow diff export.
+**NovaFlow v9.2** wires Telegram webhooks end-to-end and deepens Projects, dashboard, and Model Lab.

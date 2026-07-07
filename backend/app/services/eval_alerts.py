@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import smtplib
@@ -8,8 +7,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
-from app.database import EvalRegressionAlert, EvalRun, EvalSuite
+from app.services.integrations import send_email_notification
+from app.services.workspace_integrations import resolve_smtp_config
 from app.services.webhooks import post_alert_notification, post_opsgenie_alert, post_pagerduty_alert
 
 logger = logging.getLogger("novaflow.alerts")
@@ -47,18 +46,21 @@ def _previous_run(db: Session, suite_id: int, exclude_id: int) -> EvalRun | None
     )
 
 
-def _send_email_sync(to_addr: str, subject: str, body: str) -> bool:
-    if not SMTP_HOST or not to_addr:
+def _send_email_sync(smtp: dict, to_addr: str, subject: str, body: str) -> bool:
+    host = smtp.get("host") or ""
+    if not host or not to_addr:
         return False
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
-    msg["From"] = SMTP_FROM or SMTP_USER or "novaflow@localhost"
+    msg["From"] = smtp.get("from_addr") or smtp.get("user") or "novaflow@localhost"
     msg["To"] = to_addr
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+        with smtplib.SMTP(host, int(smtp.get("port") or 587), timeout=20) as server:
             server.starttls()
-            if SMTP_USER and SMTP_PASSWORD:
-                server.login(SMTP_USER, SMTP_PASSWORD)
+            user = smtp.get("user") or ""
+            password = smtp.get("password") or ""
+            if user and password:
+                server.login(user, password)
             server.sendmail(msg["From"], [to_addr], msg.as_string())
         return True
     except Exception as exc:
@@ -66,8 +68,27 @@ def _send_email_sync(to_addr: str, subject: str, body: str) -> bool:
         return False
 
 
-async def send_email_alert(to_addr: str, subject: str, body: str) -> bool:
-    return await asyncio.to_thread(_send_email_sync, to_addr, subject, body)
+async def send_email_alert(
+    to_addr: str,
+    subject: str,
+    body: str,
+    *,
+    db: Session | None = None,
+    workspace_id: int | None = None,
+) -> bool:
+    smtp = resolve_smtp_config(db, workspace_id) if db else {}
+    if db is None:
+        from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
+
+        smtp = {
+            "host": SMTP_HOST,
+            "port": SMTP_PORT,
+            "user": SMTP_USER,
+            "password": SMTP_PASSWORD,
+            "from_addr": SMTP_FROM or SMTP_USER,
+        }
+    result = await send_email_notification(to_addr, subject, body, db=db, workspace_id=workspace_id, smtp_override=smtp)
+    return bool(result.get("ok"))
 
 
 async def check_regression_alerts(db: Session, suite: EvalSuite, run: EvalRun) -> list[dict[str, Any]]:
@@ -134,6 +155,8 @@ async def check_regression_alerts(db: Session, suite: EvalSuite, run: EvalRun) -
                 alert.email_to,
                 f"[NovaFlow] Eval regression: {suite.name}",
                 message,
+                db=db,
+                workspace_id=suite.workspace_id,
             )
 
         alert.last_alert_at = now

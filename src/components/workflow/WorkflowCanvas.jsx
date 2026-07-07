@@ -65,6 +65,13 @@ const NODE_META = {
     ring: "http",
     port: "bg-cyan-500",
   },
+  notify: {
+    label: "Notify",
+    accent: "workflow-node-notify",
+    iconBg: "from-teal-400/20 to-teal-600/10 text-teal-700",
+    ring: "notify",
+    port: "bg-teal-500",
+  },
   loop: {
     label: "Loop",
     accent: "workflow-node-loop",
@@ -114,6 +121,7 @@ function nodeSubtitle(node) {
   if (node.type === "transform") return node.data?.template?.slice(0, 28) || "Template";
   if (node.type === "condition") return node.data?.keyword || "Keyword match";
   if (node.type === "http") return node.data?.url?.slice(0, 28) || "Request URL";
+  if (node.type === "notify") return `${node.data?.channel || "telegram"} → ${(node.data?.to || "").slice(0, 16)}`;
   if (node.type === "loop") return `max ${node.data?.max || 5} items`;
   if (node.type === "parallel") return `${(node.data?.branches || []).length || 3} branches`;
   if (node.type === "human") return node.data?.require_approval ? "Approval gate" : "Review";

@@ -35,6 +35,7 @@ import {
   listEvalTemplates,
   createSuiteFromTemplate,
 } from "@/lib/api/evaluation";
+import { getPromptDrift } from "@/lib/api/modelLab";
 import {
   listFineTuneDatasets,
   createFineTuneDataset,
@@ -100,6 +101,7 @@ export default function EvaluationClient() {
   const [abRoutes, setAbRoutes] = useState([]);
   const [newAbRoute, setNewAbRoute] = useState({ base_model: "", variant_model: "", variant_traffic_pct: 50 });
   const [quotas, setQuotas] = useState(null);
+  const [driftRadar, setDriftRadar] = useState(null);
 
   const [newSuite, setNewSuite] = useState({ name: "", assistant_id: "", caseInput: "", caseExpected: "" });
   const [newDataset, setNewDataset] = useState({
@@ -175,6 +177,21 @@ export default function EvaluationClient() {
     }
     loadTrends();
   }, [tab, trendSuiteId, suites]);
+
+  useEffect(() => {
+    if (tab !== "drift") return;
+    async function loadDrift() {
+      try {
+        const data = await getPromptDrift(
+          trendSuiteId ? { suite_id: Number(trendSuiteId) } : {}
+        );
+        setDriftRadar(data);
+      } catch {
+        setDriftRadar(null);
+      }
+    }
+    loadDrift();
+  }, [tab, trendSuiteId]);
 
   async function openSuite(id) {
     setError("");
@@ -525,6 +542,7 @@ export default function EvaluationClient() {
     { id: "benchmark", label: "Benchmarks", count: suites.length },
     { id: "compare", label: "Compare" },
     { id: "trends", label: "Trends" },
+    { id: "drift", label: "Drift radar" },
     { id: "schedules", label: "Schedules", count: schedules.length },
     { id: "alerts", label: "Alerts", count: alerts.length },
     { id: "finetune", label: "Fine-tune", count: datasets.length },
@@ -923,6 +941,84 @@ export default function EvaluationClient() {
             </motion.section>
           )}
 
+          {tab === "drift" && (
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="workspace-panel mt-6 rounded-[1.5rem] p-5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">Prompt drift radar</h2>
+                  <p className="mt-1 text-sm text-neutral-500">
+                    Detect eval regressions and cases that flipped from pass to fail.
+                  </p>
+                </div>
+                <select
+                  className="input-field !w-auto text-sm"
+                  value={trendSuiteId}
+                  onChange={(e) => setTrendSuiteId(e.target.value)}
+                >
+                  <option value="">All suites</option>
+                  {suites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {driftRadar ? (
+                <>
+                  <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                    <WorkspaceStatCard label="Suites analyzed" value={driftRadar.suites_analyzed || 0} />
+                    <WorkspaceStatCard label="Warnings" value={driftRadar.warning_count || 0} />
+                    <WorkspaceStatCard label="Critical" value={driftRadar.critical_count || 0} />
+                  </div>
+                  <ul className="mt-6 space-y-3">
+                    {(driftRadar.radar || []).length === 0 ? (
+                      <li className="text-sm text-neutral-500">Need at least 2 eval runs per suite to detect drift.</li>
+                    ) : (
+                      driftRadar.radar.map((row) => (
+                        <li
+                          key={row.suite_id}
+                          className={`rounded-xl border p-4 ${
+                            row.severity === "critical"
+                              ? "border-red-200 bg-red-50/80"
+                              : row.severity === "warning"
+                                ? "border-amber-200 bg-amber-50/80"
+                                : "border-black/[0.06] bg-white/80"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-semibold">{row.suite_name}</p>
+                            <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                              {row.severity}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-neutral-600">
+                            Pass rate {row.pass_rate}% ({row.delta >= 0 ? "+" : ""}
+                            {row.delta}% vs baseline) · {row.regression_count} regression(s)
+                          </p>
+                          {row.regressions?.length > 0 && (
+                            <ul className="mt-2 space-y-1 text-xs text-neutral-600">
+                              {row.regressions.map((r, i) => (
+                                <li key={i} className="rounded-lg bg-white/70 px-2 py-1.5">
+                                  {(r.input || "").slice(0, 100)}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </>
+              ) : (
+                <p className="mt-6 text-sm text-neutral-500">Loading drift analysis…</p>
+              )}
+            </motion.section>
+          )}
+
           {tab === "schedules" && (
             <div className="mt-6 grid gap-6 lg:grid-cols-2">
               <motion.section className="workspace-panel rounded-[1.5rem] p-5">
@@ -1155,7 +1251,7 @@ export default function EvaluationClient() {
                     />
                     <input
                       className="input-field w-full text-xs"
-                      placeholder="Email to (requires SMTP_* env on server)"
+                      placeholder="Email to (uses Gmail/SMTP from Settings → Integrations)"
                       value={newAlert.email_to}
                       onChange={(e) => setNewAlert((p) => ({ ...p, email_to: e.target.value }))}
                     />
