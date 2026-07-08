@@ -73,7 +73,7 @@ export default function WorkspaceSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="hidden max-w-[160px] truncate rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface hover:text-foreground sm:inline-block lg:max-w-[200px]"
+        className="hidden max-w-[9rem] shrink-0 truncate whitespace-nowrap rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface hover:text-foreground sm:inline-flex sm:items-center lg:max-w-[11rem]"
         title={current?.name || "Workspace"}
       >
         {current?.name || "Workspace"}

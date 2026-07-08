@@ -17,11 +17,40 @@ EmitFn = Callable[[dict], Awaitable[None]] | None
 
 FLOW_TYPE_WORKFLOW = 10
 
+# WorkflowRun.status: 1 = completed, 2 = error (step failure)
+RUN_STATUS_OK = 1
+RUN_STATUS_ERROR = 2
+
+
+def _run_status_from_steps(steps: list) -> int:
+    for step in steps or []:
+        if isinstance(step, dict) and step.get("status") == "error":
+            return RUN_STATUS_ERROR
+    return RUN_STATUS_OK
+
+
+DEFAULT_LLM_PROMPT = (
+    "You are a precise NovaFlow assistant. Answer clearly in well-structured prose. "
+    "Prefer short paragraphs and bullet lists when helpful. If context is missing, say what is unknown."
+)
+
 DEFAULT_RAG_GRAPH = {
     "nodes": [
         {"id": "trigger", "type": "trigger", "x": 60, "y": 140, "data": {"label": "User input"}},
-        {"id": "retrieve", "type": "retrieve", "x": 260, "y": 140, "data": {"knowledge_id": None, "limit": 5}},
-        {"id": "llm", "type": "llm", "x": 460, "y": 140, "data": {"prompt": "Answer using retrieved context. Be concise and cite sources when possible."}},
+        {"id": "retrieve", "type": "retrieve", "x": 260, "y": 140, "data": {"knowledge_id": None, "limit": 6}},
+        {
+            "id": "llm",
+            "type": "llm",
+            "x": 460,
+            "y": 140,
+            "data": {
+                "prompt": (
+                    "Answer the question using ONLY the retrieved context when available. "
+                    "Structure the reply as: 1) Direct answer 2) Supporting bullets 3) Sources cited as [n]. "
+                    "If context is empty or insufficient, say so and give the best cautious answer."
+                )
+            },
+        },
         {"id": "output", "type": "output", "x": 660, "y": 140, "data": {"label": "Response"}},
     ],
     "edges": [
@@ -39,7 +68,20 @@ TEMPLATES = {
         "graph": {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 60, "y": 140, "data": {"label": "Ticket"}},
-                {"id": "llm", "type": "llm", "x": 320, "y": 140, "data": {"prompt": "Classify this support ticket and draft a helpful reply."}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 320,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "You are a senior support agent. From the ticket, output exactly:\n"
+                            "## Classification\nPriority (P1–P4) · Category · Sentiment\n"
+                            "## Customer reply\nA clear, empathetic reply ready to send (3–6 sentences).\n"
+                            "## Internal notes\n1–3 bullets for the team (root cause ideas / next step)."
+                        )
+                    },
+                },
                 {"id": "output", "type": "output", "x": 580, "y": 140, "data": {"label": "Draft"}},
             ],
             "edges": [{"from": "trigger", "to": "llm"}, {"from": "llm", "to": "output"}],
@@ -52,7 +94,21 @@ TEMPLATES = {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Topic"}},
                 {"id": "retrieve", "type": "retrieve", "x": 240, "y": 140, "data": {"knowledge_id": None, "limit": 8}},
-                {"id": "llm", "type": "llm", "x": 440, "y": 140, "data": {"prompt": "Synthesize a structured research brief."}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 440,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "Create a research brief from the retrieved sources. Use this structure:\n"
+                            "## Executive summary\n2–3 sentences.\n"
+                            "## Key findings\n3–6 bullets with source tags [n].\n"
+                            "## Implications\nWhat to do next.\n"
+                            "## Gaps\nWhat is still unknown."
+                        )
+                    },
+                },
                 {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Brief"}},
             ],
             "edges": [
@@ -68,8 +124,25 @@ TEMPLATES = {
         "graph": {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Raw input"}},
-                {"id": "transform", "type": "transform", "x": 240, "y": 140, "data": {"template": "Message:\n{{input}}"}},
-                {"id": "llm", "type": "llm", "x": 440, "y": 140, "data": {"prompt": "You are a helpful assistant."}},
+                {
+                    "id": "transform",
+                    "type": "transform",
+                    "x": 240,
+                    "y": 140,
+                    "data": {"template": "User message:\n{{input}}\n\nRespond helpfully and specifically."},
+                },
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 440,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "Turn the formatted message into a polished, actionable reply. "
+                            "Lead with the answer, then add short supporting detail. Avoid filler."
+                        )
+                    },
+                },
                 {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Reply"}},
             ],
             "edges": [
@@ -85,8 +158,26 @@ TEMPLATES = {
         "graph": {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Task"}},
-                {"id": "agent", "type": "agent", "x": 240, "y": 140, "data": {"tools": ["summarize", "kb_search"]}},
-                {"id": "human", "type": "human", "x": 440, "y": 140, "data": {"message": "Review output:\n{{output}}", "require_approval": False}},
+                {
+                    "id": "agent",
+                    "type": "agent",
+                    "x": 240,
+                    "y": 140,
+                    "data": {
+                        "tools": ["summarize", "kb_search"],
+                        "prompt": (
+                            "You are a capable agent. Use tool results as evidence. "
+                            "Return a final answer with: Summary · Details · Confidence (high/med/low)."
+                        ),
+                    },
+                },
+                {
+                    "id": "human",
+                    "type": "human",
+                    "x": 440,
+                    "y": 140,
+                    "data": {"message": "Review and approve before finalize:\n\n{{output}}", "require_approval": True},
+                },
                 {"id": "output", "type": "output", "x": 640, "y": 140, "data": {"label": "Final"}},
             ],
             "edges": [
@@ -102,7 +193,19 @@ TEMPLATES = {
         "graph": {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Lines"}},
-                {"id": "loop", "type": "loop", "x": 260, "y": 140, "data": {"max": 5, "prompt": "Process this item briefly: {{item}}"}},
+                {
+                    "id": "loop",
+                    "type": "loop",
+                    "x": 260,
+                    "y": 140,
+                    "data": {
+                        "max": 5,
+                        "prompt": (
+                            "For this item, return one compact line: "
+                            "RESULT: <outcome> | WHY: <short reason>\nItem: {{item}}"
+                        ),
+                    },
+                },
                 {"id": "output", "type": "output", "x": 480, "y": 140, "data": {"label": "Results"}},
             ],
             "edges": [{"from": "trigger", "to": "loop"}, {"from": "loop", "to": "output"}],
@@ -114,8 +217,25 @@ TEMPLATES = {
         "graph": {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Telegram message"}},
-                {"id": "llm", "type": "llm", "x": 260, "y": 140, "data": {"prompt": "You are a helpful project assistant. Answer concisely."}},
-                {"id": "notify", "type": "notify", "x": 460, "y": 140, "data": {"channel": "telegram", "to": "{{chat_id}}", "message": "{{output}}"}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 260,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "You are a project assistant on Telegram. Reply in under 800 characters, "
+                            "plain text (no markdown tables). Lead with the answer, then one short tip if useful."
+                        )
+                    },
+                },
+                {
+                    "id": "notify",
+                    "type": "notify",
+                    "x": 460,
+                    "y": 140,
+                    "data": {"channel": "telegram", "to": "{{chat_id}}", "message": "{{output}}"},
+                },
                 {"id": "output", "type": "output", "x": 660, "y": 140, "data": {"label": "Sent"}},
             ],
             "edges": [
@@ -132,8 +252,34 @@ TEMPLATES = {
             "nodes": [
                 {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Schedule"}},
                 {"id": "retrieve", "type": "retrieve", "x": 220, "y": 140, "data": {"knowledge_id": None, "limit": 6}},
-                {"id": "llm", "type": "llm", "x": 400, "y": 140, "data": {"prompt": "Write a concise daily digest for the team."}},
-                {"id": "notify", "type": "notify", "x": 580, "y": 140, "data": {"channel": "email", "to": "team@example.com", "subject": "Daily digest", "message": "{{output}}"}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 400,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "Write a daily digest email body for the team from the retrieved notes. Structure:\n"
+                            "Subject line suggestion (one line)\n"
+                            "## Highlights\n3–5 bullets\n"
+                            "## Risks / blockers\nbullets or 'None'\n"
+                            "## Asks\nclear next actions with owners if mentioned.\n"
+                            "Tone: crisp, no fluff."
+                        )
+                    },
+                },
+                {
+                    "id": "notify",
+                    "type": "notify",
+                    "x": 580,
+                    "y": 140,
+                    "data": {
+                        "channel": "email",
+                        "to": "team@example.com",
+                        "subject": "Daily digest — {{input}}",
+                        "message": "{{output}}",
+                    },
+                },
                 {"id": "output", "type": "output", "x": 760, "y": 140, "data": {"label": "Emailed"}},
             ],
             "edges": [
@@ -158,6 +304,210 @@ TEMPLATES = {
                 {"from": "trigger", "to": "transform"},
                 {"from": "transform", "to": "notify"},
                 {"from": "notify", "to": "output"},
+            ],
+        },
+    },
+    "jira_ticket": {
+        "name": "Jira ticket from input",
+        "desc": "Create a Jira issue from workflow output",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Bug report"}},
+                {"id": "llm", "type": "llm", "x": 240, "y": 140, "data": {
+                    "prompt": (
+                        "Convert the input into a Jira-ready ticket. Output ONLY:\n"
+                        "TITLE: <one clear line under 80 chars>\n"
+                        "DESCRIPTION:\n"
+                        "- Context\n- Steps / evidence\n- Expected vs actual (if a bug)\n"
+                        "Keep TITLE usable as the issue summary."
+                    )
+                }},
+                {
+                    "id": "jira",
+                    "type": "jira",
+                    "x": 460,
+                    "y": 140,
+                    "data": {
+                        "action": "create",
+                        "project_key": "NF",
+                        "issue_type": "Task",
+                        "summary": "{{output}}",
+                        "description": "{{input}}",
+                        "set_output": True,
+                    },
+                },
+                {"id": "output", "type": "output", "x": 680, "y": 140, "data": {"label": "Ticket"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "llm"},
+                {"from": "llm", "to": "jira"},
+                {"from": "jira", "to": "output"},
+            ],
+        },
+    },
+    "slack_alert": {
+        "name": "Slack alert",
+        "desc": "Summarize input and post to Slack",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Alert"}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 240,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "Write a Slack alert from the input. Format:\n"
+                            "*What happened* — one sentence\n"
+                            "*Impact* — one sentence\n"
+                            "*Action* — one concrete next step\n"
+                            "Keep under 500 characters. No hashtags."
+                        )
+                    },
+                },
+                {
+                    "id": "notify",
+                    "type": "notify",
+                    "x": 460,
+                    "y": 140,
+                    "data": {
+                        "channel": "slack",
+                        "to": "",
+                        "subject": "NovaFlow alert",
+                        "message": "{{output}}",
+                    },
+                },
+                {"id": "output", "type": "output", "x": 680, "y": 140, "data": {"label": "Posted"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "llm"},
+                {"from": "llm", "to": "notify"},
+                {"from": "notify", "to": "output"},
+            ],
+        },
+    },
+    "github_issue": {
+        "name": "GitHub issue from input",
+        "desc": "Create a GitHub issue from workflow output",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Report"}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 240,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "Rewrite as a GitHub issue. Output ONLY:\n"
+                            "TITLE: <imperative, under 70 chars>\n"
+                            "BODY:\n"
+                            "## Summary\n## Steps to reproduce\n## Expected\n## Actual\n"
+                        )
+                    },
+                },
+                {
+                    "id": "github",
+                    "type": "github",
+                    "x": 460,
+                    "y": 140,
+                    "data": {
+                        "action": "create",
+                        "repo": "",
+                        "title": "{{output}}",
+                        "body": "{{input}}",
+                        "labels": "bug",
+                        "set_output": True,
+                    },
+                },
+                {"id": "output", "type": "output", "x": 680, "y": 140, "data": {"label": "Issue"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "llm"},
+                {"from": "llm", "to": "github"},
+                {"from": "github", "to": "output"},
+            ],
+        },
+    },
+    "discord_alert": {
+        "name": "Discord alert",
+        "desc": "Summarize input and post to Discord",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Alert"}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 240,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "Write a Discord alert. Use plain text with **bold** sparingly. "
+                            "3 short lines: What · Impact · Next step. Under 400 characters."
+                        )
+                    },
+                },
+                {
+                    "id": "notify",
+                    "type": "notify",
+                    "x": 460,
+                    "y": 140,
+                    "data": {
+                        "channel": "discord",
+                        "to": "",
+                        "subject": "NovaFlow alert",
+                        "message": "{{output}}",
+                    },
+                },
+                {"id": "output", "type": "output", "x": 680, "y": 140, "data": {"label": "Posted"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "llm"},
+                {"from": "llm", "to": "notify"},
+                {"from": "notify", "to": "output"},
+            ],
+        },
+    },
+    "linear_issue": {
+        "name": "Linear issue from input",
+        "desc": "Create a Linear issue from workflow output",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Ticket"}},
+                {
+                    "id": "llm",
+                    "type": "llm",
+                    "x": 240,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "Rewrite as a Linear issue. Output ONLY:\n"
+                            "TITLE: <clear under 80 chars>\n"
+                            "DESCRIPTION:\n"
+                            "Problem, acceptance criteria (bullets), and any links mentioned."
+                        )
+                    },
+                },
+                {
+                    "id": "linear",
+                    "type": "linear",
+                    "x": 460,
+                    "y": 140,
+                    "data": {
+                        "action": "create",
+                        "team_id": "",
+                        "title": "{{output}}",
+                        "description": "{{input}}",
+                        "set_output": True,
+                    },
+                },
+                {"id": "output", "type": "output", "x": 680, "y": 140, "data": {"label": "Issue"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "llm"},
+                {"from": "llm", "to": "linear"},
+                {"from": "linear", "to": "output"},
             ],
         },
     },
@@ -309,8 +659,86 @@ def _topo_order(graph: dict) -> list[dict]:
 
 def _apply_template(template: str, context: dict) -> str:
     text = template or ""
-    for key in ("input", "retrieved", "output", "http", "transform", "chat_id"):
-        text = text.replace(f"{{{{{key}}}}}", str(context.get(key) or ""))
+    # Prefer longer / known keys first so nested names don't partial-clash
+    keys = sorted(
+        (
+            "retrieved",
+            "transform",
+            "linear_issue",
+            "github_issue",
+            "jira_key",
+            "github_url",
+            "linear_url",
+            "slack_channel",
+            "slack_user",
+            "agent_tools",
+            "output",
+            "input",
+            "http",
+            "chat_id",
+        ),
+        key=len,
+        reverse=True,
+    )
+    for key in keys:
+        if key in context or key in (
+            "input",
+            "retrieved",
+            "output",
+            "http",
+            "transform",
+            "chat_id",
+        ):
+            val = context.get(key)
+            if isinstance(val, (dict, list)):
+                try:
+                    val = json.dumps(val, ensure_ascii=False)[:4000]
+                except Exception:
+                    val = str(val)[:4000]
+            text = text.replace(f"{{{{{key}}}}}", str(val or ""))
+    return text
+
+
+def _extract_titled_fields(text: str) -> tuple[str, str]:
+    """Parse TITLE:/DESCRIPTION: or TITLE:/BODY: blocks from LLM issue drafts."""
+    raw = (text or "").strip()
+    if not raw:
+        return "", ""
+    title = ""
+    body = raw
+    m = re.search(r"(?im)^\s*TITLE:\s*(.+)$", raw)
+    if m:
+        title = m.group(1).strip()
+        rest = raw[m.end() :].strip()
+        for marker in ("DESCRIPTION:", "BODY:"):
+            idx = rest.upper().find(marker)
+            if idx >= 0:
+                body = rest[idx + len(marker) :].strip()
+                break
+        else:
+            body = rest
+    else:
+        # First non-empty line as title, rest as body
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        if lines:
+            title = lines[0][:255]
+            body = "\n".join(lines[1:]) if len(lines) > 1 else raw
+    return title[:255], body
+
+
+def _format_notify_body(channel: str, subject: str, body: str) -> str:
+    """Light channel-aware cleanup so digests/alerts stay readable."""
+    text = (body or "").strip()
+    ch = (channel or "").lower()
+    if ch == "telegram":
+        text = re.sub(r"[#*_`]{2,}", "", text)
+        return text[:3500]
+    if ch == "slack":
+        return text[:3500]
+    if ch == "discord":
+        return text[:1900]
+    if ch == "email" and subject and subject not in text[:120]:
+        return text
     return text
 
 
@@ -394,6 +822,7 @@ async def run_workflow(
 
     duration_ms = int((time.perf_counter() - start) * 1000)
     final_output = context["output"] or context["input"]
+    run_status = _run_status_from_steps(steps)
 
     run = WorkflowRun(
         workflow_id=workflow.id,
@@ -401,7 +830,7 @@ async def run_workflow(
         workspace_id=workspace_id or workflow.workspace_id,
         input_text=user_input[:4000],
         output_text=final_output[:8000],
-        status=1,
+        status=run_status,
         duration_ms=duration_ms,
         steps_json=json.dumps(steps),
     )
@@ -420,7 +849,7 @@ async def run_workflow(
                 "run_id": run.id,
                 "output": final_output[:2000],
                 "duration_ms": duration_ms,
-                "status": "completed",
+                "status": "completed" if run_status == RUN_STATUS_OK else "error",
             },
             event="workflow.run.completed",
         )
@@ -431,6 +860,7 @@ async def run_workflow(
         "steps": steps,
         "duration_ms": duration_ms,
         "run_id": run.id,
+        "status": "completed" if run_status == RUN_STATUS_OK else "error",
     }
 
 
@@ -485,6 +915,7 @@ async def run_workflow_with_progress(
 
     duration_ms = int((time.perf_counter() - start) * 1000)
     final_output = context["output"] or context["input"]
+    run_status = _run_status_from_steps(steps)
 
     run = WorkflowRun(
         workflow_id=workflow.id,
@@ -492,7 +923,7 @@ async def run_workflow_with_progress(
         workspace_id=workspace_id or workflow.workspace_id,
         input_text=user_input[:4000],
         output_text=final_output[:8000],
-        status=1,
+        status=run_status,
         duration_ms=duration_ms,
         steps_json=json.dumps(steps),
     )
@@ -506,6 +937,7 @@ async def run_workflow_with_progress(
         "steps": steps,
         "duration_ms": duration_ms,
         "run_id": run.id,
+        "status": "completed" if run_status == RUN_STATUS_OK else "error",
     }
     await _emit({"type": "complete", **result})
     return result
@@ -572,20 +1004,21 @@ async def resume_workflow_pending(
     duration_ms = int((time.perf_counter() - start) * 1000)
     final_output = context["output"] or context.get("input") or ""
     pending.status = 1
+    run_status = _run_status_from_steps(steps)
     run = WorkflowRun(
         workflow_id=workflow.id,
         user_id=user_id,
         workspace_id=workspace_id or pending.workspace_id,
         input_text=(context.get("input") or "")[:4000],
         output_text=final_output[:8000],
-        status=1,
+        status=run_status,
         duration_ms=duration_ms,
         steps_json=json.dumps(steps),
     )
     db.add(run)
     db.commit()
     return {
-        "status": "completed",
+        "status": "completed" if run_status == RUN_STATUS_OK else "error",
         "workflow_id": workflow.id,
         "output": final_output,
         "steps": steps,
@@ -643,10 +1076,16 @@ async def _execute_graph(
             parts = []
             for i, hit in enumerate(hits, 1):
                 source = hit.get("file_name") or "document"
-                text = (hit.get("text") or "")[:1200]
-                parts.append(f"[{i}] ({source})\n{text}")
+                score = hit.get("score")
+                score_bit = f" · score {score:.3f}" if isinstance(score, (int, float)) else ""
+                text = (hit.get("text") or "").strip()[:1400]
+                parts.append(f"[{i}] Source: {source}{score_bit}\n{text}")
             context["retrieved"] = "\n\n".join(parts)
-            step["output"] = context["retrieved"] or "(no matches)"
+            if not parts:
+                context["retrieved"] = (
+                    "(no knowledge matches — answer carefully and state that no documents were found)"
+                )
+            step["output"] = context["retrieved"][:800] + ("…" if len(context["retrieved"]) > 800 else "")
             step["hits"] = len(hits)
             step["status"] = "ok"
         elif ntype == "transform":
@@ -689,7 +1128,9 @@ async def _execute_graph(
             to_addr = _apply_template(data.get("to") or "", context).strip()
             subject = _apply_template(data.get("subject") or "NovaFlow notification", context)
             body_text = _apply_template(data.get("message") or "{{output}}", context)
+            body_text = _format_notify_body(channel, subject, body_text)
             bot_token = (data.get("bot_token") or "").strip()
+            prior_output = context.get("output") or body_text
             result = await send_notification(
                 channel,
                 to_addr,
@@ -701,19 +1142,168 @@ async def _execute_graph(
             )
             detail = result.get("detail") or ("sent" if result.get("ok") else "failed")
             if result.get("ok"):
-                context["output"] = detail
-                step["output"] = detail
+                # Keep the user-facing content as output; delivery note goes on the step only
+                context["output"] = prior_output
+                context["notify_status"] = detail
+                step["output"] = f"{detail}\n---\n{(prior_output or '')[:400]}"
                 step["status"] = "ok"
             else:
                 step["output"] = detail
                 step["status"] = "error"
+        elif ntype == "jira":
+            from app.services.gmail_jira import jira_create_issue, jira_update_issue
+
+            action = (data.get("action") or "create").strip().lower()
+            project_key = _apply_template(data.get("project_key") or "", context).strip()
+            issue_type = _apply_template(data.get("issue_type") or "Task", context).strip() or "Task"
+            issue_key = _apply_template(data.get("issue_key") or "", context).strip()
+            summary = _apply_template(data.get("summary") or "{{output}}", context).strip()
+            description = _apply_template(data.get("description") or "{{input}}", context).strip()
+            titled, body_from_llm = _extract_titled_fields(summary)
+            if titled:
+                summary = titled
+                if body_from_llm and description == (context.get("input") or ""):
+                    description = body_from_llm
+            try:
+                if action == "update":
+                    if not issue_key:
+                        raise ValueError("issue_key required for Jira update")
+                    result = await jira_update_issue(
+                        db,
+                        workspace_id,
+                        issue_key=issue_key,
+                        summary=summary,
+                        description=description,
+                    )
+                    key = result.get("key") or issue_key
+                else:
+                    if not project_key:
+                        raise ValueError("project_key required for Jira create")
+                    result = await jira_create_issue(
+                        db,
+                        workspace_id,
+                        project_key=project_key,
+                        summary=summary or "NovaFlow issue",
+                        description=description,
+                        issue_type=issue_type,
+                    )
+                    key = result.get("key") or ""
+                context["jira"] = result
+                context["jira_key"] = key
+                detail = f"Jira {action}: {key}" if key else f"Jira {action} ok"
+                if data.get("set_output", True):
+                    context["output"] = detail
+                step["output"] = detail
+                step["status"] = "ok"
+            except Exception as exc:
+                step["output"] = str(exc)[:500]
+                step["status"] = "error"
+        elif ntype == "github":
+            from app.services.github_issues import github_create_issue, github_update_issue
+
+            action = (data.get("action") or "create").strip().lower()
+            repo = _apply_template(data.get("repo") or "", context).strip()
+            title = _apply_template(data.get("title") or "{{output}}", context).strip()
+            body_md = _apply_template(data.get("body") or "{{input}}", context).strip()
+            titled, body_from_llm = _extract_titled_fields(title)
+            if titled:
+                title = titled
+                if body_from_llm and body_md == (context.get("input") or ""):
+                    body_md = body_from_llm
+            issue_number = _apply_template(data.get("issue_number") or "", context).strip()
+            labels_raw = _apply_template(data.get("labels") or "", context).strip()
+            labels = [x.strip() for x in labels_raw.replace(";", ",").split(",") if x.strip()] if labels_raw else []
+            try:
+                if action == "update":
+                    if not issue_number:
+                        raise ValueError("issue_number required for GitHub update")
+                    result = await github_update_issue(
+                        db,
+                        workspace_id,
+                        repo=repo,
+                        issue_number=issue_number,
+                        title=title,
+                        body=body_md,
+                    )
+                else:
+                    result = await github_create_issue(
+                        db,
+                        workspace_id,
+                        repo=repo,
+                        title=title or "NovaFlow issue",
+                        body=body_md,
+                        labels=labels or None,
+                    )
+                num = result.get("number")
+                html_url = result.get("html_url") or ""
+                context["github"] = result
+                context["github_issue"] = str(num or "")
+                context["github_url"] = html_url
+                detail = f"GitHub #{num}" if num else f"GitHub {action} ok"
+                if html_url:
+                    detail = f"{detail} · {html_url}"
+                if data.get("set_output", True):
+                    context["output"] = detail
+                step["output"] = detail[:500]
+                step["status"] = "ok"
+            except Exception as exc:
+                step["output"] = str(exc)[:500]
+                step["status"] = "error"
+        elif ntype == "linear":
+            from app.services.linear_issues import linear_create_issue, linear_update_issue
+
+            action = (data.get("action") or "create").strip().lower()
+            team_id = _apply_template(data.get("team_id") or "", context).strip()
+            title = _apply_template(data.get("title") or "{{output}}", context).strip()
+            description = _apply_template(data.get("description") or "{{input}}", context).strip()
+            titled, body_from_llm = _extract_titled_fields(title)
+            if titled:
+                title = titled
+                if body_from_llm and description == (context.get("input") or ""):
+                    description = body_from_llm
+            issue_id = _apply_template(data.get("issue_id") or "", context).strip()
+            try:
+                if action == "update":
+                    if not issue_id:
+                        raise ValueError("issue_id required for Linear update")
+                    result = await linear_update_issue(
+                        db,
+                        workspace_id,
+                        issue_id=issue_id,
+                        title=title,
+                        description=description,
+                    )
+                else:
+                    result = await linear_create_issue(
+                        db,
+                        workspace_id,
+                        title=title or "NovaFlow issue",
+                        description=description,
+                        team_id=team_id,
+                    )
+                ident = result.get("identifier") or result.get("id") or ""
+                url = result.get("url") or ""
+                context["linear"] = result
+                context["linear_issue"] = str(ident)
+                context["linear_url"] = url
+                detail = f"Linear {ident}" if ident else f"Linear {action} ok"
+                if url:
+                    detail = f"{detail} · {url}"
+                if data.get("set_output", True):
+                    context["output"] = detail
+                step["output"] = detail[:500]
+                step["status"] = "ok"
+            except Exception as exc:
+                step["output"] = str(exc)[:500]
+                step["status"] = "error"
         elif ntype == "llm":
-            prompt = data.get("prompt") or "You are a helpful assistant."
+            prompt = (data.get("prompt") or DEFAULT_LLM_PROMPT).strip() or DEFAULT_LLM_PROMPT
             user_msg = context.get("transform") or context["input"]
-            if context["retrieved"]:
+            if context.get("retrieved"):
                 user_msg = (
-                    f"Question: {user_msg}\n\n"
-                    f"--- Retrieved context ---\n{context['retrieved']}\n--- End context ---"
+                    f"## Question\n{user_msg}\n\n"
+                    f"## Retrieved context\n{context['retrieved']}\n\n"
+                    f"## Instructions\nUse the context above. Cite sources as [n] when you rely on them."
                 )
             llm_messages = (prompt, user_msg)
             if skip_llm:
@@ -746,12 +1336,12 @@ async def _execute_graph(
             for item in items:
                 msg = prompt_tpl.replace("{{item}}", item)
                 reply = await stream_chat_sync(
-                    "You are a helpful assistant.",
+                    "Produce compact, consistent results. No preamble — only the requested format.",
                     msg,
                     db=db,
                     workspace_id=workspace_id,
                 )
-                outputs.append(f"• {item}\n{reply}")
+                outputs.append(f"• {item}\n  → {(reply or '').strip()}")
             merged = "\n\n".join(outputs) if outputs else context.get("input", "")
             context["output"] = merged
             step["output"] = merged[:500] + ("…" if len(merged) > 500 else "")
@@ -762,7 +1352,10 @@ async def _execute_graph(
             branches = [str(b) for b in branches][:5]
             tasks = [
                 stream_chat_sync(
-                    f"Complete this subtask: {b}",
+                    (
+                        f"You are contributing one section of a multi-perspective analysis. "
+                        f"Focus ONLY on: {b}. Be specific and concise (5–10 lines max)."
+                    ),
                     context.get("input") or "",
                     db=db,
                     workspace_id=workspace_id,
@@ -770,7 +1363,7 @@ async def _execute_graph(
                 for b in branches
             ]
             results = await asyncio.gather(*tasks)
-            merged = "\n\n".join(f"## {b}\n{r}" for b, r in zip(branches, results))
+            merged = "\n\n".join(f"## {b}\n{(r or '').strip()}" for b, r in zip(branches, results))
             context["output"] = merged
             step["output"] = merged[:500] + ("…" if len(merged) > 500 else "")
             step["status"] = "ok"
@@ -798,10 +1391,17 @@ async def _execute_graph(
                 tools if isinstance(tools, list) else [tools],
                 knowledge_id=kid,
                 workspace_id=workspace_id,
-                system=data.get("prompt") or "You are a capable agent.",
+                system=data.get("prompt")
+                or (
+                    "You are a capable NovaFlow agent. Use tool results as evidence. "
+                    "Answer with: Summary · Details · Confidence (high/med/low). Avoid inventing facts."
+                ),
             )
-            context["output"] = reply
-            step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
+            text = reply.get("output") if isinstance(reply, dict) else str(reply or "")
+            context["output"] = text
+            if isinstance(reply, dict) and reply.get("tool_results"):
+                context["agent_tools"] = reply["tool_results"]
+            step["output"] = text[:500] + ("…" if len(text) > 500 else "")
             step["status"] = "ok"
         elif ntype == "subgraph":
             sub_id = data.get("workflow_id")
@@ -846,6 +1446,6 @@ async def resolve_workflow_llm_messages(
     except json.JSONDecodeError:
         graph = {"nodes": [], "edges": []}
     context, _, _ = await _execute_graph(db, user_id, graph, user_input.strip(), skip_llm=True)
-    system = context.get("_llm_system") or "You are a helpful assistant."
+    system = context.get("_llm_system") or DEFAULT_LLM_PROMPT
     user_msg = context.get("_llm_user") or user_input.strip()
     return system, user_msg

@@ -70,8 +70,10 @@ def get_workspace_ctx(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     x_workspace_id: Optional[int] = Header(None, alias="X-Workspace-Id"),
+    # Named differently from path params like /workspaces/{workspace_id}/...
+    workspace_id_q: Optional[int] = Query(None, alias="workspace_id"),
 ) -> WorkspaceCtx:
-    wid = x_workspace_id
+    wid = x_workspace_id or workspace_id_q
     if not wid:
         ws = ensure_personal_workspace(db, user)
         wid = ws.id

@@ -7,7 +7,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.services.integrations import send_email_notification
+from app.database import EvalRegressionAlert, EvalRun, EvalSuite
+from app.services.integrations import send_email_notification, send_slack_notification
 from app.services.workspace_integrations import resolve_smtp_config
 from app.services.webhooks import post_alert_notification, post_opsgenie_alert, post_pagerduty_alert
 
@@ -24,6 +25,7 @@ def alert_dict(row: EvalRegressionAlert) -> dict:
         "pagerduty_routing_key": row.pagerduty_routing_key or "",
         "opsgenie_api_key": ("••••" + row.opsgenie_api_key[-4:]) if row.opsgenie_api_key else "",
         "email_to": row.email_to or "",
+        "use_workspace_slack": bool(getattr(row, "use_workspace_slack", 0)),
         "cooldown_hours": row.cooldown_hours or 6,
         "enabled": bool(row.enabled),
         "last_alert_at": row.last_alert_at.isoformat() if row.last_alert_at else None,
@@ -137,6 +139,13 @@ async def check_regression_alerts(db: Session, suite: EvalSuite, run: EvalRun) -
 
         if alert.webhook_url:
             await post_alert_notification(alert.webhook_url, message, payload, event="eval.regression")
+        if getattr(alert, "use_workspace_slack", 0):
+            await send_slack_notification(
+                message,
+                db=db,
+                workspace_id=suite.workspace_id,
+                subject=f"Eval regression: {suite.name}",
+            )
         if alert.pagerduty_routing_key:
             await post_pagerduty_alert(
                 alert.pagerduty_routing_key,

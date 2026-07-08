@@ -5,7 +5,7 @@ const client = axios.create({
   baseURL: "/api/v1",
   withCredentials: true,
   headers: { "Content-Type": "application/json" },
-  timeout: 30000,
+  timeout: 60000,
 });
 
 function formatApiError(error) {
@@ -58,7 +58,24 @@ client.interceptors.response.use(
     const message = response.data?.status_message || "Request failed";
     return Promise.reject(new Error(message));
   },
-  (error) => Promise.reject(new Error(formatApiError(error)))
+  (error) => {
+    const status = error.response?.status;
+    if (typeof window !== "undefined" && (status === 401 || status === 403)) {
+      const path = window.location?.pathname || "";
+      if (!path.startsWith("/login") && !path.startsWith("/setup")) {
+        try {
+          localStorage.removeItem("nf_token");
+          localStorage.removeItem("nf_workspace_id");
+        } catch {
+          /* ignore */
+        }
+        if (status === 401) {
+          window.location.assign(`/login?next=${encodeURIComponent(path)}`);
+        }
+      }
+    }
+    return Promise.reject(new Error(formatApiError(error)));
+  }
 );
 
 export default client;

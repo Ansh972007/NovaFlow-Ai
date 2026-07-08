@@ -5,40 +5,71 @@ from pathlib import Path
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
-from app.config import OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL, UPLOAD_DIR
+from app.config import OPENAI_EMBEDDING_MODEL, UPLOAD_DIR
 from app.database import KnowledgeBase, KnowledgeChunk, KnowledgeFile
 from app.services.embeddings import embed_texts_sync, parse_embedding, rank_by_embedding
 from app.services.vector_store import delete_by_file, milvus_enabled, search_vectors, upsert_vectors
 
 
+def _embedding_ready(db: Session | None) -> bool:
+    """True when Settings vault or env has an API key usable for embeddings."""
+    from app.services.workspace_settings import get_chat_config
+
+    cfg = get_chat_config(db)
+    if not (cfg.get("api_key") or "").strip():
+        return False
+    # Anthropic cannot embed with the OpenAI embeddings endpoint
+    if cfg.get("provider_type") == "anthropic":
+        return False
+    return True
+
+
 def extract_text(path: Path, db: Session | None = None) -> str:
     suffix = path.suffix.lower()
-    if suffix in {".txt", ".md", ".csv"}:
+    if suffix in {".txt", ".md"}:
         return path.read_text(encoding="utf-8", errors="ignore")
+    if suffix in {".csv", ".tsv", ".docx", ".html", ".htm", ".json", ".xlsx", ".xlsm", ".pptx"}:
+        from app.services.doc_parse import extract_document
+
+        return extract_document(path)
     if suffix == ".pdf":
         reader = PdfReader(str(path))
         parts = []
         for page in reader.pages:
             parts.append(page.extract_text() or "")
         return "\n".join(parts)
-    if suffix in {".docx", ".html", ".htm", ".json"}:
+    if suffix in {".doc", ".ppt", ".xls"}:
         from app.services.doc_parse import extract_document
 
-        parsed = extract_document(path)
-        if parsed:
-            return parsed
+        return extract_document(path)
+
     from app.services.ocr import extract_image_text, is_image_path
 
     if is_image_path(path):
-        api_key = OPENAI_API_KEY
+        api_key = ""
+        base_url = ""
+        model = ""
         if db is not None:
             try:
-                from app.services.llm_providers import resolve_api_key
+                from app.services.llm_providers import get_active_provider_row, resolve_api_key
+                from app.services.workspace_settings import get_chat_config
 
-                api_key = resolve_api_key(db) or api_key
+                row = get_active_provider_row(db)
+                api_key = resolve_api_key(row) or ""
+                cfg = get_chat_config(db)
+                base_url = cfg.get("base_url") or ""
+                model = cfg.get("model") or ""
             except Exception:
                 pass
-        return extract_image_text(path, api_key=api_key)
+        return extract_image_text(path, api_key=api_key or None, base_url=base_url or None, model=model or None)
+
+    from app.services.doc_parse import is_supported_suffix
+
+    if not is_supported_suffix(suffix):
+        raise ValueError(
+            f"Unsupported file type '{suffix or 'unknown'}'. "
+            "Accepted: pdf, docx, txt, md, csv, tsv, xlsx, pptx, html, json, and common images."
+        )
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
@@ -58,9 +89,12 @@ def chunk_text(text: str, size: int = 1000, overlap: int = 100) -> list[str]:
 
 
 def _embed_chunks(db: Session, kb: KnowledgeBase, chunk_rows: list[KnowledgeChunk]):
-    if not OPENAI_API_KEY or not chunk_rows:
+    if not chunk_rows or not _embedding_ready(db):
         return
-    model = kb.model or OPENAI_EMBEDDING_MODEL
+    from app.services.workspace_settings import get_chat_config
+
+    cfg = get_chat_config(db)
+    model = kb.model or cfg.get("embedding_model") or OPENAI_EMBEDDING_MODEL
     batch_size = 32
     for i in range(0, len(chunk_rows), batch_size):
         batch = chunk_rows[i : i + batch_size]
@@ -78,9 +112,13 @@ def _embed_chunks(db: Session, kb: KnowledgeBase, chunk_rows: list[KnowledgeChun
 
 def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 1000, chunk_overlap: int = 100):
     record.status = 1
+    if hasattr(record, "error_message"):
+        record.error_message = ""
     db.commit()
     try:
         path = UPLOAD_DIR / record.file_path
+        if not path.exists():
+            raise FileNotFoundError(f"Uploaded file missing on disk: {record.file_path}")
         text = extract_text(path, db)
         pieces = chunk_text(text, chunk_size, chunk_overlap)
         delete_by_file(record.id)
@@ -101,9 +139,18 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
         kb = db.get(KnowledgeBase, record.knowledge_id)
         if kb and chunk_rows:
             _embed_chunks(db, kb, chunk_rows)
-        record.status = 2 if pieces else 3
-    except Exception:
+        if pieces:
+            record.status = 2
+            if hasattr(record, "error_message"):
+                record.error_message = ""
+        else:
+            record.status = 3
+            if hasattr(record, "error_message"):
+                record.error_message = "No extractable text found in file"
+    except Exception as exc:
         record.status = 3
+        if hasattr(record, "error_message"):
+            record.error_message = str(exc)[:1000]
     db.commit()
 
 
@@ -181,7 +228,7 @@ def _milvus_hits(db: Session, knowledge_id: int, query_vec: list[float], limit: 
 
 
 def _vector_search(db: Session, knowledge_id: int, query: str, limit: int, model: str) -> list[dict]:
-    if not OPENAI_API_KEY:
+    if not _embedding_ready(db):
         return []
     vectors = embed_texts_sync([query[:8000]], model)
     if not vectors:
@@ -216,17 +263,64 @@ def _vector_search(db: Session, knowledge_id: int, query: str, limit: int, model
     return data
 
 
+def _hit_key(hit: dict) -> str:
+    return f"{hit.get('file_id')}:{hit.get('chunk_index')}"
+
+
+def _rrf_fuse(lists: list[list[dict]], limit: int, k: int = 60) -> list[dict]:
+    """Reciprocal Rank Fusion across retrieval lists (vector + keyword)."""
+    scores: dict[str, float] = {}
+    best: dict[str, dict] = {}
+    methods: dict[str, set[str]] = {}
+    for hits in lists:
+        for rank, hit in enumerate(hits, start=1):
+            key = _hit_key(hit)
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+            methods.setdefault(key, set()).add(hit.get("method") or "unknown")
+            # Prefer higher native score when merging duplicates
+            prev = best.get(key)
+            if prev is None or float(hit.get("score") or 0) >= float(prev.get("score") or 0):
+                best[key] = dict(hit)
+    ranked = sorted(scores.items(), key=lambda x: -x[1])
+    out = []
+    for key, rrf in ranked[:limit]:
+        hit = best[key]
+        hit["rrf"] = round(rrf, 5)
+        used = methods.get(key) or set()
+        hit["method"] = "hybrid" if len(used) > 1 else next(iter(used), "hybrid")
+        # Light filename / query boost for hybrid ranking display
+        out.append(hit)
+    return out
+
+
 def search_chunks_semantic(db: Session, knowledge_id: int, query: str, limit: int = 5) -> list[dict]:
     if not query.strip():
         return []
 
     kb = db.get(KnowledgeBase, knowledge_id)
-    model = (kb.model if kb else None) or OPENAI_EMBEDDING_MODEL
+    from app.services.workspace_settings import get_chat_config
 
-    vector_hits = _vector_search(db, knowledge_id, query.strip(), limit, model)
+    cfg = get_chat_config(db)
+    model = (kb.model if kb else None) or cfg.get("embedding_model") or OPENAI_EMBEDDING_MODEL
+    q = query.strip()
+    fetch = max(limit * 2, 8)
+
+    vector_hits = _vector_search(db, knowledge_id, q, fetch, model)
+    keyword_hits = _token_search(db, knowledge_id, q, fetch)
+
+    if vector_hits and keyword_hits:
+        fused = _rrf_fuse([vector_hits, keyword_hits], limit)
+        # Boost when file name tokens overlap the query
+        q_tokens = set(re.findall(r"[a-z0-9]+", q.lower()))
+        for hit in fused:
+            name = (hit.get("file_name") or "").lower()
+            if q_tokens and any(t in name for t in q_tokens if len(t) > 3):
+                hit["score"] = round(float(hit.get("score") or 0) + 0.05, 4)
+        fused.sort(key=lambda h: (-(h.get("rrf") or 0), -(h.get("score") or 0)))
+        return fused[:limit]
     if vector_hits:
-        return vector_hits
-    return _token_search(db, knowledge_id, query.strip(), limit)
+        return vector_hits[:limit]
+    return keyword_hits[:limit]
 
 
 def search_chunks(db: Session, knowledge_id: int, keyword: str, page: int, limit: int):
@@ -271,22 +365,11 @@ def set_assistant_knowledge(db: Session, assistant_id: str, knowledge_ids: list[
 
 
 def rag_hits_for_assistant(db: Session, assistant_id: str, query: str, limit: int = 5) -> list[dict]:
-    kid_list = get_assistant_knowledge_ids(db, assistant_id)
-    if not kid_list or not query.strip():
-        return []
-
-    hits = []
-    per_kb = max(2, limit // max(len(kid_list), 1))
-    for kid in kid_list:
-        chunks = search_chunks_semantic(db, kid, query.strip(), per_kb)
-        for chunk in chunks:
-            chunk["knowledge_id"] = kid
-        hits.extend(chunks)
-
-    if not hits:
-        return []
-
-    hits.sort(key=lambda h: h.get("score", 0), reverse=True)
+    ids = get_assistant_knowledge_ids(db, assistant_id)
+    hits: list[dict] = []
+    for kid in ids:
+        hits.extend(search_chunks_semantic(db, kid, query, limit))
+    hits.sort(key=lambda h: -(h.get("score") or 0))
     return hits[:limit]
 
 

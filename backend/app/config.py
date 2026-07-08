@@ -29,7 +29,12 @@ ADMIN_PASSWORD = os.getenv("NOVAFLOW_ADMIN_PASSWORD", "admin123")
 
 DEMO_SEED = os.getenv("NOVAFLOW_DEMO_SEED", "").lower() in {"1", "true", "yes"}
 
-EMBEDDING_MODELS = ["text-embedding-3-small", "text-embedding-ada-002"]
+EMBEDDING_MODELS = [
+    "text-embedding-3-small",
+    "text-embedding-ada-002",
+    "openai/text-embedding-3-small",
+    "openai/text-embedding-ada-002",
+]
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 MILVUS_URI = os.getenv("MILVUS_URI", "")
 
@@ -39,6 +44,8 @@ MICROSOFT_CLIENT_ID = os.getenv("MICROSOFT_CLIENT_ID", "")
 MICROSOFT_CLIENT_SECRET = os.getenv("MICROSOFT_CLIENT_SECRET", "")
 OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", f"http://localhost:{PORT}")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", FRONTEND_URL)
+OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "NovaFlow AI")
 
 LDAP_URL = os.getenv("LDAP_URL", "")
 LDAP_BASE_DN = os.getenv("LDAP_BASE_DN", "")

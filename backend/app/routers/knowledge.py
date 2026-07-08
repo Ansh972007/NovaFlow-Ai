@@ -12,7 +12,8 @@ from app.config import EMBEDDING_MODELS
 from app.database import KnowledgeBase, KnowledgeFile, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import KnowledgeCreate, KnowledgeUrlIngest, ProcessFiles, fail, ok
-from app.services.knowledge import kb_upload_dir, process_file_record, search_chunks
+from app.services.knowledge import kb_upload_dir, process_file_record, search_chunks, search_chunks_semantic
+from app.services.doc_parse import is_supported_suffix, UNSUPPORTED_OFFICE
 
 router = APIRouter(tags=["Knowledge"])
 
@@ -90,7 +91,9 @@ def file_list(
         {
             "id": f.id,
             "file_name": f.file_name,
+            "file_path": f.file_path,
             "status": f.status,
+            "error_message": getattr(f, "error_message", "") or "",
             "update_time": f.update_time.isoformat() if f.update_time else None,
         }
         for f in rows
@@ -108,8 +111,19 @@ async def upload_file(
     kb = db.get(KnowledgeBase, knowledge_id)
     if not kb or kb.workspace_id != ctx.workspace_id:
         return fail(404, "Knowledge base not found")
-    dest_dir = kb_upload_dir(knowledge_id)
     safe_name = file.filename or "upload.bin"
+    suffix = ("." + safe_name.rsplit(".", 1)[-1].lower()) if "." in safe_name else ""
+    if suffix in UNSUPPORTED_OFFICE:
+        return fail(
+            400,
+            f"Legacy Office format {suffix} is not supported. Convert to .docx / .xlsx / .pptx and upload again.",
+        )
+    if suffix and not is_supported_suffix(suffix):
+        return fail(
+            400,
+            f"Unsupported file type {suffix}. Accepted: pdf, docx, txt, md, csv, tsv, xlsx, pptx, html, json, images.",
+        )
+    dest_dir = kb_upload_dir(knowledge_id)
     dest = dest_dir / f"{uuid.uuid4().hex}_{safe_name}"
     with dest.open("wb") as out:
         shutil.copyfileobj(file.file, out)
@@ -159,9 +173,52 @@ def get_chunks(
     return ok({"data": data, "total": total})
 
 
+@router.get("/knowledge/search")
+def semantic_search(
+    knowledge_id: int = Query(...),
+    q: str = Query(""),
+    limit: int = Query(6, ge=1, le=20),
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    """Semantic (vector) search with keyword fallback — used by Knowledge Q&A preview."""
+    kb = db.get(KnowledgeBase, knowledge_id)
+    if not kb or kb.workspace_id != ctx.workspace_id:
+        return fail(404, "Knowledge base not found")
+    query = (q or "").strip()
+    if not query:
+        return ok({"data": [], "total": 0, "method": "none"})
+    hits = search_chunks_semantic(db, knowledge_id, query, limit)
+    method = hits[0].get("method") if hits else "none"
+    return ok({"data": hits, "total": len(hits), "method": method})
+
+
 @router.post("/knowledge/retry")
-def retry_file():
-    return ok(None)
+def retry_file(body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+    file_id = body.get("file_id") or body.get("id")
+    if not file_id:
+        return fail(400, "file_id required")
+    record = db.get(KnowledgeFile, int(file_id))
+    if not record:
+        return fail(404, "File not found")
+    kb = db.get(KnowledgeBase, record.knowledge_id)
+    if not kb or kb.workspace_id != ctx.workspace_id:
+        return fail(404, "File not found")
+    process_file_record(
+        db,
+        record,
+        int(body.get("chunk_size") or 1000),
+        int(body.get("chunk_overlap") or 100),
+    )
+    db.refresh(record)
+    return ok(
+        {
+            "id": record.id,
+            "file_name": record.file_name,
+            "status": record.status,
+            "error_message": getattr(record, "error_message", "") or "",
+        }
+    )
 
 
 def _url_to_filename(url: str) -> str:

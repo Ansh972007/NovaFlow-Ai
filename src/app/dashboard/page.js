@@ -16,6 +16,7 @@ import { listKnowledge } from "@/lib/api/knowledge";
 import { getIntegrationHealth } from "@/lib/api/integrations";
 import { listProjects } from "@/lib/api/projects";
 import { listPipelines, getPromptDrift } from "@/lib/api/modelLab";
+import { listWorkspaceSchedules } from "@/lib/api/workflows";
 import { loadSessions } from "@/lib/chat/storage";
 import { isSetupComplete } from "@/lib/setup/storage";
 import { truncate } from "@/lib/utils";
@@ -103,6 +104,29 @@ const modules = [
     ),
   },
   {
+    href: "/runs",
+    label: "Runs",
+    desc: "Workspace workflow execution history",
+    accent: "from-emerald-800 to-emerald-600",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+        <path d="M4 6h16M4 12h10M4 18h14" />
+      </svg>
+    ),
+  },
+  {
+    href: "/digests",
+    label: "Digests",
+    desc: "Schedules, cron digests & run-now ops",
+    accent: "from-teal-800 to-teal-600",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+    ),
+  },
+  {
     href: "/agents",
     label: "Agents",
     desc: "Run tool-augmented agents standalone",
@@ -174,6 +198,8 @@ export default function DashboardPage() {
     projects: 0,
     activeJobs: 0,
     driftWarnings: 0,
+    schedules: 0,
+    schedulesEnabled: 0,
   });
   const [stats, setStats] = useState([
     { value: "0", label: "Chat sessions", hint: "Local history" },
@@ -218,7 +244,7 @@ export default function DashboardPage() {
         }
 
         try {
-          const [summary, ts, usage, ab, integ, projects, pipes, drift] = await Promise.all([
+          const [summary, ts, usage, ab, integ, projects, pipes, drift, schedules] = await Promise.all([
             getAnalyticsSummary(),
             getAnalyticsTimeseries(7).catch(() => null),
             getAnalyticsAssistants(7).catch(() => null),
@@ -227,6 +253,7 @@ export default function DashboardPage() {
             listProjects().catch(() => []),
             listPipelines().catch(() => []),
             getPromptDrift().catch(() => null),
+            listWorkspaceSchedules().catch(() => []),
           ]);
           analytics = summary;
           setRecentRuns(summary?.recent_runs || []);
@@ -236,11 +263,14 @@ export default function DashboardPage() {
           const activeJobs = (pipes || []).filter(
             (p) => !["succeeded", "failed", "cancelled", "completed"].includes(p.status)
           );
+          const schedRows = Array.isArray(schedules) ? schedules : [];
           setWorkspacePulse({
             integrations: integ,
             projects: (projects || []).length,
             activeJobs: activeJobs.length,
             driftWarnings: (drift?.warning_count || 0) + (drift?.critical_count || 0),
+            schedules: schedRows.length,
+            schedulesEnabled: schedRows.filter((s) => s.enabled).length,
           });
         } catch {
           analytics = null;
@@ -360,20 +390,44 @@ export default function DashboardPage() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.26, ease }}
-              className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+              className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
             >
-              <Link href="/settings" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">
+              <Link href="/settings?tab=integrations" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Integrations</p>
                 <p className="mt-1 text-lg font-semibold">
-                  {workspacePulse.integrations?.telegram_ready && workspacePulse.integrations?.email_ready
-                    ? "All ready"
-                    : workspacePulse.integrations?.telegram_ready || workspacePulse.integrations?.email_ready
+                  {[
+                    workspacePulse.integrations?.telegram_ready,
+                    workspacePulse.integrations?.email_ready,
+                    workspacePulse.integrations?.slack_ready,
+                    workspacePulse.integrations?.jira_ready,
+                    workspacePulse.integrations?.github_ready,
+                  ].filter(Boolean).length >= 3
+                    ? "Ops ready"
+                    : [
+                        workspacePulse.integrations?.telegram_ready,
+                        workspacePulse.integrations?.email_ready,
+                        workspacePulse.integrations?.slack_ready,
+                        workspacePulse.integrations?.jira_ready,
+                        workspacePulse.integrations?.github_ready,
+                      ].some(Boolean)
                       ? "Partial"
                       : "Setup needed"}
                 </p>
                 <p className="mt-0.5 text-xs text-neutral-500">
                   TG {workspacePulse.integrations?.telegram_ready ? "on" : "off"} · Email{" "}
-                  {workspacePulse.integrations?.email_ready ? "on" : "off"}
+                  {workspacePulse.integrations?.email_ready ? "on" : "off"} · Slack{" "}
+                  {workspacePulse.integrations?.slack_ready ? "on" : "off"}
+                </p>
+                <p className="mt-0.5 text-xs text-neutral-400">
+                  Jira {workspacePulse.integrations?.jira_ready ? "on" : "off"} · GitHub{" "}
+                  {workspacePulse.integrations?.github_ready ? "on" : "off"}
+                </p>
+              </Link>
+              <Link href="/digests" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Digests</p>
+                <p className="mt-1 text-lg font-semibold">{workspacePulse.schedules}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">
+                  {workspacePulse.schedulesEnabled} enabled schedules
                 </p>
               </Link>
               <Link href="/projects" className="workspace-panel rounded-2xl p-4 transition hover:shadow-md">

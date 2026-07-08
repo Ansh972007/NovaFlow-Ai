@@ -72,6 +72,27 @@ const NODE_META = {
     ring: "notify",
     port: "bg-teal-500",
   },
+  jira: {
+    label: "Jira",
+    accent: "workflow-node-jira",
+    iconBg: "from-blue-400/20 to-blue-600/10 text-blue-700",
+    ring: "jira",
+    port: "bg-blue-500",
+  },
+  github: {
+    label: "GitHub",
+    accent: "workflow-node-github",
+    iconBg: "from-neutral-700/15 to-neutral-900/10 text-neutral-800",
+    ring: "github",
+    port: "bg-neutral-800",
+  },
+  linear: {
+    label: "Linear",
+    accent: "workflow-node-linear",
+    iconBg: "from-violet-400/20 to-indigo-600/10 text-indigo-700",
+    ring: "linear",
+    port: "bg-indigo-500",
+  },
   loop: {
     label: "Loop",
     accent: "workflow-node-loop",
@@ -122,6 +143,24 @@ function nodeSubtitle(node) {
   if (node.type === "condition") return node.data?.keyword || "Keyword match";
   if (node.type === "http") return node.data?.url?.slice(0, 28) || "Request URL";
   if (node.type === "notify") return `${node.data?.channel || "telegram"} → ${(node.data?.to || "").slice(0, 16)}`;
+  if (node.type === "jira") {
+    const action = node.data?.action || "create";
+    return action === "update"
+      ? `Update ${node.data?.issue_key || "KEY"}`
+      : `${node.data?.project_key || "PROJ"} · ${node.data?.issue_type || "Task"}`;
+  }
+  if (node.type === "github") {
+    const action = node.data?.action || "create";
+    return action === "update"
+      ? `Update #${node.data?.issue_number || "?"}`
+      : node.data?.repo || "Default repo";
+  }
+  if (node.type === "linear") {
+    const action = node.data?.action || "create";
+    return action === "update"
+      ? `Update ${node.data?.issue_id || "?"}`
+      : node.data?.team_id || "Default team";
+  }
   if (node.type === "loop") return `max ${node.data?.max || 5} items`;
   if (node.type === "parallel") return `${(node.data?.branches || []).length || 3} branches`;
   if (node.type === "human") return node.data?.require_approval ? "Approval gate" : "Review";

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { NODE_META } from "./WorkflowCanvas";
 import WorkflowTelegramPanel from "./WorkflowTelegramPanel";
+import WorkflowSlackPanel from "./WorkflowSlackPanel";
+import { getWorkflowRun } from "@/lib/api/workflows";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -59,6 +61,23 @@ export default function WorkflowInspector({
 }) {
   const [connectTarget, setConnectTarget] = useState("");
   const [connectSource, setConnectSource] = useState("");
+  const [runDetail, setRunDetail] = useState(null);
+  const [runDetailBusy, setRunDetailBusy] = useState(false);
+  const [runDetailError, setRunDetailError] = useState("");
+
+  async function loadRunDetail(runId) {
+    setRunDetailBusy(true);
+    setRunDetailError("");
+    try {
+      const detail = await getWorkflowRun(runId);
+      setRunDetail(detail);
+    } catch (err) {
+      setRunDetailError(err.message || "Failed to load run");
+      setRunDetail(null);
+    } finally {
+      setRunDetailBusy(false);
+    }
+  }
 
   const outgoing = selected
     ? edges.filter((e) => e.from === selected.id)
@@ -217,10 +236,16 @@ export default function WorkflowInspector({
                         </div>
                       )}
                       {(hasNotifyNode || workflowId) && (
-                        <WorkflowTelegramPanel
-                          workflowId={workflowId}
-                          published={workflowStatus === 1}
-                        />
+                        <>
+                          <WorkflowTelegramPanel
+                            workflowId={workflowId}
+                            published={workflowStatus === 1}
+                          />
+                          <WorkflowSlackPanel
+                            workflowId={workflowId}
+                            workflowStatus={workflowStatus}
+                          />
+                        </>
                       )}
                     </>
                   ) : (
@@ -437,6 +462,8 @@ export default function WorkflowInspector({
                         >
                           <option value="telegram">Telegram</option>
                           <option value="email">Email</option>
+                          <option value="slack">Slack</option>
+                          <option value="discord">Discord</option>
                           <option value="webhook">Webhook</option>
                         </select>
                       </label>
@@ -447,11 +474,17 @@ export default function WorkflowInspector({
                           onChange={(e) => onUpdateNode(selected.id, { data: { to: e.target.value } })}
                           disabled={readOnly}
                           className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          placeholder="{{chat_id}} or team@example.com"
+                          placeholder={
+                            selected.data?.channel === "slack"
+                              ? "Optional override webhook — blank uses Settings"
+                              : "{{chat_id}} or team@example.com"
+                          }
                         />
                       </label>
                       <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Subject (email)</span>
+                        <span className="text-xs font-semibold text-neutral-600">
+                          {selected.data?.channel === "slack" ? "Subject (bold prefix)" : "Subject (email)"}
+                        </span>
                         <input
                           value={selected.data?.subject || ""}
                           onChange={(e) => onUpdateNode(selected.id, { data: { subject: e.target.value } })}
@@ -481,6 +514,215 @@ export default function WorkflowInspector({
                           />
                         </label>
                       )}
+                    </>
+                  )}
+
+                  {selected.type === "jira" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Action</span>
+                        <select
+                          value={selected.data?.action || "create"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { action: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        >
+                          <option value="create">Create issue</option>
+                          <option value="update">Update issue</option>
+                        </select>
+                      </label>
+                      {(selected.data?.action || "create") === "create" ? (
+                        <>
+                          <label className="mt-4 block">
+                            <span className="text-xs font-semibold text-neutral-600">Project key</span>
+                            <input
+                              value={selected.data?.project_key || ""}
+                              onChange={(e) => onUpdateNode(selected.id, { data: { project_key: e.target.value } })}
+                              disabled={readOnly}
+                              className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                              placeholder="NF"
+                            />
+                          </label>
+                          <label className="mt-4 block">
+                            <span className="text-xs font-semibold text-neutral-600">Issue type</span>
+                            <input
+                              value={selected.data?.issue_type || "Task"}
+                              onChange={(e) => onUpdateNode(selected.id, { data: { issue_type: e.target.value } })}
+                              disabled={readOnly}
+                              className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                              placeholder="Task"
+                            />
+                          </label>
+                        </>
+                      ) : (
+                        <label className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">Issue key</span>
+                          <input
+                            value={selected.data?.issue_key || ""}
+                            onChange={(e) => onUpdateNode(selected.id, { data: { issue_key: e.target.value } })}
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                            placeholder="NF-123 or {{jira_key}}"
+                          />
+                        </label>
+                      )}
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Summary</span>
+                        <input
+                          value={selected.data?.summary || "{{output}}"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { summary: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Description</span>
+                        <textarea
+                          value={selected.data?.description || "{{input}}"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { description: e.target.value } })}
+                          disabled={readOnly}
+                          rows={4}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <p className="mt-3 text-[11px] text-neutral-500">
+                        Uses Jira credentials from Settings → Integrations.
+                      </p>
+                    </>
+                  )}
+
+                  {selected.type === "github" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Action</span>
+                        <select
+                          value={selected.data?.action || "create"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { action: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        >
+                          <option value="create">Create issue</option>
+                          <option value="update">Update issue</option>
+                        </select>
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Repo (owner/name)</span>
+                        <input
+                          value={selected.data?.repo || ""}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { repo: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          placeholder="Blank = Settings default"
+                        />
+                      </label>
+                      {(selected.data?.action || "create") === "update" && (
+                        <label className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">Issue number</span>
+                          <input
+                            value={selected.data?.issue_number || ""}
+                            onChange={(e) => onUpdateNode(selected.id, { data: { issue_number: e.target.value } })}
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                            placeholder="42 or {{github_issue}}"
+                          />
+                        </label>
+                      )}
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Title</span>
+                        <input
+                          value={selected.data?.title || "{{output}}"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { title: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Body</span>
+                        <textarea
+                          value={selected.data?.body || "{{input}}"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { body: e.target.value } })}
+                          disabled={readOnly}
+                          rows={4}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      {(selected.data?.action || "create") === "create" && (
+                        <label className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">Labels (comma-separated)</span>
+                          <input
+                            value={selected.data?.labels || ""}
+                            onChange={(e) => onUpdateNode(selected.id, { data: { labels: e.target.value } })}
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                            placeholder="bug, triage"
+                          />
+                        </label>
+                      )}
+                      <p className="mt-3 text-[11px] text-neutral-500">
+                        Uses GitHub PAT from Settings → Integrations.
+                      </p>
+                    </>
+                  )}
+
+                  {selected.type === "linear" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Action</span>
+                        <select
+                          value={selected.data?.action || "create"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { action: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        >
+                          <option value="create">Create issue</option>
+                          <option value="update">Update issue</option>
+                        </select>
+                      </label>
+                      {(selected.data?.action || "create") === "create" ? (
+                        <label className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">Team ID</span>
+                          <input
+                            value={selected.data?.team_id || ""}
+                            onChange={(e) => onUpdateNode(selected.id, { data: { team_id: e.target.value } })}
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                            placeholder="Blank = Settings default"
+                          />
+                        </label>
+                      ) : (
+                        <label className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">Issue ID</span>
+                          <input
+                            value={selected.data?.issue_id || ""}
+                            onChange={(e) => onUpdateNode(selected.id, { data: { issue_id: e.target.value } })}
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                            placeholder="Linear UUID or {{linear_issue}}"
+                          />
+                        </label>
+                      )}
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Title</span>
+                        <input
+                          value={selected.data?.title || "{{output}}"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { title: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Description</span>
+                        <textarea
+                          value={selected.data?.description || "{{input}}"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { description: e.target.value } })}
+                          disabled={readOnly}
+                          rows={4}
+                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <p className="mt-3 text-[11px] text-neutral-500">
+                        Uses Linear API key from Settings → Integrations.
+                      </p>
                     </>
                   )}
 
@@ -968,13 +1210,78 @@ export default function WorkflowInspector({
               ) : (
                 <ul className="mt-4 space-y-2">
                   {recentRuns.map((run) => (
-                    <li key={run.id} className="workspace-list-row rounded-xl px-4 py-3">
-                      <p className="truncate text-sm font-medium">{run.input || "—"}</p>
-                      <p className="mt-1 truncate text-xs text-neutral-500">{run.output}</p>
-                      <p className="mt-1 text-[10px] text-neutral-400">{run.duration_ms}ms</p>
+                    <li key={run.id}>
+                      <button
+                        type="button"
+                        onClick={() => loadRunDetail(run.id)}
+                        className="workspace-list-row w-full rounded-xl px-4 py-3 text-left transition hover:bg-white/80"
+                      >
+                        <p className="truncate text-sm font-medium">{run.input || "—"}</p>
+                        <p className="mt-1 truncate text-xs text-neutral-500">{run.output}</p>
+                        <p className="mt-1 text-[10px] text-neutral-400">
+                          {run.duration_ms}ms
+                          {run.step_count ? ` · ${run.step_count} steps` : ""}
+                          {runDetail?.id === run.id ? " · viewing" : ""}
+                        </p>
+                      </button>
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {(runDetailBusy || runDetailError || runDetail) && (
+                <div className="mt-4 rounded-xl border border-black/[0.06] bg-white/70 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-neutral-600">Run detail</p>
+                    {runDetail && (
+                      <button
+                        type="button"
+                        onClick={() => setRunDetail(null)}
+                        className="text-[10px] text-neutral-400 hover:text-neutral-700"
+                      >
+                        Close
+                      </button>
+                    )}
+                  </div>
+                  {runDetailBusy && <p className="mt-2 text-xs text-neutral-500">Loading steps…</p>}
+                  {runDetailError && <p className="mt-2 text-xs text-red-600">{runDetailError}</p>}
+                  {runDetail && !runDetailBusy && (
+                    <div className="mt-2 space-y-2">
+                      <p className="text-[11px] text-neutral-500">
+                        #{runDetail.id} · {runDetail.duration_ms}ms
+                      </p>
+                      <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                        {(runDetail.steps || []).map((step, i) => (
+                          <div
+                            key={`${step.node_id || step.id || i}-${i}`}
+                            className="rounded-lg border border-black/[0.04] bg-neutral-50 px-2.5 py-2"
+                          >
+                            <p className="text-[11px] font-semibold text-neutral-800">
+                              {step.type || step.node_type || "step"}
+                              <span
+                                className={`ml-2 font-normal ${
+                                  step.status === "ok"
+                                    ? "text-emerald-600"
+                                    : step.status === "error"
+                                      ? "text-red-600"
+                                      : "text-neutral-400"
+                                }`}
+                              >
+                                {step.status || "—"}
+                              </span>
+                            </p>
+                            <p className="mt-0.5 line-clamp-3 text-[10px] text-neutral-500">
+                              {step.output || step.message || "—"}
+                            </p>
+                          </div>
+                        ))}
+                        {!(runDetail.steps || []).length && (
+                          <p className="text-[11px] text-neutral-400">No step payload stored for this run.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </motion.div>
           )}

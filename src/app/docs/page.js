@@ -17,6 +17,7 @@ const sections = [
       { n: "02", text: "Configure env", code: "cp .env.example .env.local" },
       { n: "03", text: "Run frontend", code: "npm run dev" },
       { n: "04", text: "Open app", code: "http://localhost:3000" },
+      { n: "05", text: "Verify pipelines", code: "npm run verify" },
     ],
   },
   {
@@ -24,17 +25,29 @@ const sections = [
     icon: "🔐",
     steps: [
       { n: "01", text: "Register at", link: "/login?mode=register", linkLabel: "/login?mode=register" },
-      { n: "02", text: "Login uses RSA encryption for secure password transfer" },
-      { n: "03", text: "Token stored in localStorage as nf_token" },
+      { n: "02", text: "Default admin (local): admin / admin123 — change in production" },
+      { n: "03", text: "Login uses RSA encryption for secure password transfer" },
+      { n: "04", text: "Token stored in localStorage as nf_token; expired sessions redirect to login" },
     ],
   },
   {
-    title: "Chat",
-    icon: "💬",
+    title: "Core pipelines",
+    icon: "⚙️",
     steps: [
-      { n: "01", text: "Navigate to /chat after signing in" },
-      { n: "02", text: "Select an assistant from the sidebar" },
-      { n: "03", text: "Messages stream via WebSocket in real time" },
+      { n: "01", text: "Chat", link: "/chat", linkLabel: "/chat" },
+      { n: "02", text: "Knowledge + RAG", link: "/knowledge", linkLabel: "/knowledge" },
+      { n: "03", text: "Workflows, Runs, Digests", link: "/workflows", linkLabel: "/workflows" },
+      { n: "04", text: "Agents & Evaluation", link: "/agents", linkLabel: "/agents" },
+      { n: "05", text: "Integrations & Model Lab", link: "/settings", linkLabel: "/settings" },
+    ],
+  },
+  {
+    title: "Developer checks",
+    icon: "🧪",
+    steps: [
+      { n: "01", text: "API console presets", link: "/developer", linkLabel: "/developer" },
+      { n: "02", text: "Backend smoke tests", code: "cd backend && python -m pytest -q" },
+      { n: "03", text: "Health: GET /health → version 9.6.0" },
     ],
   },
 ];

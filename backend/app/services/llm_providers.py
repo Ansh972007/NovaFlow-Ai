@@ -23,6 +23,25 @@ PROVIDER_TYPES: dict[str, dict[str, Any]] = {
         "default_embedding": OPENAI_EMBEDDING_MODEL,
         "supports_embeddings": True,
     },
+    "openrouter": {
+        "label": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "chat_models": [
+            "openai/gpt-4o-mini",
+            "openai/gpt-4o",
+            "anthropic/claude-3.5-sonnet",
+            "google/gemini-2.0-flash-001",
+            "meta-llama/llama-3.1-8b-instruct",
+        ],
+        "embedding_models": [
+            "openai/text-embedding-3-small",
+            "openai/text-embedding-ada-002",
+            "text-embedding-3-small",
+        ],
+        "default_chat": "openai/gpt-4o-mini",
+        "default_embedding": "openai/text-embedding-3-small",
+        "supports_embeddings": True,
+    },
     "anthropic": {
         "label": "Anthropic",
         "base_url": "https://api.anthropic.com",
@@ -55,6 +74,17 @@ PROVIDER_TYPES: dict[str, dict[str, Any]] = {
         "supports_embeddings": True,
     },
 }
+
+
+def openai_compat_headers(api_key: str, base_url: str = "") -> dict[str, str]:
+    """Bearer headers; adds OpenRouter Referer/Title when needed."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if "openrouter.ai" in (base_url or "").lower():
+        from app.config import OPENROUTER_APP_TITLE, OPENROUTER_HTTP_REFERER
+
+        headers["HTTP-Referer"] = OPENROUTER_HTTP_REFERER
+        headers["X-Title"] = OPENROUTER_APP_TITLE
+    return headers
 
 
 def _key_hint(api_key: str) -> str:
@@ -154,9 +184,10 @@ def ensure_default_provider(db: Session) -> None:
     if not OPENAI_API_KEY:
         return
 
+    is_openrouter = "openrouter.ai" in (OPENAI_BASE_URL or "").lower() or OPENAI_API_KEY.startswith("sk-or-")
     row = LlmProvider(
-        name="OpenAI (env)",
-        provider_type="openai",
+        name="OpenRouter (env)" if is_openrouter else "OpenAI (env)",
+        provider_type="openrouter" if is_openrouter else "openai",
         base_url=OPENAI_BASE_URL.rstrip("/"),
         api_key_enc="",
         chat_model=OPENAI_MODEL,
@@ -247,6 +278,80 @@ def activate_provider(db: Session, provider_id: int) -> dict:
     db.commit()
     db.refresh(row)
     return provider_dict(row)
+
+
+def verify_provider(db: Session, provider_id: int) -> dict:
+    """Ping chat (and embeddings when supported) for a provider vault row."""
+    import httpx
+
+    row = db.get(LlmProvider, provider_id)
+    if not row:
+        raise ValueError("Provider not found")
+    ptype = row.provider_type or "openai"
+    meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
+    api_key = resolve_api_key(row)
+    if not api_key:
+        raise ValueError("No API key configured for this provider")
+    base_url = (row.base_url or meta["base_url"]).rstrip("/")
+    model = row.chat_model or meta["default_chat"]
+    headers = openai_compat_headers(api_key, base_url)
+    result = {
+        "ok": False,
+        "provider_id": row.id,
+        "provider_type": ptype,
+        "chat_ok": False,
+        "embedding_ok": None,
+        "model": model,
+        "detail": "",
+    }
+    with httpx.Client(timeout=45) as client:
+        if ptype == "anthropic":
+            url = f"{base_url}/v1/messages" if not base_url.endswith("/v1/messages") else base_url
+            res = client.post(
+                url,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "max_tokens": 8,
+                    "messages": [{"role": "user", "content": "Reply with OK"}],
+                },
+            )
+        else:
+            res = client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Reply with OK"}],
+                    "max_tokens": 8,
+                },
+            )
+        if res.status_code >= 400:
+            result["detail"] = res.text[:240]
+            return result
+        result["chat_ok"] = True
+
+        if meta.get("supports_embeddings"):
+            emb_model = row.embedding_model or meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL
+            emb = client.post(
+                f"{base_url}/embeddings",
+                headers=headers,
+                json={"model": emb_model, "input": ["NovaFlow connection test"]},
+            )
+            result["embedding_ok"] = emb.status_code < 400
+            if emb.status_code >= 400:
+                result["detail"] = f"chat ok; embeddings failed: {emb.text[:180]}"
+            else:
+                result["detail"] = "chat and embeddings OK"
+        else:
+            result["detail"] = "chat OK (embeddings not supported)"
+
+    result["ok"] = bool(result["chat_ok"])
+    return result
 
 
 def settings_summary(db: Session) -> dict:

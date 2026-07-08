@@ -6,7 +6,12 @@ from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import fail, ok
 from app.services.drift import compute_prompt_drift
 from app.services.finetune import job_dict, refresh_finetune_job, start_finetune_job
-from app.services.model_lab import create_dataset_from_knowledge, dataset_dict_from_row, pipeline_dict
+from app.services.model_lab import (
+    create_dataset_from_knowledge,
+    dataset_dict_from_row,
+    deploy_finetune_to_assistant,
+    pipeline_dict,
+)
 
 router = APIRouter(tags=["Model Lab"])
 
@@ -120,3 +125,32 @@ async def refresh_pipeline_job(
 
             eval_run = run_dict(run)
     return ok(pipeline_dict(job, eval_run))
+
+
+@router.post("/model-lab/jobs/{job_id}/deploy-assistant")
+def deploy_pipeline_assistant(
+    job_id: int,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    """Apply fine-tuned model workspace-wide and create a live Chat assistant."""
+    job = db.get(FineTuneJob, job_id)
+    if not job or job.workspace_id != ctx.workspace_id:
+        return fail(404, "Job not found")
+    body = body or {}
+    try:
+        result = deploy_finetune_to_assistant(
+            db,
+            job,
+            ctx.user.user_id,
+            ctx.workspace_id,
+            name=(body.get("name") or "").strip(),
+            prompt=(body.get("prompt") or "").strip(),
+            activate=bool(body.get("activate", True)),
+            provider_id=body.get("provider_id"),
+            knowledge_ids=body.get("knowledge_ids"),
+        )
+        return ok(result)
+    except ValueError as exc:
+        return fail(400, str(exc))

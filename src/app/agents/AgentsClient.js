@@ -9,8 +9,9 @@ import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
 import { getUserInfo } from "@/lib/api/auth";
-import { listAgentTools, runAgent } from "@/lib/api/agents";
+import { listAgentTools, runAgent, listSavedAgents, createSavedAgent, deleteSavedAgent } from "@/lib/api/agents";
 import { listKnowledge } from "@/lib/api/knowledge";
+import { PROMPT_TEMPLATES } from "@/lib/prompts/templates";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -26,13 +27,25 @@ export default function AgentsClient() {
   const [user, setUser] = useState(null);
   const [tools, setTools] = useState([]);
   const [knowledge, setKnowledge] = useState([]);
+  const [savedAgents, setSavedAgents] = useState([]);
+  const [activeAgentId, setActiveAgentId] = useState("");
+  const [agentName, setAgentName] = useState("");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [toolResults, setToolResults] = useState([]);
   const [selectedTools, setSelectedTools] = useState(["summarize"]);
   const [knowledgeId, setKnowledgeId] = useState("");
-  const [system, setSystem] = useState("You are a capable NovaFlow agent. Use tool results when helpful.");
+  const [system, setSystem] = useState(
+    "You are a careful NovaFlow agent. Use tool results as evidence. Lead with the answer, then short supporting bullets. Say what is uncertain."
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+
+  async function reloadAgents() {
+    const rows = await listSavedAgents().catch(() => []);
+    setSavedAgents(Array.isArray(rows) ? rows : []);
+  }
 
   useEffect(() => {
     getUserInfo()
@@ -45,13 +58,15 @@ export default function AgentsClient() {
         return Promise.all([
           listAgentTools().catch(() => []),
           listKnowledge({ pageSize: 50 }).catch(() => ({ items: [] })),
+          listSavedAgents().catch(() => []),
         ]);
       })
       .then((res) => {
         if (!res) return;
-        const [toolList, kb] = res;
+        const [toolList, kb, agents] = res;
         setTools(toolList || []);
         setKnowledge(kb?.items || kb?.data || []);
+        setSavedAgents(Array.isArray(agents) ? agents : []);
       })
       .catch(() => router.replace("/login"));
   }, [router]);
@@ -60,19 +75,69 @@ export default function AgentsClient() {
     setSelectedTools((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id].slice(0, 5)));
   }, []);
 
+  function loadAgent(a) {
+    setActiveAgentId(a.id);
+    setAgentName(a.name || "");
+    setSystem(a.system_prompt || system);
+    setSelectedTools(Array.isArray(a.tools) && a.tools.length ? a.tools : ["summarize"]);
+    setKnowledgeId(a.knowledge_id ? String(a.knowledge_id) : "");
+    setMsg(`Loaded “${a.name}”.`);
+  }
+
+  async function handleSaveAgent() {
+    const name = (agentName || "My agent").trim();
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      const created = await createSavedAgent({
+        name,
+        system_prompt: system,
+        tools: selectedTools,
+        knowledge_id: knowledgeId ? Number(knowledgeId) : null,
+      });
+      await reloadAgents();
+      setActiveAgentId(created.id);
+      setAgentName(created.name);
+      setMsg("Agent saved.");
+    } catch (e) {
+      setError(e.message || "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteAgent(id) {
+    if (!window.confirm("Delete this saved agent?")) return;
+    setBusy(true);
+    try {
+      await deleteSavedAgent(id);
+      if (activeAgentId === id) setActiveAgentId("");
+      await reloadAgents();
+      setMsg("Agent deleted.");
+    } catch (e) {
+      setError(e.message || "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleRun() {
     if (!input.trim() || busy) return;
     setBusy(true);
     setError("");
     setOutput("");
+    setToolResults([]);
     try {
       const res = await runAgent({
         input: input.trim(),
         tools: selectedTools,
         knowledge_id: knowledgeId ? Number(knowledgeId) : undefined,
         system,
+        agent_id: activeAgentId || undefined,
       });
       setOutput(res?.output || "(no output)");
+      setToolResults(Array.isArray(res?.tool_results) ? res.tool_results : []);
     } catch (e) {
       setError(e.message || "Agent run failed");
     } finally {
@@ -101,9 +166,35 @@ export default function AgentsClient() {
         <div className="grid gap-3 sm:grid-cols-3">
           <WorkspaceStatCard label="Tools available" value={String(displayTools.length)} hint="Select up to 5 per run" />
           <WorkspaceStatCard label="Knowledge bases" value={String(knowledge.length)} hint="For kb_search tool" />
-          <WorkspaceStatCard label="Selected" value={String(selectedTools.length)} hint={selectedTools.join(", ") || "None"} />
+          <WorkspaceStatCard label="Saved agents" value={String(savedAgents.length)} hint={selectedTools.join(", ") || "None"} />
         </div>
       </WorkspaceHero>
+
+      {(error || msg) && (
+        <div className="mt-6">
+          <WorkspaceAlert type={error ? "error" : "success"}>{error || msg}</WorkspaceAlert>
+        </div>
+      )}
+
+      {savedAgents.length > 0 && (
+        <div className="mt-6 flex flex-wrap gap-2">
+          {savedAgents.map((a) => (
+            <div
+              key={a.id}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${
+                activeAgentId === a.id ? "border-neutral-900 bg-neutral-900 text-white" : "border-black/10 bg-white"
+              }`}
+            >
+              <button type="button" onClick={() => loadAgent(a)} className="font-semibold">
+                {a.name}
+              </button>
+              <button type="button" onClick={() => handleDeleteAgent(a.id)} className="opacity-60 hover:opacity-100">
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <motion.div
@@ -114,6 +205,21 @@ export default function AgentsClient() {
         >
           <p className="workspace-section-label">Configure run</p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight">Agent input</h2>
+
+          <label className="mt-4 block">
+            <span className="text-xs font-semibold text-neutral-600">Save as name</span>
+            <div className="mt-1.5 flex gap-2">
+              <input
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+                placeholder="Support triage agent"
+                className="input-field w-full text-sm"
+              />
+              <button type="button" disabled={busy} onClick={handleSaveAgent} className="btn-secondary shrink-0 text-xs disabled:opacity-50">
+                Save
+              </button>
+            </div>
+          </label>
 
           <div className="mt-5">
             <p className="text-xs font-semibold text-neutral-600">Tools</p>
@@ -168,11 +274,24 @@ export default function AgentsClient() {
 
           <label className="mt-5 block text-sm font-medium">
             System prompt
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {PROMPT_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSystem(t.prompt)}
+                  className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-neutral-700 hover:bg-neutral-50"
+                  title={t.description}
+                >
+                  {t.icon} {t.name}
+                </button>
+              ))}
+            </div>
             <textarea
               value={system}
               onChange={(e) => setSystem(e.target.value)}
               rows={2}
-              className="input-field mt-1.5 w-full resize-none text-sm"
+              className="input-field mt-2 w-full resize-none text-sm"
             />
           </label>
 
@@ -230,9 +349,26 @@ export default function AgentsClient() {
               <p className="text-sm text-neutral-500">Agent is thinking…</p>
             </div>
           ) : (
-            <div className="workspace-output-panel mt-5 flex-1">
-              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Output</p>
-              <pre className="whitespace-pre-wrap">{output}</pre>
+            <div className="mt-5 flex flex-1 flex-col gap-4 overflow-auto">
+              {toolResults.length > 0 && (
+                <div className="rounded-xl border border-black/[0.06] bg-neutral-50/80 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Tool trace</p>
+                  <ul className="mt-2 space-y-2">
+                    {toolResults.map((tr, i) => (
+                      <li key={`${tr.tool}-${i}`} className="rounded-lg border border-black/[0.04] bg-white px-3 py-2">
+                        <p className="font-mono text-[11px] font-semibold text-indigo-700">{tr.tool}</p>
+                        <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] text-neutral-600">
+                          {tr.result}
+                        </pre>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="workspace-output-panel flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Output</p>
+                <pre className="whitespace-pre-wrap">{output}</pre>
+              </div>
             </div>
           )}
         </motion.div>

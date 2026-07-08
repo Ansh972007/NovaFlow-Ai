@@ -7,6 +7,12 @@ import httpx
 from app.services.workspace_settings import get_chat_config, get_embedding_model
 
 
+def _emb_headers(cfg: dict) -> dict[str, str]:
+    from app.services.llm_providers import openai_compat_headers
+
+    return openai_compat_headers(cfg["api_key"], cfg.get("base_url") or "")
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
@@ -22,16 +28,23 @@ async def embed_texts(texts: list[str], model: str | None = None) -> list[list[f
     cfg = get_chat_config()
     if not cfg["api_key"] or not texts:
         return []
+    if cfg.get("provider_type") == "anthropic":
+        return []
     model = model or get_embedding_model()
     url = f"{cfg['base_url']}/embeddings"
-    headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
+    headers = _emb_headers(cfg)
     payload = {"model": model, "input": texts}
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        items = sorted(data.get("data", []), key=lambda x: x.get("index", 0))
-        return [item["embedding"] for item in items if "embedding" in item]
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code >= 400:
+                # Quota/key errors: fall back to keyword search rather than crashing ingest
+                return []
+            data = resp.json()
+            items = sorted(data.get("data", []), key=lambda x: x.get("index", 0))
+            return [item["embedding"] for item in items if "embedding" in item]
+    except httpx.HTTPError:
+        return []
 
 
 def embed_texts_sync(texts: list[str], model: str | None = None) -> list[list[float]]:

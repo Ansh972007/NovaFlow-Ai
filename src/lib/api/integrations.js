@@ -35,3 +35,41 @@ export async function testNotify(payload) {
 export async function getTelegramSetup(workflowId) {
   return client.get(`/integrations/telegram/setup/${workflowId}`);
 }
+
+export function startGmailOAuth() {
+  const params = new URLSearchParams();
+  const token = typeof window !== "undefined" ? localStorage.getItem("nf_token") : "";
+  const wid = typeof window !== "undefined" ? localStorage.getItem("nf_workspace_id") : "";
+  if (token) params.set("t", token);
+  if (wid) params.set("workspace_id", wid);
+  const qs = params.toString();
+  window.location.href = `/api/v1/integrations/gmail/oauth/start${qs ? `?${qs}` : ""}`;
+}
+
+export async function disconnectGmailOAuth() {
+  return client.post("/integrations/gmail/oauth/disconnect");
+}
+
+export async function verifyJira() {
+  return client.post("/integrations/jira/verify");
+}
+
+export async function testSlackIntegration(payload = {}) {
+  return client.post("/integrations/slack/test", payload);
+}
+
+export async function verifyGithub() {
+  return client.post("/integrations/github/verify");
+}
+
+export async function testDiscordIntegration(payload = {}) {
+  return client.post("/integrations/discord/test", payload);
+}
+
+export async function verifyLinear() {
+  return client.post("/integrations/linear/verify");
+}
+
+export async function bindSlackEvents(payload) {
+  return client.post("/integrations/slack/events/bind", payload);
+}

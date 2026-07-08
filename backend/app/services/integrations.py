@@ -1,5 +1,6 @@
 import asyncio
 import smtplib
+import time
 from email.mime.text import MIMEText
 from typing import Any
 
@@ -42,6 +43,14 @@ async def send_email_notification(
     workspace_id: int | None = None,
     smtp_override: dict | None = None,
 ) -> dict:
+    if db and workspace_id and not smtp_override:
+        from app.database import WorkspaceIntegration
+        from app.services.gmail_jira import send_gmail_api_message
+
+        row = db.get(WorkspaceIntegration, workspace_id)
+        if row and (row.gmail_auth_mode or "").lower() == "oauth" and row.gmail_oauth_refresh_token_enc:
+            return await send_gmail_api_message(db, workspace_id, to_addr, subject, body)
+
     smtp = smtp_override or (resolve_smtp_config(db, workspace_id) if db else {})
     return await asyncio.to_thread(_send_email_sync, smtp, to_addr, subject, body)
 
@@ -85,6 +94,58 @@ async def send_webhook_notification(url: str, subject: str, body: str) -> dict:
         return {"ok": False, "detail": str(exc)[:500]}
 
 
+async def send_slack_notification(
+    text: str,
+    *,
+    webhook_url: str = "",
+    db: Session | None = None,
+    workspace_id: int | None = None,
+    subject: str = "",
+) -> dict:
+    from app.services.workspace_integrations import resolve_slack_webhook
+
+    url = resolve_slack_webhook(db, workspace_id, webhook_url) if db else (webhook_url or "").strip()
+    if not url:
+        return {"ok": False, "detail": "Slack webhook missing — add in Settings → Integrations"}
+    message = text[:3900]
+    if subject and subject.strip() and subject.strip().lower() not in ("novaflow", "novaflow notification"):
+        message = f"*{subject.strip()[:120]}*\n{message}"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(url, json={"text": message})
+            if resp.status_code >= 400:
+                return {"ok": False, "detail": resp.text[:400]}
+            return {"ok": True, "detail": "Slack message posted"}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:500]}
+
+
+async def send_discord_notification(
+    text: str,
+    *,
+    webhook_url: str = "",
+    db: Session | None = None,
+    workspace_id: int | None = None,
+    subject: str = "",
+) -> dict:
+    from app.services.workspace_integrations import resolve_discord_webhook
+
+    url = resolve_discord_webhook(db, workspace_id, webhook_url) if db else (webhook_url or "").strip()
+    if not url:
+        return {"ok": False, "detail": "Discord webhook missing — add in Settings → Integrations"}
+    message = text[:1900]
+    if subject and subject.strip() and subject.strip().lower() not in ("novaflow", "novaflow notification"):
+        message = f"**{subject.strip()[:120]}**\n{message}"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(url, json={"content": message})
+            if resp.status_code >= 400:
+                return {"ok": False, "detail": resp.text[:400]}
+            return {"ok": True, "detail": "Discord message posted"}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:500]}
+
+
 async def send_notification(
     channel: str,
     to_addr: str,
@@ -100,6 +161,22 @@ async def send_notification(
         return await send_email_notification(to_addr, subject, body, db=db, workspace_id=workspace_id)
     if ch == "webhook":
         return await send_webhook_notification(to_addr, subject, body)
+    if ch == "slack":
+        return await send_slack_notification(
+            body,
+            webhook_url=to_addr,
+            db=db,
+            workspace_id=workspace_id,
+            subject=subject,
+        )
+    if ch == "discord":
+        return await send_discord_notification(
+            body,
+            webhook_url=to_addr,
+            db=db,
+            workspace_id=workspace_id,
+            subject=subject,
+        )
     return await send_telegram_message(
         to_addr,
         body,
@@ -177,3 +254,55 @@ def parse_telegram_input(payload: dict) -> tuple[str, str]:
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id") or "")
     return chat_id, text
+
+
+def parse_slack_event(payload: dict) -> tuple[str, str, str]:
+    """Return (channel_id, user_id, text) from a Slack Events API payload."""
+    event = payload.get("event") or {}
+    if event.get("bot_id") or event.get("subtype") == "bot_message":
+        return "", "", ""
+    text = (event.get("text") or "").strip()
+    # Strip Slack user mentions like <@U123>
+    import re
+
+    text = re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+    return str(event.get("channel") or ""), str(event.get("user") or ""), text
+
+
+def verify_slack_signature(signing_secret: str, timestamp: str, body: bytes, signature: str) -> bool:
+    if not signing_secret or not timestamp or not signature:
+        return False
+    try:
+        if abs(int(time.time()) - int(timestamp)) > 60 * 5:
+            return False
+    except ValueError:
+        return False
+    import hashlib
+    import hmac
+
+    basestring = f"v0:{timestamp}:{body.decode('utf-8')}".encode("utf-8")
+    digest = "v0=" + hmac.new(signing_secret.encode("utf-8"), basestring, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(digest, signature)
+
+
+async def send_slack_bot_message(db: Session, workspace_id: int, channel: str, text: str) -> dict:
+    from app.crypto import decrypt_secret
+    from app.database import WorkspaceIntegration
+
+    row = db.get(WorkspaceIntegration, workspace_id)
+    token = decrypt_secret(row.slack_bot_token_enc or "") if row and row.slack_bot_token_enc else ""
+    if not token or not channel:
+        return {"ok": False, "detail": "Slack bot token or channel missing"}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"channel": channel, "text": text[:3900]},
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                return {"ok": False, "detail": str(data.get("error") or "chat.postMessage failed")}
+            return {"ok": True, "detail": "Slack bot reply posted"}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:500]}

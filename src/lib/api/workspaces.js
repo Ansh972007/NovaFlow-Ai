@@ -12,6 +12,21 @@ export function setActiveWorkspaceId(id) {
   localStorage.setItem(WORKSPACE_STORAGE_KEY, String(id));
 }
 
+export async function ensureActiveWorkspace() {
+  try {
+    const data = await listWorkspaces();
+    const items = data?.items || [];
+    if (!items.length) return null;
+    const stored = getActiveWorkspaceId();
+    const storedValid = stored && items.some((w) => String(w.id) === String(stored));
+    const id = storedValid ? Number(stored) : data?.current_id || items[0]?.id;
+    if (id) setActiveWorkspaceId(id);
+    return id;
+  } catch {
+    return getActiveWorkspaceId() ? Number(getActiveWorkspaceId()) : null;
+  }
+}
+
 export async function listWorkspaces() {
   return client.get("/workspaces");
 }

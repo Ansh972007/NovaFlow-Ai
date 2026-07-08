@@ -9,6 +9,7 @@ import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import { WorkspaceSkeletonList } from "@/components/workspace/WorkspaceTabs";
 import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { getUserInfo } from "@/lib/api/auth";
+import { ensureActiveWorkspace } from "@/lib/api/workspaces";
 import {
   createWorkflow,
   deleteWorkflow,
@@ -16,6 +17,7 @@ import {
   getWorkflowsPage,
   setWorkflowStatus,
 } from "@/lib/api/workflows";
+import { WORKFLOW_TEMPLATES } from "@/lib/workflow/templates";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -39,15 +41,15 @@ export default function WorkflowsClient() {
     setLoading(true);
     try {
       const [res, tpl] = await Promise.all([
-        getWorkflowsPage({ limit: 50 }),
-        getWorkflowTemplates().catch(() => []),
+        getWorkflowsPage({ limit: 50 }).catch(() => ({ data: [], total: 0 })),
+        getWorkflowTemplates(),
       ]);
       setWorkflows(res?.data || []);
       setTotal(res?.total || 0);
-      setTemplates(Array.isArray(tpl) ? tpl : []);
+      setTemplates(Array.isArray(tpl) && tpl.length ? tpl : WORKFLOW_TEMPLATES);
     } catch {
       setWorkflows([]);
-      setTemplates([]);
+      setTemplates(WORKFLOW_TEMPLATES);
     } finally {
       setLoading(false);
     }
@@ -55,7 +57,10 @@ export default function WorkflowsClient() {
 
   useEffect(() => {
     getUserInfo()
-      .then(setUser)
+      .then(async (u) => {
+        await ensureActiveWorkspace();
+        setUser(u);
+      })
       .catch(() => router.push("/login"));
   }, [router]);
 
@@ -69,7 +74,11 @@ export default function WorkflowsClient() {
     setCreating(true);
     setError("");
     try {
+      await ensureActiveWorkspace();
       const wf = await createWorkflow({ name: name.trim(), templateId });
+      if (!wf?.id) {
+        throw new Error("Workflow was created but the server did not return an ID. Refresh and try again.");
+      }
       setShowCreate(false);
       setName("");
       router.push(`/workflows/${wf.id}`);
@@ -105,13 +114,7 @@ export default function WorkflowsClient() {
     return null;
   }
 
-  const displayTemplates = templates.length
-    ? templates
-    : [
-        { id: "rag", name: "RAG Q&A pipeline", desc: "Retrieve docs then answer" },
-        { id: "support", name: "Support triage", desc: "Classify and draft replies" },
-        { id: "research", name: "Research brief", desc: "Synthesize from sources" },
-      ];
+  const displayTemplates = templates.length ? templates : WORKFLOW_TEMPLATES;
 
   return (
     <>

@@ -122,33 +122,83 @@ function RAGPreview() {
 }
 
 function WorkflowPreview() {
-  const steps = ["Trigger", "LLM", "API", "Output"];
+  const steps = [
+    { label: "Trigger", color: "border-emerald-300 bg-emerald-50 text-emerald-800" },
+    { label: "Retrieve", color: "border-sky-300 bg-sky-50 text-sky-800" },
+    { label: "LLM", color: "border-violet-300 bg-violet-50 text-violet-800" },
+    { label: "Notify", color: "border-amber-300 bg-amber-50 text-amber-800" },
+    { label: "Output", color: "border-neutral-300 bg-neutral-50 text-neutral-700" },
+  ];
+
   return (
-    <div className="mt-5 flex items-center justify-between gap-1">
-      {steps.map((step, i) => (
-        <div key={step} className="flex flex-1 items-center">
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            whileInView={{ scale: 1, opacity: 1 }}
-            viewport={{ once: true }}
-            transition={{ delay: 0.2 + i * 0.12, ease }}
-            className="flex flex-1 flex-col items-center"
-          >
-            <div className="flex h-8 w-full max-w-[52px] items-center justify-center rounded-lg border border-border bg-white text-[9px] font-semibold">
-              {step}
-            </div>
-          </motion.div>
-          {i < steps.length - 1 && (
-            <motion.span
-              animate={{ opacity: [0.3, 1, 0.3] }}
-              transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.3 }}
-              className="mx-0.5 text-muted"
+    <div className="relative mt-5 overflow-hidden rounded-xl border border-border bg-gradient-to-br from-surface to-white p-3">
+      <div className="mb-2 flex items-center justify-between text-[9px] font-semibold tracking-wider text-muted uppercase">
+        <span>Pipeline preview</span>
+        <motion.span
+          animate={{ opacity: [0.4, 1, 0.4] }}
+          transition={{ duration: 2, repeat: Infinity }}
+          className="flex items-center gap-1 text-emerald-600"
+        >
+          <span className="h-1 w-1 rounded-full bg-emerald-500" />
+          Live
+        </motion.span>
+      </div>
+      <div className="flex items-center justify-between gap-0.5">
+        {steps.map((step, i) => (
+          <div key={step.label} className="flex flex-1 items-center">
+            <motion.div
+              initial={{ scale: 0.7, opacity: 0, y: 8 }}
+              whileInView={{ scale: 1, opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.15 + i * 0.1, type: "spring", stiffness: 260, damping: 20 }}
+              whileHover={{ scale: 1.06, y: -2 }}
+              className={`flex flex-1 flex-col items-center`}
             >
-              →
-            </motion.span>
-          )}
-        </div>
-      ))}
+              <div
+                className={`flex h-9 w-full max-w-[48px] items-center justify-center rounded-lg border text-[8px] font-bold shadow-sm transition-shadow hover:shadow-md ${step.color}`}
+              >
+                {step.label}
+              </div>
+            </motion.div>
+            {i < steps.length - 1 && (
+              <motion.div
+                className="relative mx-0.5 flex h-px flex-1 items-center"
+                initial={{ scaleX: 0 }}
+                whileInView={{ scaleX: 1 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.25 + i * 0.12, duration: 0.5, ease }}
+              >
+                <span className="h-px w-full bg-border" />
+                <motion.span
+                  animate={{ x: ["-100%", "200%"], opacity: [0, 1, 0] }}
+                  transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.35, ease: "easeInOut" }}
+                  className="absolute h-1 w-3 rounded-full bg-violet-400"
+                />
+              </motion.div>
+            )}
+          </div>
+        ))}
+      </div>
+      <motion.div
+        initial={{ opacity: 0 }}
+        whileInView={{ opacity: 1 }}
+        viewport={{ once: true }}
+        transition={{ delay: 0.7, duration: 0.5 }}
+        className="mt-2.5 flex gap-1"
+      >
+        {["9 templates", "Webhooks", "Cron"].map((tag, i) => (
+          <motion.span
+            key={tag}
+            initial={{ opacity: 0, x: -6 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.75 + i * 0.06 }}
+            className="rounded-full bg-white px-2 py-0.5 text-[8px] font-medium text-muted shadow-sm"
+          >
+            {tag}
+          </motion.span>
+        ))}
+      </motion.div>
     </div>
   );
 }

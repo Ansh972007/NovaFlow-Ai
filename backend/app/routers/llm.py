@@ -11,6 +11,7 @@ from app.services.llm_providers import (
     list_provider_types,
     list_providers,
     update_provider,
+    verify_provider,
 )
 from app.services.workspace_settings import get_chat_config, get_embedding_model, load_settings, settings_dict, update_settings
 
@@ -118,3 +119,16 @@ def set_active_provider(provider_id: int, db: Session = Depends(get_db), user=De
         return ok(activate_provider(db, provider_id))
     except ValueError as exc:
         return fail(404, str(exc))
+
+
+@router.post("/llm/providers/{provider_id}/verify")
+def verify_provider_api(provider_id: int, db: Session = Depends(get_db), user=Depends(require_admin)):
+    try:
+        result = verify_provider(db, provider_id)
+        if not result.get("ok"):
+            return fail(400, result.get("detail") or "Provider verify failed")
+        return ok(result)
+    except ValueError as exc:
+        return fail(404, str(exc))
+    except Exception as exc:
+        return fail(400, str(exc)[:240])

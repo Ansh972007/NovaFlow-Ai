@@ -65,6 +65,7 @@ async def _stream_reply(
     user_msg: str,
     workspace_id: int | None = None,
     receipt_extra: dict | None = None,
+    cancel_event: asyncio.Event | None = None,
 ):
     from app.services.ab_routing import pick_ab_model
     from app.services.workspace_settings import get_chat_config
@@ -78,22 +79,42 @@ async def _stream_reply(
 
     await websocket.send_json({"type": "start"})
     buffer = ""
-    async for token in stream_chat(system, user_msg, db=db, workspace_id=workspace_id):
+    usage_out: dict = {}
+    stopped = False
+    async for token in stream_chat(
+        system,
+        user_msg,
+        db=db,
+        workspace_id=workspace_id,
+        cancel_event=cancel_event,
+        usage_out=usage_out,
+    ):
+        if cancel_event is not None and cancel_event.is_set():
+            stopped = True
+            break
         buffer += token
         await websocket.send_json(
             {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
         )
         await asyncio.sleep(0)
+    if cancel_event is not None and cancel_event.is_set():
+        stopped = True
     receipt = build_chat_receipt(
         model=ab_meta.get("model") if ab_meta else model_name,
         rag_hits=(receipt_extra or {}).get("rag_hits"),
         ab_meta=ab_meta,
         chars=len(buffer),
         event_type=event_type,
+        usage=usage_out,
+        stopped=stopped,
     )
     await websocket.send_json({"type": "end", "message": {"content": buffer}, "receipt": receipt})
     await websocket.send_json({"type": "close"})
-    meta = {"chars": len(buffer)}
+    meta = {"chars": len(buffer), "stopped": stopped}
+    if usage_out.get("total_tokens") is not None:
+        meta["total_tokens"] = usage_out.get("total_tokens")
+        meta["prompt_tokens"] = usage_out.get("prompt_tokens")
+        meta["completion_tokens"] = usage_out.get("completion_tokens")
     if ab_meta:
         meta["ab_variant"] = ab_meta.get("variant")
         meta["ab_model"] = ab_meta.get("model")
@@ -160,21 +181,50 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
             if rag:
                 system_prompt = (
                     f"{assistant.prompt}\n\n"
-                    "Use the following retrieved context when relevant. "
-                    "If context does not help, answer from general knowledge.\n\n"
-                    f"--- Context ---\n{rag}\n--- End context ---"
+                    "Use the retrieved context when it is relevant. Prefer: direct answer first, "
+                    "then short supporting bullets. Cite sources as [n] when you rely on a passage. "
+                    "If context is empty or does not help, say what is missing and answer cautiously.\n\n"
+                    f"--- Retrieved context ---\n{rag}\n--- End context ---"
                 )
-            await _stream_reply(
-                websocket,
-                db,
-                user_id,
-                assistant_id,
-                "chat",
-                system_prompt,
-                query,
-                wid,
-                receipt_extra={"rag_hits": rag_hits},
-            )
+
+            cancel_event = asyncio.Event()
+
+            async def _watch_stop(evt: asyncio.Event):
+                while not evt.is_set():
+                    try:
+                        raw_stop = await websocket.receive_text()
+                    except Exception:
+                        evt.set()
+                        return
+                    try:
+                        stop_payload = json.loads(raw_stop)
+                    except json.JSONDecodeError:
+                        continue
+                    if stop_payload.get("action") == "stop":
+                        evt.set()
+                        return
+
+            watcher = asyncio.create_task(_watch_stop(cancel_event))
+            try:
+                await _stream_reply(
+                    websocket,
+                    db,
+                    user_id,
+                    assistant_id,
+                    "chat",
+                    system_prompt,
+                    query,
+                    wid,
+                    receipt_extra={"rag_hits": rag_hits},
+                    cancel_event=cancel_event,
+                )
+            finally:
+                cancel_event.set()
+                watcher.cancel()
+                try:
+                    await watcher
+                except asyncio.CancelledError:
+                    pass
     except WebSocketDisconnect:
         pass
     finally:
@@ -240,16 +290,43 @@ async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
             system, llm_user = await resolve_workflow_llm_messages(
                 db, workflow, user_id, str(user_msg).strip()
             )
-            await _stream_reply(
-                websocket,
-                db,
-                user_id,
-                workflow.id,
-                "workflow_chat",
-                system,
-                llm_user,
-                wid,
-            )
+            cancel_event = asyncio.Event()
+
+            async def _watch_stop(evt: asyncio.Event):
+                while not evt.is_set():
+                    try:
+                        raw_stop = await websocket.receive_text()
+                    except Exception:
+                        evt.set()
+                        return
+                    try:
+                        stop_payload = json.loads(raw_stop)
+                    except json.JSONDecodeError:
+                        continue
+                    if stop_payload.get("action") == "stop":
+                        evt.set()
+                        return
+
+            watcher = asyncio.create_task(_watch_stop(cancel_event))
+            try:
+                await _stream_reply(
+                    websocket,
+                    db,
+                    user_id,
+                    workflow.id,
+                    "workflow_chat",
+                    system,
+                    llm_user,
+                    wid,
+                    cancel_event=cancel_event,
+                )
+            finally:
+                cancel_event.set()
+                watcher.cancel()
+                try:
+                    await watcher
+                except asyncio.CancelledError:
+                    pass
     except WebSocketDisconnect:
         pass
     finally:

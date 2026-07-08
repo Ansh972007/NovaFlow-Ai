@@ -23,13 +23,19 @@ const NAV_GROUPS = [
       { href: "/projects", label: "Projects" },
       { href: "/apps", label: "Apps" },
       { href: "/workflows", label: "Workflows" },
+      { href: "/runs", label: "Runs" },
+      { href: "/digests", label: "Digests" },
       { href: "/agents", label: "Agents" },
       { href: "/marketplace", label: "Marketplace" },
     ],
   },
   {
     label: "Quality",
-    links: [{ href: "/evaluation", label: "Evaluation" }],
+    links: [
+      { href: "/evaluation", label: "Evaluation" },
+      { href: "/developer", label: "Developer" },
+      { href: "/docs", label: "Docs" },
+    ],
   },
 ];
 
@@ -64,7 +70,7 @@ function AppHeader({ user, links = [] }) {
     const active = isActive(pathname, href);
     return [
       "relative rounded-full font-medium transition-all duration-200",
-      compact ? "px-3 py-2 text-sm" : "px-3 py-2 text-[13px]",
+      compact ? "px-3 py-2 text-sm" : "px-2.5 py-1.5 text-[12px] sm:px-3 sm:py-2 sm:text-[13px]",
       active
         ? "bg-neutral-900 text-white shadow-sm"
         : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900",
@@ -73,41 +79,42 @@ function AppHeader({ user, links = [] }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/80">
-      <div className="mx-auto flex h-[4.25rem] max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <Logo size="sm" href={user ? "/dashboard" : "/"} className="shrink-0" />
-          <span className="hidden h-5 w-px bg-neutral-200 lg:block" aria-hidden />
-          <p className="hidden text-[11px] font-semibold tracking-[0.14em] text-neutral-400 uppercase lg:block">
-            NovaFlow
-          </p>
+      <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center gap-2 px-4 sm:gap-3 sm:px-6">
+        <div className="flex shrink-0 items-center">
+          <Logo size="sm" href={user ? "/dashboard" : "/"} />
         </div>
 
-        <nav className="hidden items-center gap-0.5 xl:flex" aria-label="Main">
-          {useCustomLinks ? (
-            links.map((link) => (
-              <Link key={link.href} href={link.href} className={linkClass(link.href)}>
-                {link.label}
-              </Link>
-            ))
-          ) : (
-            NAV_GROUPS.map((group, gi) => (
-              <div key={group.label} className="flex items-center">
-                {gi > 0 && <span className="mx-1.5 h-4 w-px bg-neutral-200" aria-hidden />}
-                {group.links.map((link) => (
-                  <Link key={link.href} href={link.href} className={linkClass(link.href)}>
-                    {link.label}
-                  </Link>
-                ))}
-              </div>
-            ))
-          )}
+        <nav
+          className="hidden min-w-0 flex-1 justify-center xl:flex"
+          aria-label="Main"
+        >
+          <div className="flex max-w-full flex-nowrap items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {useCustomLinks ? (
+              links.map((link) => (
+                <Link key={link.href} href={link.href} className={`${linkClass(link.href)} shrink-0`}>
+                  {link.label}
+                </Link>
+              ))
+            ) : (
+              NAV_GROUPS.map((group, gi) => (
+                <div key={group.label} className="flex shrink-0 items-center">
+                  {gi > 0 && <span className="mx-1 h-4 w-px shrink-0 bg-neutral-200" aria-hidden />}
+                  {group.links.map((link) => (
+                    <Link key={link.href} href={link.href} className={`${linkClass(link.href)} shrink-0`}>
+                      {link.label}
+                    </Link>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
         </nav>
 
-        <div className="flex items-center gap-1 sm:gap-2">
+        <div className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-2">
           {user && (
             <Link
               href="/settings"
-              className={`hidden rounded-full p-2.5 transition-colors sm:inline-flex ${
+              className={`hidden shrink-0 items-center rounded-full p-2 transition-colors sm:inline-flex ${
                 isActive(pathname, "/settings")
                   ? "bg-neutral-900 text-white"
                   : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
@@ -125,19 +132,16 @@ function AppHeader({ user, links = [] }) {
           {user ? (
             <>
               <WorkspaceSwitcher />
-              <span className="hidden max-w-[120px] truncate rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-700 lg:inline">
-                {user.user_name}
-              </span>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="hidden rounded-full px-3 py-2 text-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 sm:inline"
+                className="hidden shrink-0 whitespace-nowrap rounded-full px-3 py-2 text-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 sm:inline-flex sm:items-center"
               >
                 Sign out
               </button>
             </>
           ) : (
-            <Link href="/login" className="btn-primary !py-2 !text-sm">
+            <Link href="/login" className="btn-primary shrink-0 whitespace-nowrap !py-2 !text-sm">
               Sign in
             </Link>
           )}
@@ -145,7 +149,7 @@ function AppHeader({ user, links = [] }) {
           <button
             type="button"
             onClick={() => setMobileOpen((o) => !o)}
-            className="inline-flex rounded-xl border border-neutral-200 bg-white p-2.5 text-neutral-700 shadow-sm xl:hidden"
+            className="inline-flex shrink-0 rounded-xl border border-neutral-200 bg-white p-2.5 text-neutral-700 shadow-sm xl:hidden"
             aria-expanded={mobileOpen}
             aria-label="Open menu"
           >

@@ -17,6 +17,7 @@ import {
   ingestKnowledgeUrl,
   listKnowledge,
   processKnowledgeFiles,
+  retryKnowledgeFile,
   uploadKnowledgeFile,
 } from "@/lib/api/knowledge";
 import KnowledgeQAPreview from "@/components/knowledge/KnowledgeQAPreview";
@@ -80,6 +81,17 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
     const id = setInterval(loadFiles, POLL_MS);
     return () => clearInterval(id);
   }, [user, loading, files, loadFiles]);
+
+  async function handleRetry(file) {
+    if (!file?.id || !writeable) return;
+    setError("");
+    try {
+      await retryKnowledgeFile({ file_id: file.id });
+      await loadFiles();
+    } catch (err) {
+      setError(err.message || "Retry failed");
+    }
+  }
 
   async function handleUpload(e) {
     const selected = Array.from(e.target.files || []);
@@ -189,7 +201,7 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                     ref={fileInputRef}
                     type="file"
                     multiple
-                    accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.pptx,.html,.htm,.json,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff"
+                    accept=".pdf,.docx,.txt,.md,.csv,.tsv,.xlsx,.pptx,.html,.htm,.json,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff"
                     className="hidden"
                     onChange={handleUpload}
                   />
@@ -254,7 +266,7 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                 </div>
                 <p className="mt-5 font-semibold">No documents yet</p>
                 <p className="mt-2 text-sm text-neutral-500">
-                  Upload PDF, Word, HTML, JSON, or text files to index them for AI search.
+                  Upload PDF, DOCX, CSV, XLSX, PPTX, HTML, JSON, Markdown, text, or images to index them for AI search.
                 </p>
               </div>
             ) : (
@@ -277,12 +289,26 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
                         <p className="mt-0.5 text-[11px] text-neutral-400">
                           {file.update_time ? new Date(file.update_time).toLocaleString() : "—"}
                         </p>
+                        {file.status === 3 && file.error_message ? (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-red-600">{file.error_message}</p>
+                        ) : null}
                       </div>
-                      <span
-                        className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-wide uppercase ${status.color}`}
-                      >
-                        {status.label}
-                      </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {writeable && file.status === 3 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRetry(file)}
+                            className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-neutral-700 hover:bg-neutral-50"
+                          >
+                            Retry
+                          </button>
+                        ) : null}
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-wide uppercase ${status.color}`}
+                        >
+                          {status.label}
+                        </span>
+                      </div>
                     </motion.li>
                   );
                 })}

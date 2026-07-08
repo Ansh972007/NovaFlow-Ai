@@ -15,11 +15,12 @@ import {
   getAssistantsPage,
   setAssistantStatus,
 } from "@/lib/api/apps";
+import { PROMPT_TEMPLATES } from "@/lib/prompts/templates";
 
 const ease = [0.16, 1, 0.3, 1];
 
-const DEFAULT_PROMPT =
-  "You are a helpful NovaFlow AI assistant. Answer clearly, be concise, and ask follow-up questions when the user's request is ambiguous.";
+const DEFAULT_PROMPT = PROMPT_TEMPLATES.find((t) => t.id === "docs")?.prompt
+  || "You are a helpful NovaFlow AI assistant. Answer clearly, be concise, and ask follow-up questions when the user's request is ambiguous.";
 
 export default function AppsClient() {
   const router = useRouter();
@@ -268,11 +269,24 @@ export default function AppsClient() {
             </label>
             <label className="mt-4 block text-sm font-medium">
               System prompt
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {PROMPT_TEMPLATES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setPrompt(t.prompt)}
+                    className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-neutral-700 hover:bg-neutral-50"
+                    title={t.description}
+                  >
+                    {t.icon} {t.name}
+                  </button>
+                ))}
+              </div>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={5}
-                className="input-field mt-1.5 w-full resize-none"
+                className="input-field mt-2 w-full resize-none"
                 required
                 minLength={20}
               />

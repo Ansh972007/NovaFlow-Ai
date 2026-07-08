@@ -1034,6 +1034,10 @@ body {
 .workflow-node-human { border-color: rgba(249, 115, 22, 0.5); }
 .workflow-node-agent { border-color: rgba(132, 204, 22, 0.55); }
 .workflow-node-subgraph { border-color: rgba(20, 184, 166, 0.5); }
+.workflow-node-notify { border-color: rgba(20, 184, 166, 0.55); }
+.workflow-node-jira { border-color: rgba(59, 130, 246, 0.55); }
+.workflow-node-github { border-color: rgba(23, 23, 23, 0.45); }
+.workflow-node-linear { border-color: rgba(99, 102, 241, 0.55); }
 
 /* Circular selection ring */
 .wf-selection-ring {

@@ -21,9 +21,100 @@ from app.services.workflow import (
     workflow_dict,
 )
 from app.services.workflow_diff import diff_workflow_graphs, format_diff_markdown
-from app.services.workflow_scheduler import compute_schedule_next_run, schedule_dict
+from app.services.workflow_scheduler import compute_schedule_next_run, run_schedule_now, schedule_dict
 
 router = APIRouter(tags=["Workflow"])
+
+
+@router.get("/workflow/schedules")
+def list_workspace_schedules(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    rows = (
+        db.query(WorkflowSchedule)
+        .filter(WorkflowSchedule.workspace_id == ctx.workspace_id)
+        .order_by(WorkflowSchedule.create_time.desc())
+        .all()
+    )
+    out = []
+    for row in rows:
+        wf = db.get(Workflow, row.workflow_id)
+        out.append(schedule_dict(row, wf.name if wf else None))
+    return ok(out)
+
+
+@router.post("/workflow/schedules/{schedule_id}/trigger")
+async def trigger_workspace_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    try:
+        return ok(await run_schedule_now(db, schedule_id, ctx.workspace_id))
+    except ValueError as exc:
+        return fail(400, str(exc))
+
+
+@router.get("/workflow/runs")
+def list_workspace_runs(
+    limit: int = Query(50, ge=1, le=100),
+    workflow_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    q = db.query(WorkflowRun).filter(WorkflowRun.workspace_id == ctx.workspace_id)
+    if workflow_id:
+        q = q.filter(WorkflowRun.workflow_id == workflow_id)
+    rows = q.order_by(WorkflowRun.create_time.desc()).limit(limit).all()
+    out = []
+    for r in rows:
+        wf = db.get(Workflow, r.workflow_id)
+        try:
+            steps = json.loads(r.steps_json or "[]")
+            step_count = len(steps) if isinstance(steps, list) else 0
+        except json.JSONDecodeError:
+            step_count = 0
+        status_code = int(r.status or 1)
+        out.append(
+            {
+                "id": r.id,
+                "workflow_id": r.workflow_id,
+                "workflow_name": wf.name if wf else r.workflow_id,
+                "input": (r.input_text or "")[:200],
+                "output": (r.output_text or "")[:200],
+                "duration_ms": r.duration_ms,
+                "status": status_code,
+                "status_label": "error" if status_code == 2 else "completed",
+                "step_count": step_count,
+                "create_time": r.create_time.isoformat() if r.create_time else None,
+            }
+        )
+    return ok(out)
+
+
+@router.get("/workflow/runs/{run_id}")
+def get_workflow_run(run_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+    run = db.get(WorkflowRun, run_id)
+    if not run or run.workspace_id != ctx.workspace_id:
+        return fail(404, "Run not found")
+    try:
+        steps = json.loads(run.steps_json or "[]")
+    except json.JSONDecodeError:
+        steps = []
+    wf = db.get(Workflow, run.workflow_id)
+    status_code = int(run.status or 1)
+    return ok(
+        {
+            "id": run.id,
+            "workflow_id": run.workflow_id,
+            "workflow_name": wf.name if wf else run.workflow_id,
+            "input": run.input_text or "",
+            "output": run.output_text or "",
+            "duration_ms": run.duration_ms,
+            "status": status_code,
+            "status_label": "error" if status_code == 2 else "completed",
+            "create_time": run.create_time.isoformat() if run.create_time else None,
+            "steps": steps if isinstance(steps, list) else [],
+        }
+    )
 
 
 @router.get("/workflow")
@@ -71,6 +162,7 @@ def workflow_info(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(g
             "output": (r.output_text or "")[:120],
             "duration_ms": r.duration_ms,
             "create_time": r.create_time.isoformat() if r.create_time else None,
+            "step_count": len(json.loads(r.steps_json or "[]")) if r.steps_json else 0,
         }
         for r in runs
     ]

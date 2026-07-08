@@ -20,6 +20,7 @@ import FAQ from "@/components/FAQ";
 import Pricing from "@/components/Pricing";
 import CodeShowcase from "@/components/CodeShowcase";
 import PlatformSection from "@/components/PlatformSection";
+import WorkflowShowcase from "@/components/landing/WorkflowShowcase";
 import { StaggerText } from "@/components/Reveal";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -264,93 +265,70 @@ export default function LandingPage() {
 
       <CodeShowcase />
 
-      {/* Dark section */}
-      <section className="section-dark relative px-4 py-28 sm:px-6">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <LiveBackground variant="dark" showGrid={false} showNetwork={false} />
-        </div>
-        <div className="relative mx-auto max-w-6xl">
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.7, ease }}
-            className="max-w-2xl"
-          >
-            <p className="text-xs font-semibold tracking-[0.2em] text-neutral-500 uppercase">
-              Workflow
-            </p>
-            <h2 className="mt-4 font-serif text-4xl tracking-tight sm:text-5xl">
-              From idea to production
-              <br />
-              <span className="italic text-neutral-400">in three steps.</span>
-            </h2>
-          </motion.div>
-
-          <div className="relative mt-20 grid gap-12 md:grid-cols-3">
-            <div className="absolute top-8 hidden h-px w-full bg-white/10 md:block" />
-            {[
-              { n: "01", title: "Connect", desc: "Link models, APIs, and your data sources in minutes." },
-              { n: "02", title: "Build", desc: "Create assistants, knowledge bases, and automated flows." },
-              { n: "03", title: "Deploy", desc: "Launch to your team with one click. Scale instantly." },
-            ].map((step, i) => (
-              <motion.div
-                key={step.n}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.15, duration: 0.6, ease }}
-                whileHover={{ y: -4 }}
-                className="group relative cursor-default"
-              >
-                <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-full border border-white/20 bg-white/5 text-sm font-mono backdrop-blur-sm transition-all group-hover:border-white/40 group-hover:bg-white/10">
-                  {step.n}
-                </div>
-                <h3 className="text-xl font-semibold">{step.title}</h3>
-                <p className="mt-3 text-sm leading-relaxed text-neutral-400">
-                  {step.desc}
-                </p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <WorkflowShowcase />
 
       <Pricing />
 
       {/* Testimonials */}
       <section id="testimonials" className="px-4 py-28 sm:px-6">
         <div className="mx-auto max-w-6xl">
-          <motion.h2
-            initial={{ opacity: 0, y: 20 }}
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="text-center font-serif text-4xl tracking-tight sm:text-5xl"
+            transition={{ duration: 0.7, ease }}
+            className="text-center"
           >
-            Trusted by forward-thinking teams
-          </motion.h2>
+            <p className="text-xs font-semibold tracking-[0.2em] text-muted uppercase">Stories</p>
+            <h2 className="mt-4 font-serif text-4xl tracking-tight sm:text-5xl">
+              Trusted by forward-thinking teams
+            </h2>
+          </motion.div>
           <div className="mt-16 grid gap-6 md:grid-cols-3">
             {testimonials.map((t, i) => (
               <motion.blockquote
                 key={t.author}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.1, duration: 0.6, ease }}
-                className="card card-hover flex flex-col justify-between p-8"
+                initial={{ opacity: 0, y: 36, rotateX: 8 }}
+                whileInView={{ opacity: 1, y: 0, rotateX: 0 }}
+                viewport={{ once: true, margin: "-40px" }}
+                transition={{ delay: i * 0.12, duration: 0.65, ease }}
+                whileHover={{
+                  y: -6,
+                  boxShadow: "0 24px 60px rgba(0,0,0,0.08)",
+                  transition: { duration: 0.25 },
+                }}
+                className="card card-hover flex flex-col justify-between p-8 transition-shadow"
               >
-                <div className="mb-6 flex gap-1 text-neutral-300">
+                <div className="mb-6 flex gap-1">
                   {[...Array(5)].map((_, j) => (
-                    <span key={j}>★</span>
+                    <motion.span
+                      key={j}
+                      initial={{ opacity: 0, scale: 0 }}
+                      whileInView={{ opacity: 1, scale: 1 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: 0.3 + i * 0.1 + j * 0.05, type: "spring", stiffness: 400 }}
+                      className="text-amber-400"
+                    >
+                      ★
+                    </motion.span>
                   ))}
                 </div>
-                <p className="text-base leading-relaxed text-foreground">
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  whileInView={{ opacity: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 0.35 + i * 0.1, duration: 0.5 }}
+                  className="text-base leading-relaxed text-foreground"
+                >
                   &ldquo;{t.quote}&rdquo;
-                </p>
+                </motion.p>
                 <footer className="mt-8 flex items-center gap-4 border-t border-border pt-6">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black text-xs font-bold text-white">
+                  <motion.span
+                    whileHover={{ scale: 1.08, rotate: 3 }}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-black text-xs font-bold text-white"
+                  >
                     {t.avatar}
-                  </span>
+                  </motion.span>
                   <div>
                     <p className="font-semibold">{t.author}</p>
                     <p className="text-sm text-muted">{t.role}</p>
@@ -367,10 +345,10 @@ export default function LandingPage() {
       {/* CTA */}
       <section className="px-4 pb-28 sm:px-6">
         <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
-          whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.8, ease }}
+          initial={{ opacity: 0, scale: 0.95, y: 32 }}
+          whileInView={{ opacity: 1, scale: 1, y: 0 }}
+          viewport={{ once: true, margin: "-60px" }}
+          transition={{ duration: 0.85, ease }}
           className="relative mx-auto max-w-4xl overflow-hidden rounded-[2rem] bg-black px-8 py-20 text-center text-white sm:px-16"
         >
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.08),transparent_50%)]" />
@@ -384,27 +362,68 @@ export default function LandingPage() {
             transition={{ duration: 80, repeat: Infinity, ease: "linear" }}
             className="pointer-events-none absolute -bottom-32 -left-32 h-96 w-96 rounded-full border border-white/5"
           />
+          {[...Array(6)].map((_, i) => (
+            <motion.span
+              key={i}
+              className="pointer-events-none absolute h-1 w-1 rounded-full bg-white/30"
+              style={{
+                left: `${15 + i * 14}%`,
+                top: `${20 + (i % 3) * 25}%`,
+              }}
+              animate={{
+                opacity: [0.2, 0.8, 0.2],
+                scale: [1, 1.8, 1],
+                y: [0, -12, 0],
+              }}
+              transition={{
+                duration: 3 + i * 0.4,
+                repeat: Infinity,
+                delay: i * 0.5,
+                ease: "easeInOut",
+              }}
+            />
+          ))}
           <div className="relative">
-            <h2 className="font-serif text-4xl tracking-tight sm:text-5xl">
+            <motion.h2
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.15, duration: 0.6, ease }}
+              className="font-serif text-4xl tracking-tight sm:text-5xl"
+            >
               Start building today.
-            </h2>
-            <p className="mx-auto mt-4 max-w-md text-neutral-400">
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0 }}
+              whileInView={{ opacity: 1 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+              className="mx-auto mt-4 max-w-md text-neutral-400"
+            >
               Join teams using NovaFlow to ship AI products with confidence.
-            </p>
-            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link
-                href="/login?mode=register"
-                className="inline-flex items-center justify-center rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-black transition-all hover:scale-105 hover:shadow-2xl"
-              >
-                Create free account
-              </Link>
+            </motion.p>
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.45, duration: 0.5, ease }}
+              className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
+            >
+              <Magnetic strength={0.3}>
+                <Link
+                  href="/login?mode=register"
+                  className="inline-flex items-center justify-center rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-black transition-all hover:scale-105 hover:shadow-2xl"
+                >
+                  Create free account
+                </Link>
+              </Magnetic>
               <Link
                 href="/login"
-                className="inline-flex items-center justify-center rounded-full border border-white/20 px-8 py-3.5 text-sm font-semibold text-white transition-all hover:bg-white/10"
+                className="inline-flex items-center justify-center rounded-full border border-white/20 px-8 py-3.5 text-sm font-semibold text-white transition-all hover:border-white/40 hover:bg-white/10"
               >
                 Sign in
               </Link>
-            </div>
+            </motion.div>
           </div>
         </motion.div>
       </section>

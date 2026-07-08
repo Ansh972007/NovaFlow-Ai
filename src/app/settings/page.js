@@ -1,8 +1,9 @@
+import { Suspense } from "react";
 import dynamic from "next/dynamic";
 import WorkspacePageLoading from "@/components/WorkspacePageLoading";
 
 const SettingsClient = dynamic(() => import("./SettingsClient"), {
-  loading: () => <WorkspacePageLoading />,
+  loading: () => <WorkspacePageLoading message="Loading settings…" />,
 });
 
 export const metadata = {
@@ -11,5 +12,9 @@ export const metadata = {
 };
 
 export default function SettingsPage() {
-  return <SettingsClient />;
+  return (
+    <Suspense fallback={<WorkspacePageLoading message="Loading settings…" />}>
+      <SettingsClient />
+    </Suspense>
+  );
 }

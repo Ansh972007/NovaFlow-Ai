@@ -44,10 +44,230 @@ def integration_health(db: Session = Depends(get_db), ctx=Depends(get_workspace_
         {
             "telegram_ready": data["telegram"]["configured"],
             "email_ready": data["email"]["configured"],
+            "jira_ready": data.get("jira", {}).get("configured", False),
+            "slack_ready": data.get("slack", {}).get("configured", False),
+            "github_ready": data.get("github", {}).get("configured", False),
+            "discord_ready": data.get("discord", {}).get("configured", False),
+            "linear_ready": data.get("linear", {}).get("configured", False),
+            "slack_bot_ready": data.get("slack", {}).get("bot_configured", False),
             "telegram_source": data["telegram"]["source"],
             "email_source": data["email"]["source"],
+            "jira_source": data.get("jira", {}).get("source", "none"),
+            "slack_source": data.get("slack", {}).get("source", "none"),
+            "github_source": data.get("github", {}).get("source", "none"),
+            "discord_source": data.get("discord", {}).get("source", "none"),
+            "linear_source": data.get("linear", {}).get("source", "none"),
+            "gmail_oauth_connected": data["email"].get("oauth_connected", False),
         }
     )
+
+
+@router.get("/integrations/gmail/oauth/start")
+def gmail_oauth_start(db: Session = Depends(get_db), ctx=Depends(require_workspace_admin)):
+    from app.services.gmail_jira import build_gmail_authorize_url, gmail_oauth_enabled
+    from fastapi.responses import RedirectResponse
+
+    if not gmail_oauth_enabled():
+        return fail(400, "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable Gmail OAuth")
+    url = build_gmail_authorize_url(ctx.workspace_id, ctx.user.user_id)
+    if not url:
+        return fail(400, "Could not build Google authorize URL")
+    return RedirectResponse(url)
+
+
+@router.get("/integrations/gmail/oauth/callback")
+async def gmail_oauth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+):
+    from fastapi.responses import RedirectResponse
+    from app.services.gmail_jira import (
+        exchange_gmail_code,
+        fetch_gmail_profile,
+        frontend_settings_redirect,
+        store_gmail_oauth_tokens,
+        verify_gmail_oauth_state,
+    )
+
+    if error:
+        return RedirectResponse(frontend_settings_redirect(f"tab=integrations&gmail=error&msg={error}"))
+    payload = verify_gmail_oauth_state(state or "")
+    if not payload or not code:
+        return RedirectResponse(frontend_settings_redirect("tab=integrations&gmail=error&msg=invalid_state"))
+    try:
+        token_data = await exchange_gmail_code(code)
+        access = token_data.get("access_token") or ""
+        profile = await fetch_gmail_profile(access) if access else {}
+        email = profile.get("email") or ""
+        store_gmail_oauth_tokens(db, int(payload["workspace_id"]), token_data, email)
+        return RedirectResponse(frontend_settings_redirect("tab=integrations&gmail=connected"))
+    except Exception as exc:
+        return RedirectResponse(
+            frontend_settings_redirect(f"tab=integrations&gmail=error&msg={str(exc)[:120]}")
+        )
+
+
+@router.post("/integrations/gmail/oauth/disconnect")
+def gmail_oauth_disconnect(db: Session = Depends(get_db), ctx=Depends(require_workspace_admin)):
+    from app.services.gmail_jira import disconnect_gmail_oauth
+
+    disconnect_gmail_oauth(db, ctx.workspace_id)
+    return ok(integrations_dict(db, ctx.workspace_id))
+
+
+@router.post("/integrations/jira/verify")
+async def verify_jira(db: Session = Depends(get_db), ctx=Depends(require_workspace_admin)):
+    from app.services.gmail_jira import jira_verify
+
+    result = await jira_verify(db, ctx.workspace_id)
+    if not result.get("ok"):
+        return fail(400, result.get("detail") or "Jira verification failed")
+    return ok(result)
+
+
+@router.post("/integrations/slack/test")
+async def test_slack_integration(
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_admin),
+):
+    body = body or {}
+    result = await send_notification(
+        "slack",
+        (body.get("webhook_url") or "").strip(),
+        (body.get("subject") or "NovaFlow Slack test").strip(),
+        (body.get("message") or "Slack integration test OK ✅").strip(),
+        db=db,
+        workspace_id=ctx.workspace_id,
+    )
+    if not result.get("ok"):
+        return fail(400, result.get("detail") or "Slack test failed")
+    return ok(result)
+
+
+@router.post("/integrations/github/verify")
+async def verify_github(db: Session = Depends(get_db), ctx=Depends(require_workspace_admin)):
+    from app.services.github_issues import github_verify
+
+    result = await github_verify(db, ctx.workspace_id)
+    if not result.get("ok"):
+        return fail(400, result.get("detail") or "GitHub verification failed")
+    return ok(result)
+
+
+@router.post("/integrations/discord/test")
+async def test_discord_integration(
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_admin),
+):
+    body = body or {}
+    result = await send_notification(
+        "discord",
+        (body.get("webhook_url") or "").strip(),
+        (body.get("subject") or "NovaFlow Discord test").strip(),
+        (body.get("message") or "Discord integration test OK ✅").strip(),
+        db=db,
+        workspace_id=ctx.workspace_id,
+    )
+    if not result.get("ok"):
+        return fail(400, result.get("detail") or "Discord test failed")
+    return ok(result)
+
+
+@router.post("/integrations/linear/verify")
+async def verify_linear(db: Session = Depends(get_db), ctx=Depends(require_workspace_admin)):
+    from app.services.linear_issues import linear_verify
+
+    result = await linear_verify(db, ctx.workspace_id)
+    if not result.get("ok"):
+        return fail(400, result.get("detail") or "Linear verification failed")
+    return ok(result)
+
+
+@router.post("/integrations/slack/events/bind")
+def bind_slack_events(
+    body: dict,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_admin),
+):
+    from app.services.workspace_integrations import record_slack_events
+
+    workflow_id = (body.get("workflow_id") or "").strip()
+    if not workflow_id:
+        return fail(400, "workflow_id required")
+    wf = db.get(Workflow, workflow_id)
+    if not wf or wf.workspace_id != ctx.workspace_id:
+        return fail(404, "Workflow not found")
+    if wf.status != 1:
+        return fail(400, "Publish the workflow before binding Slack events")
+    settings = integrations_dict(db, ctx.workspace_id)
+    if not settings.get("slack", {}).get("bot_configured"):
+        return fail(400, "Add Slack bot token + signing secret in Settings first")
+    public_base = resolve_public_base_url(db, ctx.workspace_id, (body.get("public_base_url") or "").strip())
+    events_url = f"{public_base}/api/v1/integrations/slack/events/{workflow_id}"
+    record_slack_events(db, ctx.workspace_id, workflow_id, events_url)
+    return ok(
+        {
+            "ok": True,
+            "events_url": events_url,
+            "detail": "Point Slack Event Subscriptions Request URL to this URL (app_mention, message.im).",
+        }
+    )
+
+
+@router.post("/integrations/slack/events/{workflow_id}")
+async def slack_events_webhook(workflow_id: str, request: Request, db: Session = Depends(get_db)):
+    import json as _json
+
+    from fastapi.responses import PlainTextResponse
+
+    from app.crypto import decrypt_secret
+    from app.database import WorkspaceIntegration
+    from app.services.integrations import parse_slack_event, send_slack_bot_message, verify_slack_signature
+
+    wf = db.get(Workflow, workflow_id)
+    if not wf or wf.status != 1:
+        return fail(404, "Workflow not found or not published")
+
+    body_bytes = await request.body()
+    try:
+        payload = _json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        return fail(400, "Invalid JSON")
+
+    # URL verification challenge
+    if payload.get("type") == "url_verification":
+        return PlainTextResponse(payload.get("challenge") or "")
+
+    row = db.get(WorkspaceIntegration, wf.workspace_id)
+    signing = decrypt_secret(row.slack_signing_secret_enc or "") if row and row.slack_signing_secret_enc else ""
+    timestamp = request.headers.get("X-Slack-Request-Timestamp") or ""
+    signature = request.headers.get("X-Slack-Signature") or ""
+    if signing and not verify_slack_signature(signing, timestamp, body_bytes, signature):
+        return fail(401, "Invalid Slack signature")
+
+    if payload.get("type") != "event_callback":
+        return ok({"ignored": True})
+
+    channel, user_id, text = parse_slack_event(payload)
+    if not text:
+        return ok({"ignored": True})
+
+    result = await run_workflow(
+        db,
+        wf,
+        wf.user_id,
+        text,
+        wf.workspace_id,
+        extra_context={"slack_channel": channel, "slack_user": user_id, "chat_id": channel},
+    )
+    output = (result.get("output") or "")[:3500]
+    if channel and output:
+        await send_slack_bot_message(db, wf.workspace_id, channel, output)
+    return ok({"channel": channel, "result": result})
 
 
 @router.get("/integrations/telegram/webhook-status")

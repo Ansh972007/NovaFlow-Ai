@@ -62,13 +62,24 @@ export async function ingestKnowledgeUrl(knowledgeId, url) {
 
 /** Search indexed chunks (Q&A preview) */
 export async function searchKnowledgeChunks(knowledgeId, keyword, { page = 1, limit = 6 } = {}) {
-  if (!keyword?.trim()) return { data: [], total: 0 };
-  return client.get("/knowledge/chunk", {
-    params: {
-      knowledge_id: knowledgeId,
-      keyword: keyword.trim(),
-      page,
-      limit,
-    },
-  });
+  if (!keyword?.trim()) return { data: [], total: 0, method: "none" };
+  // Prefer semantic search (vector + keyword fallback)
+  try {
+    return await client.get("/knowledge/search", {
+      params: {
+        knowledge_id: knowledgeId,
+        q: keyword.trim(),
+        limit,
+      },
+    });
+  } catch {
+    return client.get("/knowledge/chunk", {
+      params: {
+        knowledge_id: knowledgeId,
+        keyword: keyword.trim(),
+        page,
+        limit,
+      },
+    });
+  }
 }

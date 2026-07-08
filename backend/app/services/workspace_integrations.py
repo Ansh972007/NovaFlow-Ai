@@ -75,11 +75,71 @@ def resolve_smtp_config(db: Session, workspace_id: int | None) -> dict[str, Any]
     }
 
 
+def email_ready(db: Session, workspace_id: int) -> bool:
+    row = db.get(WorkspaceIntegration, workspace_id)
+    if row and (row.gmail_auth_mode or "smtp") == "oauth" and row.gmail_oauth_refresh_token_enc:
+        return True
+    smtp = resolve_smtp_config(db, workspace_id)
+    return bool(smtp.get("host") and (smtp.get("user") or smtp.get("from_addr")))
+
+
+def resolve_slack_webhook(db: Session, workspace_id: int | None, override: str = "") -> str:
+    if override:
+        return override.strip()
+    if not workspace_id:
+        return ""
+    row = db.get(WorkspaceIntegration, workspace_id)
+    if row and row.slack_webhook_url_enc:
+        return decrypt_secret(row.slack_webhook_url_enc) or ""
+    return ""
+
+
+def resolve_discord_webhook(db: Session, workspace_id: int | None, override: str = "") -> str:
+    if override:
+        return override.strip()
+    if not workspace_id:
+        return ""
+    row = db.get(WorkspaceIntegration, workspace_id)
+    if row and getattr(row, "discord_webhook_url_enc", None):
+        return decrypt_secret(row.discord_webhook_url_enc) or ""
+    return ""
+
+
+def slack_ready(db: Session, workspace_id: int) -> bool:
+    return bool(resolve_slack_webhook(db, workspace_id))
+
+
+def discord_ready(db: Session, workspace_id: int) -> bool:
+    return bool(resolve_discord_webhook(db, workspace_id))
+
+
 def integrations_dict(db: Session, workspace_id: int) -> dict:
+    from app.services.gmail_jira import gmail_oauth_enabled, resolve_jira_config
+    from app.services.github_issues import resolve_github_config
+    from app.services.linear_issues import resolve_linear_config
+
     row = get_or_create(db, workspace_id)
     token = decrypt_secret(row.telegram_bot_token_enc or "")
     password = decrypt_secret(row.smtp_password_enc or "")
     smtp = resolve_smtp_config(db, workspace_id)
+    oauth_connected = bool(row.gmail_oauth_refresh_token_enc)
+    auth_mode = (row.gmail_auth_mode or "smtp").strip().lower()
+    if oauth_connected and auth_mode != "oauth":
+        auth_mode = "oauth"
+    jira_token = decrypt_secret(row.jira_api_token_enc or "") if row.jira_api_token_enc else ""
+    jira = resolve_jira_config(db, workspace_id)
+    slack_url = decrypt_secret(row.slack_webhook_url_enc or "") if row.slack_webhook_url_enc else ""
+    discord_url = (
+        decrypt_secret(row.discord_webhook_url_enc or "") if getattr(row, "discord_webhook_url_enc", None) else ""
+    )
+    github = resolve_github_config(db, workspace_id)
+    gh_token = github.get("token") or ""
+    linear = resolve_linear_config(db, workspace_id)
+    linear_key = linear.get("api_key") or ""
+    slack_bot = decrypt_secret(row.slack_bot_token_enc or "") if getattr(row, "slack_bot_token_enc", None) else ""
+    slack_signing = (
+        decrypt_secret(row.slack_signing_secret_enc or "") if getattr(row, "slack_signing_secret_enc", None) else ""
+    )
 
     return {
         "workspace_id": workspace_id,
@@ -97,14 +157,62 @@ def integrations_dict(db: Session, workspace_id: int) -> dict:
             else None,
         },
         "email": {
-            "configured": bool(smtp.get("host") and (smtp.get("user") or smtp.get("from_addr"))),
+            "configured": email_ready(db, workspace_id),
             "gmail_preset": bool(row.gmail_preset),
+            "auth_mode": auth_mode,
             "smtp_host": row.smtp_host or smtp.get("host") or "",
             "smtp_port": row.smtp_port or smtp.get("port") or 587,
             "smtp_user": row.smtp_user or smtp.get("user") or "",
             "smtp_from": row.smtp_from or smtp.get("from_addr") or "",
             "smtp_password_masked": _mask_secret(password) if password else ("" if not SMTP_PASSWORD else "env"),
-            "source": "workspace" if row.smtp_host or row.smtp_user else ("env" if SMTP_HOST else "none"),
+            "source": "oauth"
+            if oauth_connected and auth_mode == "oauth"
+            else ("workspace" if row.smtp_host or row.smtp_user else ("env" if SMTP_HOST else "none")),
+            "oauth_enabled": gmail_oauth_enabled(),
+            "oauth_connected": oauth_connected,
+            "oauth_email": row.gmail_oauth_email or "",
+            "oauth_connected_at": row.gmail_oauth_connected_at.isoformat() if row.gmail_oauth_connected_at else None,
+        },
+        "jira": {
+            "configured": jira["configured"],
+            "base_url": row.jira_base_url or "",
+            "email": row.jira_email or "",
+            "api_token_masked": _mask_secret(jira_token) if jira_token else "",
+            "source": "workspace" if jira_token else "none",
+        },
+        "slack": {
+            "configured": bool(slack_url),
+            "webhook_url_masked": _mask_secret(slack_url) if slack_url else "",
+            "default_channel": row.slack_default_channel or "",
+            "source": "workspace" if slack_url else "none",
+            "bot_token_masked": _mask_secret(slack_bot) if slack_bot else "",
+            "signing_secret_masked": _mask_secret(slack_signing) if slack_signing else "",
+            "bot_configured": bool(slack_bot and slack_signing),
+            "events_workflow_id": getattr(row, "slack_events_workflow_id", None) or "",
+            "events_url": getattr(row, "slack_events_url", None) or "",
+            "events_registered_at": row.slack_events_registered_at.isoformat()
+            if getattr(row, "slack_events_registered_at", None)
+            else None,
+        },
+        "discord": {
+            "configured": bool(discord_url),
+            "webhook_url_masked": _mask_secret(discord_url) if discord_url else "",
+            "default_channel": getattr(row, "discord_default_channel", None) or "",
+            "source": "workspace" if discord_url else "none",
+        },
+        "github": {
+            "configured": github["configured"],
+            "token_masked": _mask_secret(gh_token) if gh_token else "",
+            "owner": row.github_owner or "",
+            "repo": row.github_repo or "",
+            "default_repo": github.get("default_repo") or "",
+            "source": "workspace" if gh_token else "none",
+        },
+        "linear": {
+            "configured": linear["configured"],
+            "api_key_masked": _mask_secret(linear_key) if linear_key else "",
+            "team_id": getattr(row, "linear_team_id", None) or "",
+            "source": "workspace" if linear_key else "none",
         },
     }
 
@@ -130,6 +238,9 @@ def update_integrations(db: Session, workspace_id: int, body: dict) -> dict:
 
     email = body.get("email") if isinstance(body.get("email"), dict) else {}
     if email:
+        if "auth_mode" in email:
+            mode = str(email.get("auth_mode") or "smtp").strip().lower()
+            row.gmail_auth_mode = "oauth" if mode == "oauth" else "smtp"
         if "gmail_preset" in email:
             row.gmail_preset = 1 if email.get("gmail_preset") else 0
             if row.gmail_preset:
@@ -150,6 +261,77 @@ def update_integrations(db: Session, workspace_id: int, body: dict) -> dict:
             elif email.get("clear_password"):
                 row.smtp_password_enc = ""
 
+    jira = body.get("jira") if isinstance(body.get("jira"), dict) else {}
+    if jira:
+        if "base_url" in jira:
+            row.jira_base_url = str(jira.get("base_url") or "").strip().rstrip("/")[:500]
+        if "email" in jira:
+            row.jira_email = str(jira.get("email") or "").strip()[:255]
+        if "api_token" in jira:
+            tok = str(jira.get("api_token") or "").strip()
+            if tok:
+                row.jira_api_token_enc = encrypt_secret(tok)
+        if jira.get("clear_token"):
+            row.jira_api_token_enc = ""
+
+    slack = body.get("slack") if isinstance(body.get("slack"), dict) else {}
+    if slack:
+        if "default_channel" in slack:
+            row.slack_default_channel = str(slack.get("default_channel") or "").strip()[:120]
+        if "webhook_url" in slack:
+            url = str(slack.get("webhook_url") or "").strip()
+            if url:
+                row.slack_webhook_url_enc = encrypt_secret(url)
+        if slack.get("clear_webhook"):
+            row.slack_webhook_url_enc = ""
+        if "bot_token" in slack:
+            tok = str(slack.get("bot_token") or "").strip()
+            if tok:
+                row.slack_bot_token_enc = encrypt_secret(tok)
+        if slack.get("clear_bot_token"):
+            row.slack_bot_token_enc = ""
+        if "signing_secret" in slack:
+            sec = str(slack.get("signing_secret") or "").strip()
+            if sec:
+                row.slack_signing_secret_enc = encrypt_secret(sec)
+        if slack.get("clear_signing_secret"):
+            row.slack_signing_secret_enc = ""
+
+    discord = body.get("discord") if isinstance(body.get("discord"), dict) else {}
+    if discord:
+        if "default_channel" in discord:
+            row.discord_default_channel = str(discord.get("default_channel") or "").strip()[:120]
+        if "webhook_url" in discord:
+            url = str(discord.get("webhook_url") or "").strip()
+            if url:
+                row.discord_webhook_url_enc = encrypt_secret(url)
+        if discord.get("clear_webhook"):
+            row.discord_webhook_url_enc = ""
+
+    github = body.get("github") if isinstance(body.get("github"), dict) else {}
+    if github:
+        if "owner" in github:
+            row.github_owner = str(github.get("owner") or "").strip()[:120]
+        if "repo" in github:
+            row.github_repo = str(github.get("repo") or "").strip()[:120]
+        if "token" in github:
+            tok = str(github.get("token") or "").strip()
+            if tok:
+                row.github_token_enc = encrypt_secret(tok)
+        if github.get("clear_token"):
+            row.github_token_enc = ""
+
+    linear = body.get("linear") if isinstance(body.get("linear"), dict) else {}
+    if linear:
+        if "team_id" in linear:
+            row.linear_team_id = str(linear.get("team_id") or "").strip()[:64]
+        if "api_key" in linear:
+            tok = str(linear.get("api_key") or "").strip()
+            if tok:
+                row.linear_api_key_enc = encrypt_secret(tok)
+        if linear.get("clear_api_key"):
+            row.linear_api_key_enc = ""
+
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
@@ -166,6 +348,20 @@ def record_telegram_webhook(
     row.telegram_webhook_workflow_id = workflow_id[:32]
     row.telegram_webhook_url = webhook_url[:500]
     row.telegram_webhook_registered_at = datetime.utcnow()
+    row.updated_at = datetime.utcnow()
+    db.commit()
+
+
+def record_slack_events(
+    db: Session,
+    workspace_id: int,
+    workflow_id: str,
+    events_url: str,
+) -> None:
+    row = get_or_create(db, workspace_id)
+    row.slack_events_workflow_id = workflow_id[:32]
+    row.slack_events_url = events_url[:500]
+    row.slack_events_registered_at = datetime.utcnow()
     row.updated_at = datetime.utcnow()
     db.commit()
 

@@ -1,6 +1,7 @@
 import { getApiBaseUrl, getServerApiBaseUrl } from "@/lib/api/config";
 
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 20_000;
+const RETRIES = 3;
 
 async function probe(url) {
   const res = await fetch(url, {
@@ -10,6 +11,20 @@ async function probe(url) {
   if (!res.ok) return false;
   const data = await res.json().catch(() => ({}));
   return data.status_code === 200 || data.ok === true;
+}
+
+async function probeWithRetry(url) {
+  for (let i = 0; i < RETRIES; i += 1) {
+    try {
+      if (await probe(url)) return true;
+    } catch {
+      /* retry */
+    }
+    if (i < RETRIES - 1) {
+      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  return false;
 }
 
 /** Server-side check — NovaFlow API on port 3001 */
@@ -23,12 +38,8 @@ export async function GET() {
   ];
 
   for (const url of urls) {
-    try {
-      if (await probe(url)) {
-        return Response.json({ ok: true, apiUrl: publicUrl, probe: url });
-      }
-    } catch {
-      /* try next */
+    if (await probeWithRetry(url)) {
+      return Response.json({ ok: true, apiUrl: publicUrl, probe: url });
     }
   }
 

@@ -503,6 +503,7 @@ def create_alert(body: dict, db: Session = Depends(get_db), ctx=Depends(require_
         pagerduty_routing_key=(body.get("pagerduty_routing_key") or "").strip()[:64],
         opsgenie_api_key=(body.get("opsgenie_api_key") or "").strip()[:128],
         email_to=(body.get("email_to") or "").strip()[:255],
+        use_workspace_slack=1 if body.get("use_workspace_slack") else 0,
         cooldown_hours=max(1, int(body.get("cooldown_hours") or 6)),
         enabled=1 if body.get("enabled", True) else 0,
     )
@@ -534,6 +535,8 @@ def update_alert(
         row.opsgenie_api_key = str(body["opsgenie_api_key"]).strip()[:128]
     if "email_to" in body:
         row.email_to = str(body["email_to"] or "").strip()[:255]
+    if "use_workspace_slack" in body:
+        row.use_workspace_slack = 1 if body["use_workspace_slack"] else 0
     if "cooldown_hours" in body:
         row.cooldown_hours = max(1, int(body["cooldown_hours"]))
     if "enabled" in body:

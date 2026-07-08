@@ -28,6 +28,19 @@ const faqs = [
   },
 ];
 
+const container = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08, delayChildren: 0.15 },
+  },
+};
+
+const item = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease } },
+};
+
 export default function FAQ() {
   const [open, setOpen] = useState(0);
 
@@ -35,30 +48,35 @@ export default function FAQ() {
     <section id="faq" className="border-t border-border bg-surface px-4 py-28 sm:px-6">
       <div className="mx-auto max-w-3xl">
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 28 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.7, ease }}
           className="text-center"
         >
-          <p className="text-xs font-semibold tracking-[0.2em] text-muted uppercase">
-            FAQ
-          </p>
+          <p className="text-xs font-semibold tracking-[0.2em] text-muted uppercase">FAQ</p>
           <h2 className="mt-4 font-serif text-4xl tracking-tight sm:text-5xl">
             Questions, answered.
           </h2>
         </motion.div>
 
-        <div className="mt-14 space-y-3">
-          {faqs.map((item, i) => (
-            <FAQItem
-              key={item.q}
-              item={item}
-              isOpen={open === i}
-              onToggle={() => setOpen(open === i ? -1 : i)}
-            />
+        <motion.div
+          variants={container}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-40px" }}
+          className="mt-14 space-y-3"
+        >
+          {faqs.map((faqItem, i) => (
+            <motion.div key={faqItem.q} variants={item}>
+              <FAQItem
+                item={faqItem}
+                isOpen={open === i}
+                onToggle={() => setOpen(open === i ? -1 : i)}
+              />
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
       </div>
     </section>
   );
@@ -70,18 +88,26 @@ function FAQItem({ item, isOpen, onToggle }) {
   return (
     <motion.div
       layout
-      className="overflow-hidden rounded-2xl border border-border bg-white transition-colors hover:border-neutral-300"
+      whileHover={{ borderColor: "rgba(0,0,0,0.15)" }}
+      className={`overflow-hidden rounded-2xl border bg-white transition-colors ${
+        isOpen ? "border-neutral-300 shadow-sm" : "border-border"
+      }`}
     >
       <button
         type="button"
         onClick={onToggle}
         className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
       >
-        <span className="font-medium">{item.q}</span>
         <motion.span
-          animate={{ rotate: isOpen ? 45 : 0 }}
+          animate={{ color: isOpen ? "#0a0a0a" : "#525252" }}
+          className="font-medium"
+        >
+          {item.q}
+        </motion.span>
+        <motion.span
+          animate={{ rotate: isOpen ? 45 : 0, backgroundColor: isOpen ? "rgba(0,0,0,0.06)" : "transparent" }}
           transition={{ duration: 0.3, ease }}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-sm"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-sm"
         >
           +
         </motion.span>
@@ -93,11 +119,17 @@ function FAQItem({ item, isOpen, onToggle }) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.35, ease }}
+            transition={{ duration: 0.4, ease }}
           >
-            <p className="border-t border-border px-6 pb-5 pt-2 text-sm leading-relaxed text-muted">
+            <motion.p
+              initial={{ y: -8 }}
+              animate={{ y: 0 }}
+              exit={{ y: -4 }}
+              transition={{ duration: 0.3, ease }}
+              className="border-t border-border px-6 pb-5 pt-3 text-sm leading-relaxed text-muted"
+            >
               {item.a}
-            </p>
+            </motion.p>
           </motion.div>
         )}
       </AnimatePresence>

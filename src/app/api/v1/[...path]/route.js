@@ -36,7 +36,7 @@ async function proxyRequest(request, context) {
       method,
       headers,
       body,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(60_000),
     });
   } catch {
     return Response.json(

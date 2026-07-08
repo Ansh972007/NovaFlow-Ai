@@ -19,6 +19,7 @@ import {
   trainAndEval,
   listPipelines,
   refreshPipelineJob,
+  deployPipelineAssistant,
 } from "@/lib/api/modelLab";
 
 const ease = [0.16, 1, 0.3, 1];
@@ -39,7 +40,7 @@ export default function ModelLabClient() {
   const [evalSuiteId, setEvalSuiteId] = useState("");
   const [baseModel, setBaseModel] = useState("gpt-4o-mini-2024-07-18");
   const [systemPrompt, setSystemPrompt] = useState(
-    "You are a helpful assistant trained on internal documents."
+    "You are a precise specialist trained on internal documents. Answer clearly: lead with the point, then short supporting detail. Cite the document name when relevant."
   );
   const [jobWebhook, setJobWebhook] = useState("");
 
@@ -141,6 +142,30 @@ export default function ModelLabClient() {
     }
   }
 
+  function toggleKb(id) {
+    setSelectedKb((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function handleDeploy(job) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await deployPipelineAssistant(job.id, {
+        name: `FT · ${job.fine_tuned_model || `Job ${job.id}`}`,
+        activate: true,
+      });
+      const path = res?.chat_path || (res?.assistant?.id ? `/chat?app=${res.assistant.id}` : "/chat");
+      router.push(path);
+    } catch (err) {
+      setError(err.message || "Deploy failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canDeploy = (job) =>
+    ["succeeded", "completed"].includes(job.status) && Boolean(job.fine_tuned_model);
+
   return (
     <div className="relative min-h-screen overflow-hidden">
       <WorkspaceLiveBackground />
@@ -150,7 +175,7 @@ export default function ModelLabClient() {
           <WorkspaceHero
             eyebrow="Model Lab"
             title="Train & auto-test from knowledge"
-            description="Turn knowledge bases into fine-tune datasets, launch OpenAI training jobs, and optionally run eval suites when training completes."
+            description="Turn knowledge bases into fine-tune datasets, launch OpenAI training jobs, and optionally run eval suites when training completes. Add an OpenAI API key under Settings → Model providers first (embeddings + training use the vault key)."
           />
 
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -309,12 +334,13 @@ export default function ModelLabClient() {
                   <ul className="mt-4 divide-y divide-black/[0.06]">
                     {pipelines.map((job) => (
                       <li key={job.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold">
                             Job #{job.id} · {job.status}
                           </p>
                           <p className="text-xs text-neutral-500">
                             {job.base_model}
+                            {job.fine_tuned_model ? ` → ${job.fine_tuned_model}` : ""}
                             {job.auto_eval_run_id
                               ? ` · auto-eval run #${job.auto_eval_run_id}`
                               : job.auto_eval_suite_id
@@ -327,14 +353,26 @@ export default function ModelLabClient() {
                             </p>
                           )}
                         </div>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => handleRefresh(job.id)}
-                          className="btn-secondary text-xs"
-                        >
-                          Refresh
-                        </button>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handleRefresh(job.id)}
+                            className="btn-secondary text-xs"
+                          >
+                            Refresh
+                          </button>
+                          {canDeploy(job) && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleDeploy(job)}
+                              className="btn-primary text-xs"
+                            >
+                              Deploy to Chat
+                            </button>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>

@@ -47,3 +47,7 @@ export async function deleteLlmProvider(id) {
 export async function activateLlmProvider(id) {
   return client.post(`/llm/providers/${id}/activate`);
 }
+
+export async function verifyLlmProvider(id) {
+  return client.post(`/llm/providers/${id}/verify`);
+}

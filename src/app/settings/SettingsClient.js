@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
@@ -25,6 +25,7 @@ import {
   createLlmProvider,
   deleteLlmProvider,
   activateLlmProvider,
+  verifyLlmProvider,
 } from "@/lib/api/llm";
 import { getApiBaseUrl } from "@/lib/api/config";
 import { getTeamMembers, updateMemberRole, downloadAuditExport, getAuditEvents } from "@/lib/api/analytics";
@@ -38,6 +39,13 @@ import {
   verifyTelegramBot,
   testEmailIntegration,
   testNotify,
+  startGmailOAuth,
+  disconnectGmailOAuth,
+  verifyJira,
+  testSlackIntegration,
+  verifyGithub,
+  testDiscordIntegration,
+  verifyLinear,
 } from "@/lib/api/integrations";
 import { createAbRoute, deleteAbRoute, listAbRoutes, updateAbRoute } from "@/lib/api/finetune";
 import { resetSetup } from "@/lib/setup/storage";
@@ -175,11 +183,26 @@ export default function SettingsClient() {
   const [smtpFrom, setSmtpFrom] = useState("");
   const [smtpPassword, setSmtpPassword] = useState("");
   const [gmailPreset, setGmailPreset] = useState(true);
+  const [jiraBaseUrl, setJiraBaseUrl] = useState("");
+  const [jiraEmail, setJiraEmail] = useState("");
+  const [jiraApiToken, setJiraApiToken] = useState("");
+  const [slackWebhook, setSlackWebhook] = useState("");
+  const [slackChannel, setSlackChannel] = useState("");
+  const [githubToken, setGithubToken] = useState("");
+  const [githubOwner, setGithubOwner] = useState("");
+  const [githubRepo, setGithubRepo] = useState("");
+  const [discordWebhook, setDiscordWebhook] = useState("");
+  const [discordChannel, setDiscordChannel] = useState("");
+  const [linearApiKey, setLinearApiKey] = useState("");
+  const [linearTeamId, setLinearTeamId] = useState("");
+  const [slackBotToken, setSlackBotToken] = useState("");
+  const [slackSigningSecret, setSlackSigningSecret] = useState("");
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [integrationMsg, setIntegrationMsg] = useState("");
   const [publicBaseUrl, setPublicBaseUrl] = useState("");
 
   const isAdmin = user?.role === "admin";
+  const searchParams = useSearchParams();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -249,6 +272,23 @@ export default function SettingsClient() {
           setSmtpUser(s.email.smtp_user || "");
           setSmtpFrom(s.email.smtp_from || "");
         }
+        if (s?.jira) {
+          setJiraBaseUrl(s.jira.base_url || "");
+          setJiraEmail(s.jira.email || "");
+        }
+        if (s?.slack) {
+          setSlackChannel(s.slack.default_channel || "");
+        }
+        if (s?.github) {
+          setGithubOwner(s.github.owner || "");
+          setGithubRepo(s.github.repo || "");
+        }
+        if (s?.discord) {
+          setDiscordChannel(s.discord.default_channel || "");
+        }
+        if (s?.linear) {
+          setLinearTeamId(s.linear.team_id || "");
+        }
         setPublicBaseUrl(s?.public_base_url || "");
       })
       .catch(() => setIntegrationSettings(null));
@@ -256,6 +296,19 @@ export default function SettingsClient() {
       .then(setIntegrationHealth)
       .catch(() => setIntegrationHealth(null));
   }, [isAdmin]);
+
+  useEffect(() => {
+    const tab = searchParams?.get("tab");
+    if (tab && ["overview", "security", "models", "integrations", "team"].includes(tab)) {
+      setActiveTab(tab);
+    }
+    const gmail = searchParams?.get("gmail");
+    if (!gmail) return;
+    if (gmail === "connected") setIntegrationMsg("Gmail connected with Google OAuth.");
+    if (gmail === "error") {
+      setIntegrationMsg(`Gmail OAuth failed: ${searchParams.get("msg") || "unknown error"}`);
+    }
+  }, [searchParams]);
 
   async function handleRoleChange(memberId, role) {
     setTeamBusy(memberId);
@@ -394,6 +447,24 @@ export default function SettingsClient() {
         setSmtpUser(s.email.smtp_user || "");
         setSmtpFrom(s.email.smtp_from || "");
       }
+      if (s.jira) {
+        setJiraBaseUrl(s.jira.base_url || "");
+        setJiraEmail(s.jira.email || "");
+      }
+      if (s.slack) {
+        setSlackChannel(s.slack.default_channel || "");
+      }
+      if (s.github) {
+        setGithubOwner(s.github.owner || "");
+        setGithubRepo(s.github.repo || "");
+      }
+      if (s.discord) {
+        setDiscordChannel(s.discord.default_channel || "");
+      }
+      if (s.linear) {
+        setLinearTeamId(s.linear.team_id || "");
+      }
+      setPublicBaseUrl(s.public_base_url || "");
     }
     setIntegrationHealth(h);
   }
@@ -508,6 +579,284 @@ export default function SettingsClient() {
     }
   }
 
+  async function handleConnectGmailOAuth() {
+    setIntegrationMsg("");
+    startGmailOAuth();
+  }
+
+  async function handleDisconnectGmailOAuth() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      await disconnectGmailOAuth();
+      await reloadIntegrations();
+      setIntegrationMsg("Gmail OAuth disconnected — SMTP mode restored.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Disconnect failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleSaveJira(e) {
+    e.preventDefault();
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const payload = {
+        jira: {
+          base_url: jiraBaseUrl.trim(),
+          email: jiraEmail.trim(),
+        },
+      };
+      if (jiraApiToken.trim()) payload.jira.api_token = jiraApiToken.trim();
+      await updateIntegrationSettings(payload);
+      setJiraApiToken("");
+      await reloadIntegrations();
+      setIntegrationMsg("Jira settings saved.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Failed to save Jira settings");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleVerifyJira() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const res = await verifyJira();
+      setIntegrationMsg(res?.detail || "Jira verified.");
+      await reloadIntegrations();
+    } catch (err) {
+      setIntegrationMsg(err.message || "Jira verification failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleClearJiraToken() {
+    setIntegrationBusy(true);
+    try {
+      await updateIntegrationSettings({ jira: { clear_token: true } });
+      await reloadIntegrations();
+      setIntegrationMsg("Jira API token cleared.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Clear failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleSaveSlack(e) {
+    e.preventDefault();
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const payload = { slack: { default_channel: slackChannel.trim() } };
+      if (slackWebhook.trim()) payload.slack.webhook_url = slackWebhook.trim();
+      await updateIntegrationSettings(payload);
+      setSlackWebhook("");
+      await reloadIntegrations();
+      setIntegrationMsg("Slack settings saved.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Failed to save Slack settings");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleTestSlack() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const res = await testSlackIntegration(
+        slackWebhook.trim() ? { webhook_url: slackWebhook.trim() } : {}
+      );
+      setIntegrationMsg(res?.detail || "Slack test sent.");
+      await reloadIntegrations();
+    } catch (err) {
+      setIntegrationMsg(err.message || "Slack test failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleClearSlackWebhook() {
+    setIntegrationBusy(true);
+    try {
+      await updateIntegrationSettings({ slack: { clear_webhook: true } });
+      await reloadIntegrations();
+      setIntegrationMsg("Slack webhook cleared.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Clear failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleSaveGithub(e) {
+    e.preventDefault();
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const payload = {
+        github: {
+          owner: githubOwner.trim(),
+          repo: githubRepo.trim(),
+        },
+      };
+      if (githubToken.trim()) payload.github.token = githubToken.trim();
+      await updateIntegrationSettings(payload);
+      setGithubToken("");
+      await reloadIntegrations();
+      setIntegrationMsg("GitHub settings saved.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Failed to save GitHub settings");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleVerifyGithub() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const res = await verifyGithub();
+      setIntegrationMsg(res?.detail || "GitHub verified.");
+      await reloadIntegrations();
+    } catch (err) {
+      setIntegrationMsg(err.message || "GitHub verification failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleClearGithubToken() {
+    setIntegrationBusy(true);
+    try {
+      await updateIntegrationSettings({ github: { clear_token: true } });
+      await reloadIntegrations();
+      setIntegrationMsg("GitHub token cleared.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Clear failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleSaveDiscord(e) {
+    e.preventDefault();
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const payload = { discord: { default_channel: discordChannel.trim() } };
+      if (discordWebhook.trim()) payload.discord.webhook_url = discordWebhook.trim();
+      await updateIntegrationSettings(payload);
+      setDiscordWebhook("");
+      await reloadIntegrations();
+      setIntegrationMsg("Discord settings saved.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Failed to save Discord");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleTestDiscord() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const res = await testDiscordIntegration(
+        discordWebhook.trim() ? { webhook_url: discordWebhook.trim() } : {}
+      );
+      setIntegrationMsg(res?.detail || "Discord test sent.");
+      await reloadIntegrations();
+    } catch (err) {
+      setIntegrationMsg(err.message || "Discord test failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleClearDiscordWebhook() {
+    setIntegrationBusy(true);
+    try {
+      await updateIntegrationSettings({ discord: { clear_webhook: true } });
+      await reloadIntegrations();
+      setIntegrationMsg("Discord webhook cleared.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Clear failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleSaveLinear(e) {
+    e.preventDefault();
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const payload = { linear: { team_id: linearTeamId.trim() } };
+      if (linearApiKey.trim()) payload.linear.api_key = linearApiKey.trim();
+      await updateIntegrationSettings(payload);
+      setLinearApiKey("");
+      await reloadIntegrations();
+      setIntegrationMsg("Linear settings saved.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Failed to save Linear");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleVerifyLinear() {
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const res = await verifyLinear();
+      setIntegrationMsg(res?.detail || "Linear verified.");
+      await reloadIntegrations();
+    } catch (err) {
+      setIntegrationMsg(err.message || "Linear verification failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleClearLinearKey() {
+    setIntegrationBusy(true);
+    try {
+      await updateIntegrationSettings({ linear: { clear_api_key: true } });
+      await reloadIntegrations();
+      setIntegrationMsg("Linear API key cleared.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Clear failed");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function handleSaveSlackBot(e) {
+    e.preventDefault();
+    setIntegrationBusy(true);
+    setIntegrationMsg("");
+    try {
+      const payload = { slack: {} };
+      if (slackBotToken.trim()) payload.slack.bot_token = slackBotToken.trim();
+      if (slackSigningSecret.trim()) payload.slack.signing_secret = slackSigningSecret.trim();
+      await updateIntegrationSettings(payload);
+      setSlackBotToken("");
+      setSlackSigningSecret("");
+      await reloadIntegrations();
+      setIntegrationMsg("Slack bot credentials saved.");
+    } catch (err) {
+      setIntegrationMsg(err.message || "Failed to save Slack bot");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
   async function handleSaveProvider(e) {
     e.preventDefault();
     if (!provider) return;
@@ -545,6 +894,25 @@ export default function SettingsClient() {
       await load();
     } catch (err) {
       setProviderMsg(err.message || "Activate failed");
+    } finally {
+      setProviderBusy(null);
+    }
+  }
+
+  async function handleVerifyProvider(id) {
+    setProviderBusy(id);
+    setProviderMsg("");
+    try {
+      const res = await verifyLlmProvider(id);
+      const emb =
+        res?.embedding_ok === true
+          ? " · embeddings OK"
+          : res?.embedding_ok === false
+            ? " · embeddings failed"
+            : "";
+      setProviderMsg(`Provider test passed (${res?.model || "model"})${emb}.`);
+    } catch (err) {
+      setProviderMsg(err.message || "Provider test failed");
     } finally {
       setProviderBusy(null);
     }
@@ -940,6 +1308,14 @@ export default function SettingsClient() {
                                 </p>
                               </div>
                               <div className="flex shrink-0 gap-2">
+                                <button
+                                  type="button"
+                                  disabled={providerBusy === p.id}
+                                  onClick={() => handleVerifyProvider(p.id)}
+                                  className="workspace-btn-ghost !px-2.5 !py-1.5 text-xs"
+                                >
+                                  Test
+                                </button>
                                 {!p.is_active && (
                                   <button
                                     type="button"
@@ -1215,10 +1591,10 @@ export default function SettingsClient() {
                   <SettingsSection
                     icon={SECTION_ICONS.health}
                     title="Integration status"
-                    description="Live readiness for Telegram and email across workflows, projects, and alerts."
+                    description="Live readiness for Telegram, email, Slack, Jira, and GitHub."
                     delay={0.01}
                   >
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                       <div className="rounded-xl border border-black/[0.06] bg-white/70 p-4">
                         <p className="text-xs font-semibold text-neutral-500">Telegram</p>
                         <p className="mt-1 text-sm font-semibold">
@@ -1231,7 +1607,33 @@ export default function SettingsClient() {
                         <p className="mt-1 text-sm font-semibold">
                           {integrationHealth?.email_ready ? "Ready" : "Not configured"}
                         </p>
-                        <p className="text-xs text-neutral-400">Source: {integrationSettings?.email?.source || "—"}</p>
+                        <p className="text-xs text-neutral-400">
+                          Source: {integrationSettings?.email?.source || "—"}
+                          {integrationSettings?.email?.oauth_connected
+                            ? ` · ${integrationSettings.email.oauth_email || "OAuth"}`
+                            : ""}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-black/[0.06] bg-white/70 p-4">
+                        <p className="text-xs font-semibold text-neutral-500">Slack</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {integrationHealth?.slack_ready ? "Ready" : "Not configured"}
+                        </p>
+                        <p className="text-xs text-neutral-400">Source: {integrationSettings?.slack?.source || "—"}</p>
+                      </div>
+                      <div className="rounded-xl border border-black/[0.06] bg-white/70 p-4">
+                        <p className="text-xs font-semibold text-neutral-500">Jira</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {integrationHealth?.jira_ready ? "Ready" : "Not configured"}
+                        </p>
+                        <p className="text-xs text-neutral-400">Source: {integrationSettings?.jira?.source || "—"}</p>
+                      </div>
+                      <div className="rounded-xl border border-black/[0.06] bg-white/70 p-4">
+                        <p className="text-xs font-semibold text-neutral-500">GitHub</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {integrationHealth?.github_ready ? "Ready" : "Not configured"}
+                        </p>
+                        <p className="text-xs text-neutral-400">Source: {integrationSettings?.github?.source || "—"}</p>
                       </div>
                     </div>
                     <label className="mt-4 block">
@@ -1362,11 +1764,49 @@ export default function SettingsClient() {
 
                   <SettingsSection
                     icon={SECTION_ICONS.email}
-                    title="Gmail & email (SMTP)"
-                    description="Use a Gmail app password or any SMTP server for digests, eval alerts, and workflow notify nodes."
+                    title="Gmail & email"
+                    description="Connect Gmail with Google OAuth, or use an app password / any SMTP server for digests, alerts, and notify nodes."
                     delay={0.04}
                   >
-                    <label className="flex items-center gap-2 text-sm text-neutral-700">
+                    <div className="rounded-xl border border-black/[0.06] bg-white/80 p-4">
+                      <p className="text-sm font-semibold">Google OAuth (recommended)</p>
+                      <p className="mt-1 text-xs text-neutral-500">
+                        {integrationSettings?.email?.oauth_enabled
+                          ? "Requires GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the API. Grants gmail.send scope."
+                          : "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the backend to enable Connect with Google."}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={integrationBusy || !integrationSettings?.email?.oauth_enabled}
+                          onClick={handleConnectGmailOAuth}
+                          className="btn-primary disabled:opacity-50"
+                        >
+                          {integrationSettings?.email?.oauth_connected ? "Reconnect Google" : "Connect with Google"}
+                        </button>
+                        {integrationSettings?.email?.oauth_connected && (
+                          <button
+                            type="button"
+                            disabled={integrationBusy}
+                            onClick={handleDisconnectGmailOAuth}
+                            className="workspace-btn-ghost workspace-btn-danger text-xs"
+                          >
+                            Disconnect OAuth
+                          </button>
+                        )}
+                      </div>
+                      {integrationSettings?.email?.oauth_connected && (
+                        <p className="mt-2 text-xs text-emerald-700">
+                          Connected as {integrationSettings.email.oauth_email || "Gmail account"}
+                        </p>
+                      )}
+                    </div>
+
+                    <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                      Or use SMTP / app password
+                    </p>
+
+                    <label className="mt-3 flex items-center gap-2 text-sm text-neutral-700">
                       <input
                         type="checkbox"
                         checked={gmailPreset}
@@ -1467,12 +1907,335 @@ export default function SettingsClient() {
                     <p className="mt-3 text-xs text-neutral-500">
                       Status:{" "}
                       {integrationSettings?.email?.configured
-                        ? `Configured (${integrationSettings.email.source})`
+                        ? `Configured (${integrationSettings.email.source}${
+                            integrationSettings.email.auth_mode === "oauth" ? " · OAuth" : " · SMTP"
+                          })`
                         : "Not configured"}
-                      {integrationSettings?.email?.smtp_password_masked
-                        ? ` · password ${integrationSettings.email.smtp_password_masked}`
-                        : ""}
                     </p>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.keys}
+                    title="Jira Cloud"
+                    description="Store Atlassian site URL, account email, and API token for the Jira workflow node."
+                    delay={0.045}
+                  >
+                    <form onSubmit={handleSaveJira} className="space-y-4">
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Site URL</span>
+                        <input
+                          value={jiraBaseUrl}
+                          onChange={(e) => setJiraBaseUrl(e.target.value)}
+                          placeholder="https://your-domain.atlassian.net"
+                          className="input-field mt-2 w-full text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Atlassian email</span>
+                        <input
+                          value={jiraEmail}
+                          onChange={(e) => setJiraEmail(e.target.value)}
+                          placeholder="you@company.com"
+                          className="input-field mt-2 w-full text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">API token</span>
+                        <input
+                          type="password"
+                          value={jiraApiToken}
+                          onChange={(e) => setJiraApiToken(e.target.value)}
+                          placeholder={
+                            integrationSettings?.jira?.api_token_masked
+                              ? `Saved ${integrationSettings.jira.api_token_masked} — enter to replace`
+                              : "Atlassian API token"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" disabled={integrationBusy} className="btn-primary disabled:opacity-50">
+                          Save Jira
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleVerifyJira}
+                          className="btn-secondary disabled:opacity-50"
+                        >
+                          Verify
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleClearJiraToken}
+                          className="workspace-btn-ghost workspace-btn-danger text-xs"
+                        >
+                          Clear token
+                        </button>
+                      </div>
+                    </form>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.telegram}
+                    title="Slack"
+                    description="Incoming webhook for notify nodes and digests. Create one in Slack → Apps → Incoming Webhooks."
+                    delay={0.046}
+                  >
+                    <form onSubmit={handleSaveSlack} className="space-y-4">
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Webhook URL</span>
+                        <input
+                          type="password"
+                          value={slackWebhook}
+                          onChange={(e) => setSlackWebhook(e.target.value)}
+                          placeholder={
+                            integrationSettings?.slack?.webhook_url_masked
+                              ? `Saved ${integrationSettings.slack.webhook_url_masked} — enter to replace`
+                              : "https://hooks.slack.com/services/…"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Default channel (label)</span>
+                        <input
+                          value={slackChannel}
+                          onChange={(e) => setSlackChannel(e.target.value)}
+                          placeholder="#ops-alerts"
+                          className="input-field mt-2 w-full text-sm"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" disabled={integrationBusy} className="btn-primary disabled:opacity-50">
+                          Save Slack
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleTestSlack}
+                          className="btn-secondary disabled:opacity-50"
+                        >
+                          Send test
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleClearSlackWebhook}
+                          className="workspace-btn-ghost workspace-btn-danger text-xs"
+                        >
+                          Clear webhook
+                        </button>
+                      </div>
+                    </form>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.keys}
+                    title="GitHub Issues"
+                    description="Personal access token with repo issues scope for the GitHub workflow node."
+                    delay={0.047}
+                  >
+                    <form onSubmit={handleSaveGithub} className="space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="text-xs font-semibold text-neutral-600">Default owner</span>
+                          <input
+                            value={githubOwner}
+                            onChange={(e) => setGithubOwner(e.target.value)}
+                            placeholder="acme-org"
+                            className="input-field mt-2 w-full text-sm"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-semibold text-neutral-600">Default repo</span>
+                          <input
+                            value={githubRepo}
+                            onChange={(e) => setGithubRepo(e.target.value)}
+                            placeholder="novaflow"
+                            className="input-field mt-2 w-full text-sm"
+                          />
+                        </label>
+                      </div>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Personal access token</span>
+                        <input
+                          type="password"
+                          value={githubToken}
+                          onChange={(e) => setGithubToken(e.target.value)}
+                          placeholder={
+                            integrationSettings?.github?.token_masked
+                              ? `Saved ${integrationSettings.github.token_masked} — enter to replace`
+                              : "ghp_…"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" disabled={integrationBusy} className="btn-primary disabled:opacity-50">
+                          Save GitHub
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleVerifyGithub}
+                          className="btn-secondary disabled:opacity-50"
+                        >
+                          Verify
+                        </button>
+                        <button
+                          type="button"
+                          disabled={integrationBusy}
+                          onClick={handleClearGithubToken}
+                          className="workspace-btn-ghost workspace-btn-danger text-xs"
+                        >
+                          Clear token
+                        </button>
+                      </div>
+                    </form>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.telegram}
+                    title="Discord"
+                    description="Incoming webhook for notify nodes and digests."
+                    delay={0.048}
+                  >
+                    <form onSubmit={handleSaveDiscord} className="space-y-4">
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Webhook URL</span>
+                        <input
+                          type="password"
+                          value={discordWebhook}
+                          onChange={(e) => setDiscordWebhook(e.target.value)}
+                          placeholder={
+                            integrationSettings?.discord?.webhook_url_masked
+                              ? `Saved ${integrationSettings.discord.webhook_url_masked} — enter to replace`
+                              : "https://discord.com/api/webhooks/…"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Channel label</span>
+                        <input
+                          value={discordChannel}
+                          onChange={(e) => setDiscordChannel(e.target.value)}
+                          placeholder="#alerts"
+                          className="input-field mt-2 w-full text-sm"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" disabled={integrationBusy} className="btn-primary disabled:opacity-50">
+                          Save Discord
+                        </button>
+                        <button type="button" disabled={integrationBusy} onClick={handleTestDiscord} className="btn-secondary disabled:opacity-50">
+                          Send test
+                        </button>
+                        <button type="button" disabled={integrationBusy} onClick={handleClearDiscordWebhook} className="workspace-btn-ghost workspace-btn-danger text-xs">
+                          Clear webhook
+                        </button>
+                      </div>
+                    </form>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.keys}
+                    title="Linear"
+                    description="API key + default team ID for the Linear workflow node."
+                    delay={0.049}
+                  >
+                    <form onSubmit={handleSaveLinear} className="space-y-4">
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Default team ID</span>
+                        <input
+                          value={linearTeamId}
+                          onChange={(e) => setLinearTeamId(e.target.value)}
+                          placeholder="Linear team UUID"
+                          className="input-field mt-2 w-full font-mono text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">API key</span>
+                        <input
+                          type="password"
+                          value={linearApiKey}
+                          onChange={(e) => setLinearApiKey(e.target.value)}
+                          placeholder={
+                            integrationSettings?.linear?.api_key_masked
+                              ? `Saved ${integrationSettings.linear.api_key_masked} — enter to replace`
+                              : "lin_api_…"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" disabled={integrationBusy} className="btn-primary disabled:opacity-50">
+                          Save Linear
+                        </button>
+                        <button type="button" disabled={integrationBusy} onClick={handleVerifyLinear} className="btn-secondary disabled:opacity-50">
+                          Verify
+                        </button>
+                        <button type="button" disabled={integrationBusy} onClick={handleClearLinearKey} className="workspace-btn-ghost workspace-btn-danger text-xs">
+                          Clear key
+                        </button>
+                      </div>
+                    </form>
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.telegram}
+                    title="Slack Bot (Events API)"
+                    description="Bot token + signing secret for inbound Slack → workflow. Bind a workflow in the builder inspector."
+                    delay={0.05}
+                  >
+                    <form onSubmit={handleSaveSlackBot} className="space-y-4">
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Bot user OAuth token</span>
+                        <input
+                          type="password"
+                          value={slackBotToken}
+                          onChange={(e) => setSlackBotToken(e.target.value)}
+                          placeholder={
+                            integrationSettings?.slack?.bot_token_masked
+                              ? `Saved ${integrationSettings.slack.bot_token_masked} — enter to replace`
+                              : "xoxb-…"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-neutral-600">Signing secret</span>
+                        <input
+                          type="password"
+                          value={slackSigningSecret}
+                          onChange={(e) => setSlackSigningSecret(e.target.value)}
+                          placeholder={
+                            integrationSettings?.slack?.signing_secret_masked
+                              ? `Saved ${integrationSettings.slack.signing_secret_masked} — enter to replace`
+                              : "Slack app signing secret"
+                          }
+                          className="input-field mt-2 w-full font-mono text-sm"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <p className="text-xs text-neutral-500">
+                        Status: {integrationSettings?.slack?.bot_configured ? "Bot ready" : "Not configured"}
+                        {integrationSettings?.slack?.events_url
+                          ? ` · bound ${integrationSettings.slack.events_url}`
+                          : ""}
+                      </p>
+                      <button type="submit" disabled={integrationBusy} className="btn-primary disabled:opacity-50">
+                        Save Slack bot
+                      </button>
+                    </form>
                   </SettingsSection>
 
                   <SettingsSection

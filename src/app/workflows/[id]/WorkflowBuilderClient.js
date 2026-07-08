@@ -11,6 +11,7 @@ import WorkflowDiffSplit from "@/components/workflow/WorkflowDiffSplit";
 import WorkflowInspector from "@/components/workflow/WorkflowInspector";
 import { NODE_ICONS } from "@/components/workflow/WorkflowNodeIcons";
 import { getUserInfo } from "@/lib/api/auth";
+import { ensureActiveWorkspace } from "@/lib/api/workspaces";
 import { listKnowledge } from "@/lib/api/knowledge";
 import {
   deleteWorkflow,
@@ -43,13 +44,51 @@ const ADD_NODE_DEFAULTS = {
   condition: { keyword: "", then_text: "{{input}}", else_text: "" },
   http: { url: "", method: "GET", body: "" },
   notify: { channel: "telegram", to: "{{chat_id}}", subject: "NovaFlow", message: "{{output}}" },
-  retrieve: { knowledge_id: null, limit: 5 },
-  llm: { prompt: "You are a helpful assistant." },
+  jira: {
+    action: "create",
+    project_key: "NF",
+    issue_type: "Task",
+    issue_key: "",
+    summary: "{{output}}",
+    description: "{{input}}",
+    set_output: true,
+  },
+  github: {
+    action: "create",
+    repo: "",
+    issue_number: "",
+    title: "{{output}}",
+    body: "{{input}}",
+    labels: "bug",
+    set_output: true,
+  },
+  linear: {
+    action: "create",
+    team_id: "",
+    issue_id: "",
+    title: "{{output}}",
+    description: "{{input}}",
+    set_output: true,
+  },
+  retrieve: { knowledge_id: null, limit: 6 },
+  llm: {
+    prompt:
+      "Answer clearly. Prefer structure: direct answer, then short supporting bullets. If context is missing, say what is unknown.",
+  },
   output: { label: "Output" },
-  loop: { max: 5, prompt: "Process: {{item}}", separator: "\n" },
+  loop: {
+    max: 5,
+    prompt: "For this item, return one compact line: RESULT: <outcome> | WHY: <short reason>\nItem: {{item}}",
+    separator: "\n",
+  },
   parallel: { branches: ["Summary", "Key points", "Actions"] },
-  human: { message: "Review:\n{{output}}", require_approval: false },
-  agent: { tools: ["summarize"], prompt: "You are a capable agent.", knowledge_id: null },
+  human: { message: "Review and approve before finalize:\n\n{{output}}", require_approval: true },
+  agent: {
+    tools: ["summarize"],
+    prompt:
+      "You are a capable NovaFlow agent. Use tool results as evidence. Answer with: Summary · Details · Confidence (high/med/low).",
+    knowledge_id: null,
+  },
   subgraph: { workflow_id: null, label: "Sub-workflow" },
 };
 
@@ -82,6 +121,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [presence, setPresence] = useState(null);
   const [presenceViewers, setPresenceViewers] = useState([]);
   const cursorThrottleRef = useRef(0);
+  const nodeSeqRef = useRef(0);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState(null);
   const [libraries, setLibraries] = useState([]);
@@ -104,10 +144,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
     setLoading(true);
     setError("");
     try {
-      const [info, kbRes] = await Promise.all([
-        getWorkflowInfo(workflowId),
-        listKnowledge({ pageSize: 100 }),
-      ]);
+      const info = await getWorkflowInfo(workflowId);
       setName(info?.name || "");
       setDesc(info?.desc || "");
       setStatus(info?.status ?? 0);
@@ -116,10 +153,31 @@ export default function WorkflowBuilderClient({ workflowId }) {
       setRunWebhookUrl(info?.run_webhook_url || "");
       setGraph(info?.graph || { nodes: [], edges: [] });
       setRecentRuns(info?.recent_runs || []);
-      setLibraries(kbRes?.data || []);
       if (info?.graph?.nodes?.[0]) setSelectedId(info.graph.nodes[0].id);
     } catch (err) {
-      setError(err.message || "Workflow not found");
+      const msg = err?.message || "Workflow not found";
+      if (msg === "Workflow not found") {
+        setError(
+          "Workflow not found in the current workspace. Switch to the correct workspace from the header, or go back and open the workflow again."
+        );
+      } else if (
+        msg.includes("Cannot reach") ||
+        msg.includes("unavailable") ||
+        msg.includes("unreachable")
+      ) {
+        setError(
+          `${msg} Ensure the NovaFlow backend is running on port 3001, then click Retry.`
+        );
+      } else {
+        setError(msg);
+      }
+    }
+
+    try {
+      const kbRes = await listKnowledge({ pageSize: 100 });
+      setLibraries(kbRes?.data || (Array.isArray(kbRes) ? kbRes : []));
+    } catch {
+      setLibraries([]);
     } finally {
       setLoading(false);
     }
@@ -127,7 +185,10 @@ export default function WorkflowBuilderClient({ workflowId }) {
 
   useEffect(() => {
     getUserInfo()
-      .then(setUser)
+      .then(async (u) => {
+        await ensureActiveWorkspace();
+        setUser(u);
+      })
       .catch(() => router.push("/login"));
   }, [router]);
 
@@ -220,7 +281,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
 
   function addNode(type) {
     if (user?.role === "viewer") return;
-    const id = `${type}_${Date.now()}`;
+    nodeSeqRef.current += 1;
+    const id = `${type}_${nodeSeqRef.current}_${graph.nodes?.length || 0}`;
     const maxX = Math.max(60, ...(graph.nodes || []).map((n) => n.x || 0));
     const newNode = {
       id,
@@ -603,7 +665,14 @@ export default function WorkflowBuilderClient({ workflowId }) {
 
       {error && (
         <div className="relative z-20 shrink-0 border-b border-red-100 bg-red-50/90 px-4 py-2 text-center text-sm text-red-700">
-          {error}
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => load()}
+            className="ml-3 rounded-full border border-red-200 bg-white px-3 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -700,7 +769,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
             <div className="shrink-0 border-t border-black/[0.04] p-3">
               <p className="workspace-section-label mb-2">Add node</p>
               <div className="flex flex-wrap gap-1.5">
-                {["loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "notify", "retrieve", "llm", "output"].map((type) => (
+                {["loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "notify", "jira", "github", "linear", "retrieve", "llm", "output"].map((type) => (
                   <button
                     key={type}
                     type="button"

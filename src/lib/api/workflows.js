@@ -1,4 +1,5 @@
 import client from "./client";
+import { mergeWorkflowTemplates, WORKFLOW_TEMPLATES } from "@/lib/workflow/templates";
 import { getApiBaseUrl, getWsQueryString } from "./config";
 
 function getWsUrl(path) {
@@ -19,11 +20,27 @@ export async function getWorkflowsPage(params = {}) {
 }
 
 export async function getWorkflowTemplates() {
-  return client.get("/workflow/templates");
+  try {
+    const data = await client.get("/workflow/templates");
+    return mergeWorkflowTemplates(Array.isArray(data) ? data : []);
+  } catch {
+    return WORKFLOW_TEMPLATES;
+  }
 }
 
-export async function getWorkflowInfo(id) {
-  return client.get(`/workflow/info/${id}`);
+export async function getWorkflowInfo(id, { retries = 2 } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await client.get(`/workflow/info/${id}`);
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
 }
 
 export async function createWorkflow({ name, desc = "", templateId = "rag" }) {
@@ -34,8 +51,10 @@ export async function createWorkflow({ name, desc = "", templateId = "rag" }) {
   });
 }
 
-export async function updateWorkflow({ id, name, desc, graph }) {
-  return client.put("/workflow", { id, name, desc, graph });
+export async function updateWorkflow({ id, name, desc, graph, run_webhook_url }) {
+  const body = { id, name, desc, graph };
+  if (run_webhook_url !== undefined) body.run_webhook_url = run_webhook_url;
+  return client.put("/workflow", body);
 }
 
 export async function setWorkflowStatus(id, status) {
@@ -122,6 +141,14 @@ export async function getWorkflowSchedules(workflowId) {
   return client.get(`/workflow/${workflowId}/schedules`);
 }
 
+export async function listWorkspaceSchedules() {
+  return client.get("/workflow/schedules");
+}
+
+export async function triggerWorkflowSchedule(scheduleId) {
+  return client.post(`/workflow/schedules/${scheduleId}/trigger`);
+}
+
 export async function createWorkflowSchedule(workflowId, payload) {
   return client.post(`/workflow/${workflowId}/schedules`, payload);
 }
@@ -146,6 +173,14 @@ export async function getWorkflowPresence(workflowId) {
 
 export async function deleteWorkflowSchedule(scheduleId) {
   return client.delete(`/workflow/schedules/${scheduleId}`);
+}
+
+export async function getWorkflowRun(runId) {
+  return client.get(`/workflow/runs/${runId}`);
+}
+
+export async function listWorkspaceRuns(params = {}) {
+  return client.get("/workflow/runs", { params });
 }
 
 export async function getOnlineWorkflows() {

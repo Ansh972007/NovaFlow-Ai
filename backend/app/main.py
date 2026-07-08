@@ -56,7 +56,7 @@ async def lifespan(_app: FastAPI):
         pass
 
 
-app = FastAPI(title="NovaFlow API", version="9.2.0", lifespan=lifespan)
+app = FastAPI(title="NovaFlow API", version="9.7.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -92,7 +92,7 @@ def health():
         {
             "service": "novaflow-api",
             "status": "ok",
-            "version": "9.2.0",
+            "version": "9.7.0",
             "vector_backend": vector_backend(),
         }
     )
@@ -100,4 +100,4 @@ def health():
 
 @app.get("/")
 def root():
-    return ok({"name": "NovaFlow API", "version": "9.2.0"})
+    return ok({"name": "NovaFlow API", "version": "9.7.0"})

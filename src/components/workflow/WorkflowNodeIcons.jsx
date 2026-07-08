@@ -116,6 +116,32 @@ export function NotifyIcon({ size = 18 }) {
   );
 }
 
+export function JiraIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M12 3l8 8-8 8-8-8 8-8z" />
+      <path d="M12 7l4 4-4 4-4-4 4-4z" />
+    </svg>
+  );
+}
+
+export function GithubIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.48 0-.24-.01-.87-.01-1.7-2.78.62-3.37-1.37-3.37-1.37-.46-1.2-1.12-1.52-1.12-1.52-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.36 1.12 2.94.85.09-.67.35-1.12.63-1.37-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.32.1-2.75 0 0 .84-.27 2.75 1.05A9.3 9.3 0 0 1 12 6.8c.85 0 1.7.12 2.5.34 1.9-1.32 2.74-1.05 2.74-1.05.55 1.43.2 2.49.1 2.75.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.8 0 .27.18.59.69.48A10.04 10.04 0 0 0 22 12.26C22 6.58 17.52 2 12 2z" />
+    </svg>
+  );
+}
+
+export function LinearIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M4 15l8-11 8 11H4z" />
+      <path d="M7 15l5 5 5-5" />
+    </svg>
+  );
+}
+
 export const NODE_ICONS = {
   trigger: TriggerIcon,
   retrieve: RetrieveIcon,
@@ -125,8 +151,12 @@ export const NODE_ICONS = {
   condition: ConditionIcon,
   http: HttpIcon,
   notify: NotifyIcon,
+  jira: JiraIcon,
+  github: GithubIcon,
+  linear: LinearIcon,
   loop: LoopIcon,
   parallel: ParallelIcon,
   human: HumanIcon,
   agent: AgentIcon,
+  subgraph: HttpIcon,
 };

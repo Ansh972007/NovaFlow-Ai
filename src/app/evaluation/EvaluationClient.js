@@ -93,6 +93,7 @@ export default function EvaluationClient() {
     pagerduty_routing_key: "",
     opsgenie_api_key: "",
     email_to: "",
+    use_workspace_slack: true,
   });
   const [runDiff, setRunDiff] = useState(null);
   const [costEstimate, setCostEstimate] = useState(null);
@@ -106,7 +107,8 @@ export default function EvaluationClient() {
   const [newSuite, setNewSuite] = useState({ name: "", assistant_id: "", caseInput: "", caseExpected: "" });
   const [newDataset, setNewDataset] = useState({
     name: "",
-    system: "You are a helpful assistant.",
+    system:
+      "You are a precise assistant. Lead with the answer, then short supporting bullets. If information is missing, say so.",
     user: "",
     assistant: "",
   });
@@ -389,6 +391,7 @@ export default function EvaluationClient() {
         pagerduty_routing_key: newAlert.pagerduty_routing_key.trim(),
         opsgenie_api_key: newAlert.opsgenie_api_key.trim(),
         email_to: newAlert.email_to.trim(),
+        use_workspace_slack: !!newAlert.use_workspace_slack,
       });
       setNewAlert({
         suite_id: "",
@@ -398,6 +401,7 @@ export default function EvaluationClient() {
         pagerduty_routing_key: "",
         opsgenie_api_key: "",
         email_to: "",
+        use_workspace_slack: true,
       });
       await load();
     } catch (err) {
@@ -496,7 +500,13 @@ export default function EvaluationClient() {
           },
         ],
       });
-      setNewDataset({ name: "", system: "You are a helpful assistant.", user: "", assistant: "" });
+      setNewDataset({
+        name: "",
+        system:
+          "You are a precise assistant. Lead with the answer, then short supporting bullets. If information is missing, say so.",
+        user: "",
+        assistant: "",
+      });
       await load();
     } catch (err) {
       setError(err.message || "Create dataset failed");
@@ -1150,7 +1160,7 @@ export default function EvaluationClient() {
               <motion.section className="workspace-panel rounded-[1.5rem] p-5">
                 <h2 className="text-lg font-semibold">Regression alerts</h2>
                 <p className="mt-1 text-xs text-neutral-500">
-                  Notify Slack (webhook) or email when pass rate drops below a threshold or vs the previous run.
+                  Notify via workspace Slack (Settings), custom webhook, email, or on-call tools when pass rate drops.
                 </p>
                 <ul className="mt-4 space-y-2">
                   {alerts.map((a) => {
@@ -1162,6 +1172,16 @@ export default function EvaluationClient() {
                           <span className="ml-2 text-xs font-normal text-neutral-500">
                             min {a.min_pass_rate}% · drop {a.drop_points}pts · {a.enabled ? "on" : "off"}
                           </span>
+                        </p>
+                        <p className="mt-1 text-[11px] text-neutral-400">
+                          {[
+                            a.use_workspace_slack ? "workspace Slack" : null,
+                            a.webhook_url ? "webhook" : null,
+                            a.email_to ? `email ${a.email_to}` : null,
+                            a.pagerduty_routing_key ? "PagerDuty" : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "no channels"}
                         </p>
                         {!readOnly && (
                           <div className="mt-2 flex gap-2">
@@ -1231,9 +1251,17 @@ export default function EvaluationClient() {
                         onChange={(e) => setNewAlert((p) => ({ ...p, drop_points: e.target.value }))}
                       />
                     </div>
+                    <label className="flex items-center gap-2 text-sm text-neutral-700">
+                      <input
+                        type="checkbox"
+                        checked={!!newAlert.use_workspace_slack}
+                        onChange={(e) => setNewAlert((p) => ({ ...p, use_workspace_slack: e.target.checked }))}
+                      />
+                      Use workspace Slack (Settings → Integrations)
+                    </label>
                     <input
                       className="input-field w-full text-xs"
-                      placeholder="Slack / webhook URL"
+                      placeholder="Optional extra Slack / webhook URL"
                       value={newAlert.webhook_url}
                       onChange={(e) => setNewAlert((p) => ({ ...p, webhook_url: e.target.value }))}
                     />

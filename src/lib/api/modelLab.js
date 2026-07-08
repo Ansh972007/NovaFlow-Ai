@@ -19,3 +19,7 @@ export async function listPipelines() {
 export async function refreshPipelineJob(jobId) {
   return client.post(`/model-lab/jobs/${jobId}/refresh`);
 }
+
+export async function deployPipelineAssistant(jobId, payload = {}) {
+  return client.post(`/model-lab/jobs/${jobId}/deploy-assistant`, payload);
+}

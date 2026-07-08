@@ -74,6 +74,7 @@ class KnowledgeFile(Base):
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
     status = Column(Integer, default=5)  # 5 queued, 1 processing, 2 ready, 3 failed
+    error_message = Column(Text, default="")
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     knowledge = relationship("KnowledgeBase", back_populates="files")
@@ -358,6 +359,7 @@ class EvalRegressionAlert(Base):
     pagerduty_routing_key = Column(String(64), default="")
     opsgenie_api_key = Column(String(128), default="")
     email_to = Column(String(255), default="")
+    use_workspace_slack = Column(Integer, default=0)
     cooldown_hours = Column(Integer, default=6)
     enabled = Column(Integer, default=1)
     last_alert_at = Column(DateTime, nullable=True)
@@ -449,11 +451,57 @@ class WorkspaceIntegration(Base):
     smtp_password_enc = Column(Text, default="")
     smtp_from = Column(String(255), default="")
     gmail_preset = Column(Integer, default=0)
+    # smtp | oauth
+    gmail_auth_mode = Column(String(16), default="smtp")
+    gmail_oauth_refresh_token_enc = Column(Text, default="")
+    gmail_oauth_access_token_enc = Column(Text, default="")
+    gmail_oauth_token_expiry = Column(DateTime, nullable=True)
+    gmail_oauth_email = Column(String(255), default="")
+    gmail_oauth_connected_at = Column(DateTime, nullable=True)
+    # Jira Cloud
+    jira_base_url = Column(String(500), default="")
+    jira_email = Column(String(255), default="")
+    jira_api_token_enc = Column(Text, default="")
+    # Slack incoming webhook (optional default channel webhook)
+    slack_webhook_url_enc = Column(Text, default="")
+    slack_default_channel = Column(String(120), default="")
+    # Slack Bot / Events API (inbound)
+    slack_bot_token_enc = Column(Text, default="")
+    slack_signing_secret_enc = Column(Text, default="")
+    slack_events_workflow_id = Column(String(32), default="")
+    slack_events_url = Column(String(500), default="")
+    slack_events_registered_at = Column(DateTime, nullable=True)
+    # Discord incoming webhook
+    discord_webhook_url_enc = Column(Text, default="")
+    discord_default_channel = Column(String(120), default="")
+    # GitHub Issues (PAT)
+    github_token_enc = Column(Text, default="")
+    github_owner = Column(String(120), default="")
+    github_repo = Column(String(120), default="")
+    # Linear Issues
+    linear_api_key_enc = Column(Text, default="")
+    linear_team_id = Column(String(64), default="")
     public_base_url = Column(String(500), default="")
     telegram_webhook_workflow_id = Column(String(32), default="")
     telegram_webhook_url = Column(String(500), default="")
     telegram_webhook_registered_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SavedAgent(Base):
+    __tablename__ = "saved_agents"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    name = Column(String(80), nullable=False)
+    desc = Column(String(500), default="")
+    system_prompt = Column(Text, default="")
+    tools_json = Column(Text, default="[]")
+    knowledge_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    status = Column(Integer, default=1)  # 1 active
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Workspace(Base):
@@ -515,6 +563,11 @@ def migrate_schema():
         if "embedding_json" not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN embedding_json TEXT DEFAULT ''"))
+    if "knowledge_files" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("knowledge_files")}
+        if "error_message" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE knowledge_files ADD COLUMN error_message TEXT DEFAULT ''"))
     if "users" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("users")}
         if "role" not in cols:
@@ -568,10 +621,36 @@ def migrate_schema():
             ("telegram_webhook_workflow_id", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_workflow_id VARCHAR(32) DEFAULT ''"),
             ("telegram_webhook_url", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_url VARCHAR(500) DEFAULT ''"),
             ("telegram_webhook_registered_at", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_registered_at DATETIME"),
+            ("gmail_auth_mode", "ALTER TABLE workspace_integrations ADD COLUMN gmail_auth_mode VARCHAR(16) DEFAULT 'smtp'"),
+            ("gmail_oauth_refresh_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_refresh_token_enc TEXT DEFAULT ''"),
+            ("gmail_oauth_access_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_access_token_enc TEXT DEFAULT ''"),
+            ("gmail_oauth_token_expiry", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_token_expiry DATETIME"),
+            ("gmail_oauth_email", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_email VARCHAR(255) DEFAULT ''"),
+            ("gmail_oauth_connected_at", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_connected_at DATETIME"),
+            ("jira_base_url", "ALTER TABLE workspace_integrations ADD COLUMN jira_base_url VARCHAR(500) DEFAULT ''"),
+            ("jira_email", "ALTER TABLE workspace_integrations ADD COLUMN jira_email VARCHAR(255) DEFAULT ''"),
+            ("jira_api_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN jira_api_token_enc TEXT DEFAULT ''"),
+            ("slack_webhook_url_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_webhook_url_enc TEXT DEFAULT ''"),
+            ("slack_default_channel", "ALTER TABLE workspace_integrations ADD COLUMN slack_default_channel VARCHAR(120) DEFAULT ''"),
+            ("github_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN github_token_enc TEXT DEFAULT ''"),
+            ("github_owner", "ALTER TABLE workspace_integrations ADD COLUMN github_owner VARCHAR(120) DEFAULT ''"),
+            ("github_repo", "ALTER TABLE workspace_integrations ADD COLUMN github_repo VARCHAR(120) DEFAULT ''"),
+            ("discord_webhook_url_enc", "ALTER TABLE workspace_integrations ADD COLUMN discord_webhook_url_enc TEXT DEFAULT ''"),
+            ("discord_default_channel", "ALTER TABLE workspace_integrations ADD COLUMN discord_default_channel VARCHAR(120) DEFAULT ''"),
+            ("linear_api_key_enc", "ALTER TABLE workspace_integrations ADD COLUMN linear_api_key_enc TEXT DEFAULT ''"),
+            ("linear_team_id", "ALTER TABLE workspace_integrations ADD COLUMN linear_team_id VARCHAR(64) DEFAULT ''"),
+            ("slack_bot_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_bot_token_enc TEXT DEFAULT ''"),
+            ("slack_signing_secret_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_signing_secret_enc TEXT DEFAULT ''"),
+            ("slack_events_workflow_id", "ALTER TABLE workspace_integrations ADD COLUMN slack_events_workflow_id VARCHAR(32) DEFAULT ''"),
+            ("slack_events_url", "ALTER TABLE workspace_integrations ADD COLUMN slack_events_url VARCHAR(500) DEFAULT ''"),
+            ("slack_events_registered_at", "ALTER TABLE workspace_integrations ADD COLUMN slack_events_registered_at DATETIME"),
         ]:
             if col not in cols:
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
+
+    if "saved_agents" not in insp.get_table_names():
+        Base.metadata.tables["saved_agents"].create(bind=engine, checkfirst=True)
 
     if "eval_schedules" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("eval_schedules")}
@@ -584,6 +663,7 @@ def migrate_schema():
         for col, ddl in [
             ("pagerduty_routing_key", "ALTER TABLE eval_regression_alerts ADD COLUMN pagerduty_routing_key VARCHAR(64) DEFAULT ''"),
             ("opsgenie_api_key", "ALTER TABLE eval_regression_alerts ADD COLUMN opsgenie_api_key VARCHAR(128) DEFAULT ''"),
+            ("use_workspace_slack", "ALTER TABLE eval_regression_alerts ADD COLUMN use_workspace_slack INTEGER DEFAULT 0"),
         ]:
             if col not in cols:
                 with engine.begin() as conn:
