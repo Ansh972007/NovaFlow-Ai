@@ -6,6 +6,7 @@ const ease = [0.16, 1, 0.3, 1];
 
 export default function WorkspaceHero({
   eyebrow,
+  subtitle,
   title,
   titleHighlight,
   description,
@@ -16,12 +17,17 @@ export default function WorkspaceHero({
 }) {
   return (
     <motion.section
-      initial={{ opacity: 0, y: 22 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, ease }}
+      initial={{ opacity: 0, y: 28, filter: "blur(8px)" }}
+      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+      transition={{ duration: 0.75, ease }}
       className={`workspace-hero relative overflow-hidden rounded-[1.75rem] p-8 sm:p-10 ${className}`}
     >
       <div className="workspace-hero-glow pointer-events-none absolute inset-0" aria-hidden />
+      <motion.div
+        className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full border border-black/[0.04]"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 50, repeat: Infinity, ease: "linear" }}
+      />
 
       <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-2xl">
@@ -31,7 +37,10 @@ export default function WorkspaceHero({
               {eyebrow}
             </p>
           )}
-          <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-[2.75rem]">
+          {subtitle && (
+            <p className="mt-2 text-sm font-medium text-neutral-500">{subtitle}</p>
+          )}
+          <h1 className={`${subtitle ? "mt-1" : "mt-2"} font-serif text-4xl tracking-tight sm:text-[2.75rem]`}>
             {title}{" "}
             {titleHighlight && <span className="text-gradient">{titleHighlight}</span>}
           </h1>

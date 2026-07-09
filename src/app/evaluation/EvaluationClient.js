@@ -3,12 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import AppHeader from "@/components/AppHeader";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
-import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
-import WorkspaceTabs, { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
+import WorkspaceEmpty from "@/components/workspace/WorkspaceEmpty";
+import WorkspaceTabs, { WorkspaceStatCard, WorkspaceSkeletonList } from "@/components/workspace/WorkspaceTabs";
 import { SuiteTrendChart, ComparisonTrendChart } from "@/components/evaluation/EvalTrendCharts";
 import { getUserInfo } from "@/lib/api/auth";
 import { getAssistantsPage } from "@/lib/api/apps";
@@ -545,7 +544,7 @@ export default function EvaluationClient() {
   }
 
   if (!user) {
-    return <WorkspaceLoading message="Loading evaluation…" />;
+    return <WorkspacePageShell loading loadingMessage="Loading evaluation…" />;
   }
 
   const evalTabs = [
@@ -559,11 +558,7 @@ export default function EvaluationClient() {
   ];
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <WorkspaceLiveBackground />
-      <div className="relative z-10">
-        <AppHeader user={user} />
-        <main className="workspace-page-main mx-auto max-w-6xl px-4 py-10 sm:px-6">
+    <WorkspacePageShell user={user}>
           <WorkspaceHero
             eyebrow="Quality"
             title="Evaluation &"
@@ -596,9 +591,14 @@ export default function EvaluationClient() {
               >
                 <h2 className="text-lg font-semibold">Benchmark suites</h2>
                 {loading ? (
-                  <p className="mt-4 text-sm text-neutral-500">Loading…</p>
+                  <WorkspaceSkeletonList count={4} height="h-14" />
                 ) : suites.length === 0 ? (
-                  <p className="mt-4 text-sm text-neutral-500">No suites yet. Create one below.</p>
+                  <WorkspaceEmpty
+                    className="mt-4"
+                    title="No benchmark suites yet"
+                    description="Create a suite below or import from a template to start scoring."
+                    icon="◎"
+                  />
                 ) : (
                   <ul className="mt-4 space-y-2">
                     {suites.map((s) => (
@@ -1496,8 +1496,6 @@ export default function EvaluationClient() {
               </motion.section>
             </div>
           )}
-        </main>
-      </div>
-    </div>
+    </WorkspacePageShell>
   );
 }

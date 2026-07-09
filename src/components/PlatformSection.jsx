@@ -252,16 +252,20 @@ export default function PlatformSection() {
         {/* Header */}
         <div className="flex flex-col gap-10 lg:flex-row lg:items-end lg:justify-between">
           <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, y: 32, filter: "blur(10px)" }}
+            whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.7, ease }}
+            transition={{ duration: 0.85, ease }}
             className="max-w-2xl"
           >
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-white/90 px-4 py-1.5 text-[10px] font-bold tracking-[0.2em] uppercase shadow-sm backdrop-blur-sm">
+            <motion.div
+              whileHover={{ scale: 1.03 }}
+              transition={{ duration: 0.35, ease }}
+              className="nf-landing-badge mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-white/90 px-4 py-1.5 text-[10px] font-bold tracking-[0.2em] uppercase shadow-sm backdrop-blur-sm"
+            >
               <span className="h-1.5 w-1.5 rounded-full bg-black" />
               Platform
-            </div>
+            </motion.div>
             <h2
               id="features"
               className="font-serif text-4xl leading-[1.1] tracking-tight sm:text-5xl lg:text-[3.25rem]"

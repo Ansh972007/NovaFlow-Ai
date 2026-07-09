@@ -9,6 +9,7 @@ import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
+import WorkspaceEmpty from "@/components/workspace/WorkspaceEmpty";
 import { getUserInfo } from "@/lib/api/auth";
 import { getWorkflowRun, getWorkflowsPage, listWorkspaceRuns } from "@/lib/api/workflows";
 
@@ -441,21 +442,17 @@ export default function RunsClient() {
             </div>
 
             {filteredRuns.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="workspace-empty rounded-[1.5rem] py-16 text-center"
-              >
-                <p className="font-semibold text-neutral-900">No runs found</p>
-                <p className="mt-2 text-sm text-neutral-500">
-                  {runs.length === 0
+              <WorkspaceEmpty
+                title="No runs found"
+                description={
+                  runs.length === 0
                     ? "Publish and execute a workflow to populate history."
-                    : "Try adjusting your filters or search query."}
-                </p>
-                <Link href="/workflows" className="btn-primary mt-6 inline-flex text-sm">
-                  Go to workflows
-                </Link>
-              </motion.div>
+                    : "Try adjusting your filters or search query."
+                }
+                actionLabel="Go to workflows"
+                actionHref="/workflows"
+                icon="▸"
+              />
             ) : (
               <ul className="space-y-2.5">
                 {filteredRuns.map((run, i) => (

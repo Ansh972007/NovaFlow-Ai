@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import AppHeader from "@/components/AppHeader";
 import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
+import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
 import ChatSidebar from "@/components/chat/ChatSidebar";
 import ChatMessages from "@/components/chat/ChatMessages";
 import ChatInput from "@/components/chat/ChatInput";
@@ -20,20 +21,7 @@ import {
 import { generateId } from "@/lib/utils";
 
 function ChatLoading() {
-  return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden">
-      <WorkspaceLiveBackground />
-      <div className="relative z-10 flex flex-1 items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative flex h-12 w-12 items-center justify-center">
-            <div className="chat-empty-ring absolute inset-0 rounded-xl" />
-            <div className="h-10 w-10 animate-pulse rounded-lg bg-neutral-900/90" />
-          </div>
-          <p className="text-sm text-neutral-500">Loading workspace…</p>
-        </div>
-      </div>
-    </div>
-  );
+  return <WorkspaceLoading message="Loading chat…" />;
 }
 
 export default function ChatPageClient() {

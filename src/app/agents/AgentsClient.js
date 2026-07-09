@@ -315,7 +315,7 @@ export default function AgentsClient() {
             type="button"
             onClick={handleRun}
             disabled={busy || !input.trim()}
-            className="btn-primary mt-5 w-full disabled:opacity-50 sm:w-auto"
+            className="workspace-btn-ghost mt-5 w-full disabled:opacity-50 sm:mt-6 sm:w-auto"
           >
             {busy ? "Running…" : "Run agent"}
           </button>

@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import AppHeader from "@/components/AppHeader";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
-import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
+import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import SettingsNav, { SettingsStatCard } from "@/components/settings/SettingsNav";
 import SettingsSection, {
@@ -1017,16 +1015,11 @@ export default function SettingsClient() {
   const embeddingModel = knowledgeCfg?.embedding_model?.model_name || "Not set";
 
   if (!user) {
-    return <SettingsLoading />;
+    return <WorkspacePageShell loading loadingMessage="Loading settings…" />;
   }
 
   return (
-    <div className="settings-shell relative min-h-screen overflow-hidden">
-      <WorkspaceLiveBackground />
-      <div className="relative z-10">
-        <AppHeader user={user} />
-
-        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+    <WorkspacePageShell user={user}>
           <WorkspaceHero
             eyebrow="Workspace"
             title="Settings &"
@@ -2388,8 +2381,6 @@ export default function SettingsClient() {
               )}
             </div>
           </div>
-        </main>
-      </div>
-    </div>
+    </WorkspacePageShell>
   );
 }

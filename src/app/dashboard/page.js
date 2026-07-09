@@ -5,9 +5,10 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import AppHeader from "@/components/AppHeader";
-import WorkspaceLiveBackground from "@/components/WorkspaceLiveBackground";
-import AnimatedCounter from "@/components/AnimatedCounter";
+import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
+import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
+import WorkspaceEmpty from "@/components/workspace/WorkspaceEmpty";
 import { getUserInfo } from "@/lib/api/auth";
 import { getOnlineApps, getAssistants } from "@/lib/api/apps";
 import { getAnalyticsSummary, getAnalyticsTimeseries, getAnalyticsAssistants, getAbRoutingAnalytics } from "@/lib/api/analytics";
@@ -300,58 +301,25 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <WorkspaceLiveBackground />
-
-      <div className="relative z-10">
-        <AppHeader user={user} />
-
-        <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
-          {/* Hero */}
-          <motion.section
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.65, ease }}
-            className="dashboard-hero relative overflow-hidden rounded-[1.75rem] p-8 sm:p-10"
-          >
-            <div className="dashboard-hero-glow pointer-events-none absolute inset-0" aria-hidden />
-
-            <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-2xl">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.96 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.1, duration: 0.5, ease }}
-                  className="mb-5 inline-flex items-center gap-2.5 rounded-full border border-black/10 bg-white/80 px-4 py-1.5 text-[11px] font-semibold tracking-[0.18em] uppercase backdrop-blur-md"
-                >
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-40" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                  </span>
-                  <span className="text-emerald-700">Workspace live</span>
-                  <span className="text-neutral-400">·</span>
-                  <span className="text-neutral-500">NovaFlow AI</span>
-                </motion.div>
-
-                <p className="text-sm font-medium text-neutral-500">
-                  {loading ? "Loading…" : user ? `${greeting}, ${user.user_name}` : "Welcome"}
-                </p>
-                <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-5xl lg:text-[3.25rem]">
-                  Your AI{" "}
-                  <span className="text-gradient">command center</span>
-                </h1>
-                <p className="mt-4 max-w-lg text-[15px] leading-relaxed text-neutral-500">
-                  Chat, knowledge, and assistants in one place — pick up where you left off or launch something new.
-                </p>
-              </div>
-
-              {!loading && user && (
-                <motion.div
-                  initial={{ opacity: 0, x: 12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.2, duration: 0.5, ease }}
-                  className="flex shrink-0 flex-wrap gap-3"
-                >
+    <WorkspacePageShell user={user} loading={loading} loadingMessage="Loading dashboard…">
+          <WorkspaceHero
+            eyebrow="Dashboard"
+            subtitle={user ? `${greeting}, ${user.user_name}` : "Welcome"}
+            badge={
+              <span className="workspace-badge-live">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-40" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                Workspace live
+              </span>
+            }
+            title="Your AI"
+            titleHighlight="command center"
+            description="Chat, knowledge, and assistants in one place — pick up where you left off or launch something new."
+            actions={
+              user ? (
+                <>
                   <Link href="/chat" className="group btn-primary inline-flex">
                     Open Chat
                     <span className="transition-transform group-hover:translate-x-1">→</span>
@@ -359,31 +327,25 @@ export default function DashboardPage() {
                   <Link href="/apps" className="btn-secondary">
                     Manage apps
                   </Link>
-                </motion.div>
-              )}
-            </div>
-
+                </>
+              ) : null
+            }
+          >
             {user && (
-              <div className="relative mt-10 grid gap-4 border-t border-black/[0.06] pt-8 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {stats.map((stat, i) => (
                   <motion.div
                     key={stat.label}
                     initial={{ opacity: 0, y: 14 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.25 + i * 0.08, ease }}
-                    whileHover={{ y: -2 }}
-                    className="workspace-stat rounded-2xl p-5"
+                    transition={{ delay: 0.15 + i * 0.07, ease }}
                   >
-                    <p className="text-3xl font-semibold tabular-nums tracking-tight sm:text-4xl">
-                      <AnimatedCounter value={stat.value} />
-                    </p>
-                    <p className="mt-1.5 text-sm font-semibold text-neutral-900">{stat.label}</p>
-                    <p className="mt-0.5 text-xs text-neutral-400">{stat.hint}</p>
+                    <WorkspaceStatCard label={stat.label} value={stat.value} hint={stat.hint} />
                   </motion.div>
                 ))}
               </div>
             )}
-          </motion.section>
+          </WorkspaceHero>
 
           {user && (
             <motion.section
@@ -523,12 +485,14 @@ export default function DashboardPage() {
                 {!user ? (
                   <p className="mt-4 text-sm text-neutral-500">Sign in to see history.</p>
                 ) : recentSessions.length === 0 ? (
-                  <div className="mt-4 rounded-xl border border-white/60 bg-white/50 p-4 text-center backdrop-blur-sm">
-                    <p className="text-sm text-neutral-500">No chats yet</p>
-                    <Link href="/chat" className="mt-2 inline-block text-xs font-semibold hover:underline">
-                      Start a conversation →
-                    </Link>
-                  </div>
+                  <WorkspaceEmpty
+                    className="mt-4"
+                    title="No chats yet"
+                    description="Start a conversation with your assistant."
+                    actionLabel="Start chatting"
+                    actionHref="/chat"
+                    icon="💬"
+                  />
                 ) : (
                   <ul className="mt-4 space-y-1">
                     {recentSessions.map((session, i) => (
@@ -649,8 +613,6 @@ export default function DashboardPage() {
               </div>
             </motion.div>
           )}
-        </main>
-      </div>
-    </div>
+    </WorkspacePageShell>
   );
 }
