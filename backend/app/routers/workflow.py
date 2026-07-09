@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.database import Workflow, WorkflowPresence, WorkflowPresenceSession, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
@@ -463,7 +464,11 @@ def touch_workflow_presence(
                 updated_at=now,
             )
         )
-    db.commit()
+    try:
+        db.commit()
+    except OperationalError:
+        db.rollback()
+        return ok({"workflow_id": workflow_id, "user_name": ctx.user.user_name, "presence_degraded": True})
     return ok({"workflow_id": workflow_id, "user_name": ctx.user.user_name})
 
 

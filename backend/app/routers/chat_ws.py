@@ -55,6 +55,24 @@ def _parse_user_message(payload: dict) -> str:
     )
 
 
+def _parse_chat_history(payload: dict) -> list[dict]:
+    """Accept prior turns from the client (role + content)."""
+    raw = payload.get("chatHistory") or payload.get("history") or []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        role = (row.get("role") or "").strip().lower()
+        if role not in ("user", "assistant"):
+            continue
+        content = (row.get("content") or row.get("message") or "").strip()
+        if content:
+            out.append({"role": role, "content": content})
+    return out
+
+
 async def _stream_reply(
     websocket: WebSocket,
     db: Session,
@@ -66,6 +84,7 @@ async def _stream_reply(
     workspace_id: int | None = None,
     receipt_extra: dict | None = None,
     cancel_event: asyncio.Event | None = None,
+    history: list[dict] | None = None,
 ):
     from app.services.ab_routing import pick_ab_model
     from app.services.workspace_settings import get_chat_config
@@ -88,6 +107,7 @@ async def _stream_reply(
         workspace_id=workspace_id,
         cancel_event=cancel_event,
         usage_out=usage_out,
+        history=history,
     ):
         if cancel_event is not None and cancel_event.is_set():
             stopped = True
@@ -175,8 +195,16 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 continue
 
             query = str(user_msg).strip()
-            rag_hits = rag_hits_for_assistant(db, assistant_id, query)
-            rag = rag_context_for_assistant(db, assistant_id, query)
+            history = _parse_chat_history(payload)
+            # Prefer last user turn for retrieval; fall back to full query
+            rag_query = query
+            if history:
+                # Light rewrite: include previous user question for follow-ups
+                prev_users = [h["content"] for h in history if h["role"] == "user"][-2:]
+                if prev_users and len(query.split()) <= 8:
+                    rag_query = f"{' '.join(prev_users[-1:])} {query}".strip()
+            rag_hits = rag_hits_for_assistant(db, assistant_id, rag_query)
+            rag = rag_context_for_assistant(db, assistant_id, rag_query)
             system_prompt = assistant.prompt
             if rag:
                 system_prompt = (
@@ -217,6 +245,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     wid,
                     receipt_extra={"rag_hits": rag_hits},
                     cancel_event=cancel_event,
+                    history=history,
                 )
             finally:
                 cancel_event.set()
@@ -287,6 +316,7 @@ async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
             if not str(user_msg).strip():
                 continue
 
+            history = _parse_chat_history(payload)
             system, llm_user = await resolve_workflow_llm_messages(
                 db, workflow, user_id, str(user_msg).strip()
             )
@@ -319,6 +349,7 @@ async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
                     llm_user,
                     wid,
                     cancel_event=cancel_event,
+                    history=history,
                 )
             finally:
                 cancel_event.set()

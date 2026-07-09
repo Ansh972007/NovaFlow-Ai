@@ -28,11 +28,22 @@ export async function getWorkflowTemplates() {
   }
 }
 
+function normalizeWorkflowId(id) {
+  const safe = String(id ?? "").trim();
+  if (!safe || safe === "undefined" || safe === "null") return "";
+  return safe;
+}
+
 export async function getWorkflowInfo(id, { retries = 2 } = {}) {
+  const workflowId = normalizeWorkflowId(id);
+  if (!workflowId) {
+    throw new Error("Workflow not found");
+  }
+
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      return await client.get(`/workflow/info/${id}`);
+      return await client.get(`/workflow/info/${workflowId}`);
     } catch (err) {
       lastError = err;
       if (attempt < retries) {

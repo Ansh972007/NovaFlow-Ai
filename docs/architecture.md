@@ -56,9 +56,9 @@ API calls go through `src/lib/api/*`. Chat uses `AssistantChatSocket` for WebSoc
 
 ## RAG pipeline
 
-1. Upload file → chunk text → OpenAI embeddings
+1. Upload file → sentence-aware chunking → embeddings (provider vault / OpenAI-compatible)
 2. Store vectors in `embedding_json` and optionally **Milvus**
-3. On chat/workflow retrieve step: cosine search → top chunks → LLM context
+3. On chat/workflow retrieve: hybrid **vector + BM25 keyword** fused with **RRF** (including cross-KB) → numbered passages `[n]` → LLM context + citation receipt
 
 ## Workflow engine
 

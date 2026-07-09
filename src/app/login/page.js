@@ -15,6 +15,10 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isRegister = searchParams.get("mode") === "register";
+  const nextPath = useMemo(() => {
+    const next = searchParams.get("next") || "/chat";
+    return next.startsWith("/") && !next.startsWith("//") ? next : "/chat";
+  }, [searchParams]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -93,7 +97,7 @@ function LoginForm() {
       }
       setGreeting((g) => g + 1);
       await new Promise((resolve) => setTimeout(resolve, 1400));
-      router.push("/chat");
+      router.push(nextPath);
     } catch (err) {
       setError(err.message || "Authentication failed");
     } finally {

@@ -18,6 +18,32 @@ export default function Reveal({ children, delay = 0, className = "" }) {
   );
 }
 
+export function BlurReveal({ children, delay = 0, className = "", y = 32 }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y, filter: "blur(12px)" }}
+      whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+      viewport={{ once: true, margin: "-60px" }}
+      transition={{ duration: 0.9, delay, ease }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+export function LineReveal({ className = "" }) {
+  return (
+    <motion.div
+      initial={{ scaleX: 0, opacity: 0 }}
+      whileInView={{ scaleX: 1, opacity: 1 }}
+      viewport={{ once: true }}
+      transition={{ duration: 1, ease }}
+      className={`h-px origin-left bg-gradient-to-r from-black/50 via-black/20 to-transparent ${className}`}
+    />
+  );
+}
+
 export function StaggerText({ text, className = "" }) {
   const words = text.split(" ");
 

@@ -40,8 +40,7 @@ services:
     environment:
       ETCD_USE_EMBED: "true"
       COMMON_STORAGETYPE: local
-    ports:
-      - "19530:19530"
+    # No host port — API reaches milvus:19530 on the Docker network (avoids clash with bisheng on 19530)
     volumes:
       - novaflow_milvus:/var/lib/milvus
     healthcheck:
@@ -73,6 +72,18 @@ services:
       MILVUS_URI: http://milvus:19530
     volumes:
       - novaflow_data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
     depends_on:
       mysql:
         condition: service_healthy

@@ -23,14 +23,36 @@ JUDGE_SYSTEM = (
 def _score(actual: str, expected: str, match_type: str) -> bool:
     actual = (actual or "").strip()
     expected = (expected or "").strip()
-    if match_type == "judge":
+    mt = (match_type or "contains").lower().strip()
+    if mt == "judge":
         return False  # handled separately
     if not expected:
         return bool(actual)
-    if match_type == "exact":
+    if mt == "exact":
         return actual.lower() == expected.lower()
+    if mt == "regex":
+        try:
+            return bool(re.search(expected, actual, re.I | re.S))
+        except re.error:
+            return expected.lower() in actual.lower()
+    if mt in ("fuzzy", "token_overlap", "overlap"):
+        return _token_overlap(actual, expected) >= 0.55
+    # default: contains
     return expected.lower() in actual.lower()
 
+
+def _tokenize_eval(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]{2,}", (text or "").lower()))
+
+
+def _token_overlap(actual: str, expected: str) -> float:
+    a = _tokenize_eval(actual)
+    e = _tokenize_eval(expected)
+    if not e:
+        return 1.0 if a else 0.0
+    if not a:
+        return 0.0
+    return len(a & e) / len(e)
 
 async def _llm_judge(
     question: str,

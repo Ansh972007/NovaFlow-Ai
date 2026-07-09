@@ -33,6 +33,7 @@ export default function AgentsClient() {
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [toolResults, setToolResults] = useState([]);
+  const [selectedUsed, setSelectedUsed] = useState([]);
   const [selectedTools, setSelectedTools] = useState(["summarize"]);
   const [knowledgeId, setKnowledgeId] = useState("");
   const [system, setSystem] = useState(
@@ -128,6 +129,7 @@ export default function AgentsClient() {
     setError("");
     setOutput("");
     setToolResults([]);
+    setSelectedUsed([]);
     try {
       const res = await runAgent({
         input: input.trim(),
@@ -138,6 +140,7 @@ export default function AgentsClient() {
       });
       setOutput(res?.output || "(no output)");
       setToolResults(Array.isArray(res?.tool_results) ? res.tool_results : []);
+      setSelectedUsed(Array.isArray(res?.selected_tools) ? res.selected_tools : []);
     } catch (e) {
       setError(e.message || "Agent run failed");
     } finally {
@@ -350,6 +353,15 @@ export default function AgentsClient() {
             </div>
           ) : (
             <div className="mt-5 flex flex-1 flex-col gap-4 overflow-auto">
+              {selectedUsed.length > 0 && (
+                <p className="text-[11px] text-neutral-500">
+                  Ran tools:{" "}
+                  <span className="font-semibold text-neutral-700">{selectedUsed.join(", ")}</span>
+                  {selectedTools.length > selectedUsed.length
+                    ? ` (${selectedTools.length - selectedUsed.length} skipped as less relevant)`
+                    : null}
+                </p>
+              )}
               {toolResults.length > 0 && (
                 <div className="rounded-xl border border-black/[0.06] bg-neutral-50/80 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Tool trace</p>

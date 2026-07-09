@@ -74,15 +74,19 @@ def get_workspace_ctx(
     workspace_id_q: Optional[int] = Query(None, alias="workspace_id"),
 ) -> WorkspaceCtx:
     wid = x_workspace_id or workspace_id_q
-    if not wid:
+    ws = None
+    membership = None
+
+    if wid:
+        ws = db.get(Workspace, wid)
+        if ws:
+            membership = get_membership(db, user.user_id, wid)
+
+    if not ws or not membership:
         ws = ensure_personal_workspace(db, user)
         wid = ws.id
-    else:
-        ws = db.get(Workspace, wid)
-        if not ws:
-            raise HTTPException(status_code=404, detail="Workspace not found")
+        membership = get_membership(db, user.user_id, wid)
 
-    membership = get_membership(db, user.user_id, wid)
     if not membership:
         raise HTTPException(status_code=403, detail="Not a member of this workspace")
 

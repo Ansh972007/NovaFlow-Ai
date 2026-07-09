@@ -259,8 +259,9 @@ TEMPLATES = {
                     "y": 140,
                     "data": {
                         "prompt": (
-                            "Write a daily digest email body for the team from the retrieved notes. Structure:\n"
-                            "Subject line suggestion (one line)\n"
+                            "Write a daily digest email for the team from the retrieved notes.\n"
+                            "Line 1 MUST be: Subject: <concise subject under 80 chars>\n"
+                            "Then:\n"
                             "## Highlights\n3–5 bullets\n"
                             "## Risks / blockers\nbullets or 'None'\n"
                             "## Asks\nclear next actions with owners if mentioned.\n"
@@ -276,7 +277,7 @@ TEMPLATES = {
                     "data": {
                         "channel": "email",
                         "to": "team@example.com",
-                        "subject": "Daily digest — {{input}}",
+                        "subject": "{{subject}}",
                         "message": "{{output}}",
                     },
                 },
@@ -672,10 +673,12 @@ def _apply_template(template: str, context: dict) -> str:
             "slack_channel",
             "slack_user",
             "agent_tools",
+            "subject",
             "output",
             "input",
             "http",
             "chat_id",
+            "item",
         ),
         key=len,
         reverse=True,
@@ -688,6 +691,8 @@ def _apply_template(template: str, context: dict) -> str:
             "http",
             "transform",
             "chat_id",
+            "subject",
+            "item",
         ):
             val = context.get(key)
             if isinstance(val, (dict, list)):
@@ -697,6 +702,34 @@ def _apply_template(template: str, context: dict) -> str:
                     val = str(val)[:4000]
             text = text.replace(f"{{{{{key}}}}}", str(val or ""))
     return text
+
+
+def _extract_digest_subject(text: str) -> tuple[str, str]:
+    """Pull an explicit Subject: line from digest LLM output; return (subject, cleaned_body).
+
+    Only mutates the body when an explicit Subject: / Subject line marker is present,
+    so ordinary LLM replies are left untouched.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return "", ""
+    m = re.search(
+        r"(?im)^\s*(?:subject(?:\s*line)?(?:\s*suggestion)?)\s*:\s*(.+)$",
+        raw,
+    )
+    if not m:
+        return "", raw
+    subject = m.group(1).strip().strip("\"'")
+    lines = raw.splitlines()
+    drop_idx = None
+    for i, ln in enumerate(lines):
+        if re.match(r"(?i)^\s*(?:subject(?:\s*line)?(?:\s*suggestion)?)\s*:", ln):
+            drop_idx = i
+            break
+    body = raw
+    if drop_idx is not None:
+        body = "\n".join(lines[:drop_idx] + lines[drop_idx + 1 :]).strip()
+    return subject[:200], body or raw
 
 
 def _extract_titled_fields(text: str) -> tuple[str, str]:
@@ -732,8 +765,12 @@ def _format_notify_body(channel: str, subject: str, body: str) -> str:
     ch = (channel or "").lower()
     if ch == "telegram":
         text = re.sub(r"[#*_`]{2,}", "", text)
+        text = re.sub(r"^#+\s*", "", text, flags=re.M)
         return text[:3500]
     if ch == "slack":
+        # Prefer Slack mrkdwn: ## → *bold*, bullets stay
+        text = re.sub(r"^###?\s+(.+)$", r"*\1*", text, flags=re.M)
+        text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
         return text[:3500]
     if ch == "discord":
         return text[:1900]
@@ -1126,7 +1163,16 @@ async def _execute_graph(
         elif ntype == "notify":
             channel = (data.get("channel") or "telegram").strip().lower()
             to_addr = _apply_template(data.get("to") or "", context).strip()
-            subject = _apply_template(data.get("subject") or "NovaFlow notification", context)
+            # If LLM set a digest subject and template still asks for {{subject}}, fill it
+            if not context.get("subject") and context.get("output"):
+                subj, _ = _extract_digest_subject(context["output"])
+                if subj:
+                    context["subject"] = subj
+            if not context.get("subject"):
+                context["subject"] = f"NovaFlow digest — {(context.get('input') or '')[:60]}".strip(" —")
+            subject = _apply_template(data.get("subject") or "{{subject}}", context)
+            if not subject.strip() or subject.strip() == "{{subject}}":
+                subject = context.get("subject") or "NovaFlow notification"
             body_text = _apply_template(data.get("message") or "{{output}}", context)
             body_text = _format_notify_body(channel, subject, body_text)
             bot_token = (data.get("bot_token") or "").strip()
@@ -1315,14 +1361,28 @@ async def _execute_graph(
                 async for token in stream_chat(prompt, user_msg, db=db, workspace_id=workspace_id):
                     reply += token
                     await _emit({"type": "stream", "message": {"content": token}})
-                context["output"] = reply
-                step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
+                subject, cleaned = _extract_digest_subject(reply)
+                if subject:
+                    context["subject"] = subject
+                    context["output"] = cleaned or reply
+                else:
+                    context["output"] = reply
+                step["output"] = (context["output"] or "")[:500] + (
+                    "…" if len(context.get("output") or "") > 500 else ""
+                )
                 step["status"] = "ok"
                 await _emit({"type": "llm_end"})
             else:
                 reply = await stream_chat_sync(prompt, user_msg, db=db, workspace_id=workspace_id)
-                context["output"] = reply
-                step["output"] = reply[:500] + ("…" if len(reply) > 500 else "")
+                subject, cleaned = _extract_digest_subject(reply)
+                if subject:
+                    context["subject"] = subject
+                    context["output"] = cleaned or reply
+                else:
+                    context["output"] = reply
+                step["output"] = (context["output"] or "")[:500] + (
+                    "…" if len(context.get("output") or "") > 500 else ""
+                )
                 step["status"] = "ok"
         elif ntype == "output":
             step["output"] = context["output"] or context["input"]
@@ -1330,19 +1390,44 @@ async def _execute_graph(
         elif ntype == "loop":
             sep = data.get("separator") or "\n"
             max_iter = int(data.get("max") or 5)
+            concurrency = max(1, min(int(data.get("concurrency") or 3), 5))
             items = [x.strip() for x in (context.get("input") or "").split(sep) if x.strip()][:max_iter]
             prompt_tpl = data.get("prompt") or "Process: {{item}}"
-            outputs = []
-            for item in items:
-                msg = prompt_tpl.replace("{{item}}", item)
-                reply = await stream_chat_sync(
-                    "Produce compact, consistent results. No preamble — only the requested format.",
-                    msg,
+            system_tpl = (
+                data.get("system")
+                or "Produce compact, consistent results for each item. No preamble — only the requested format."
+            )
+
+            async def _one(item: str) -> tuple[str, str]:
+                local = {**context, "item": item}
+                msg = _apply_template(prompt_tpl, local)
+                if "{{item}}" in prompt_tpl and item not in msg:
+                    msg = prompt_tpl.replace("{{item}}", item)
+                sys_msg = _apply_template(system_tpl, local)
+                reply = await stream_chat_sync(sys_msg, msg, db=db, workspace_id=workspace_id)
+                return item, (reply or "").strip()
+
+            outputs: list[str] = []
+            # Bounded concurrency
+            for i in range(0, len(items), concurrency):
+                batch = items[i : i + concurrency]
+                results = await asyncio.gather(*[_one(it) for it in batch])
+                for item, reply in results:
+                    outputs.append(f"• {item}\n  → {reply}")
+
+            merged = "\n\n".join(outputs) if outputs else context.get("input", "")
+            if len(outputs) > 1 and data.get("merge", True):
+                merge_reply = await stream_chat_sync(
+                    (
+                        "Merge these batch results into one coherent summary. "
+                        "Keep a short bullet per item, then one overall takeaway. No fluff."
+                    ),
+                    merged[:8000],
                     db=db,
                     workspace_id=workspace_id,
                 )
-                outputs.append(f"• {item}\n  → {(reply or '').strip()}")
-            merged = "\n\n".join(outputs) if outputs else context.get("input", "")
+                if merge_reply and merge_reply.strip():
+                    merged = f"{merge_reply.strip()}\n\n---\nDetails:\n{merged}"
             context["output"] = merged
             step["output"] = merged[:500] + ("…" if len(merged) > 500 else "")
             step["iterations"] = len(items)
@@ -1350,13 +1435,16 @@ async def _execute_graph(
         elif ntype == "parallel":
             branches = data.get("branches") or ["Summary", "Key points", "Action items"]
             branches = [str(b) for b in branches][:5]
+            base_input = context.get("input") or ""
+            if context.get("retrieved"):
+                base_input = f"{base_input}\n\nContext:\n{context['retrieved']}"
             tasks = [
                 stream_chat_sync(
                     (
                         f"You are contributing one section of a multi-perspective analysis. "
                         f"Focus ONLY on: {b}. Be specific and concise (5–10 lines max)."
                     ),
-                    context.get("input") or "",
+                    base_input,
                     db=db,
                     workspace_id=workspace_id,
                 )

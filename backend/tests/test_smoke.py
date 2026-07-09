@@ -30,6 +30,7 @@ from app.services.workflow import (  # noqa: E402
     DEFAULT_LLM_PROMPT,
     TEMPLATES,
     _extract_titled_fields,
+    _extract_digest_subject,
     _format_notify_body,
     _run_status_from_steps,
 )
@@ -128,13 +129,13 @@ def test_health(client):
     data = res.json()
     assert data["status_code"] == 200
     assert data["data"]["status"] == "ok"
-    assert data["data"]["version"] == "9.7.0"
+    assert data["data"]["version"] == "9.9.0"
 
 
 def test_root(client):
     res = client.get("/")
     assert res.status_code == 200
-    assert res.json()["data"]["version"] == "9.7.0"
+    assert res.json()["data"]["version"] == "9.9.0"
 
 
 def test_login_and_user_info(client):
@@ -309,11 +310,78 @@ def test_rrf_hybrid_fuse():
 def test_receipt_usage_and_cost():
     r = build_chat_receipt(
         model="openai/gpt-4o-mini",
-        rag_hits=[{"file_name": "policy.pdf", "text": "hello", "score": 0.8, "method": "hybrid"}],
+        rag_hits=[
+            {"file_name": "policy.pdf", "text": "hello chunk A", "score": 0.8, "method": "hybrid"},
+            {"file_name": "policy.pdf", "text": "hello chunk B", "score": 0.7, "method": "hybrid"},
+        ],
         chars=12,
         usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
     )
     assert r["source_count"] == 1
+    assert len(r["chunks"]) == 2
+    assert r["chunks"][0]["n"] == 1
+    assert r["chunks"][1]["n"] == 2
+    assert r["chunks"][0]["file_name"] == "policy.pdf"
     assert r["total_tokens"] == 150
     assert r["est_cost_usd"] is not None
     assert estimate_cost_usd("gpt-4o-mini", 1_000_000, 0) == 0.15
+    assert estimate_cost_usd("claude-3-5-haiku", 1_000_000, 0) == 0.8
+
+
+def test_agent_tool_select_skips_irrelevant():
+    from app.services.agent_tools import _select_tools
+
+    tools = ["calculator", "kb_search", "summarize", "datetime", "web_fetch"]
+    picked = _select_tools("What is 12 + 30?", tools)
+    assert "calculator" in picked
+    assert "web_fetch" not in picked
+
+    picked2 = _select_tools("Fetch https://example.com and summarize", tools)
+    assert "web_fetch" in picked2
+
+
+def test_llm_history_normalize():
+    from app.services.llm import _normalize_history
+
+    hist = _normalize_history(
+        [
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": "nope"},
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": ""},
+        ]
+    )
+    assert hist == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
+
+
+def test_sentence_chunk_prefers_boundaries():
+    from app.services.knowledge import chunk_text
+
+    text = "First sentence here. Second sentence follows. Third one ends!"
+    chunks = chunk_text(text, size=40, overlap=5)
+    assert chunks
+    assert any("First" in c for c in chunks)
+
+
+def test_digest_subject_extraction():
+    subj, body = _extract_digest_subject(
+        "Subject: Ops standup - Mar 12\n\n## Highlights\n- Ship auth\n"
+    )
+    assert "Ops standup" in subj
+    assert "Highlights" in body
+    assert "Subject:" not in body
+    subj2, body2 = _extract_digest_subject("Here is a normal answer.\n\nMore detail.")
+    assert subj2 == ""
+    assert body2.startswith("Here is a normal")
+
+
+def test_eval_fuzzy_score():
+    from app.services.evaluation import _score
+
+    assert _score("The warranty period is 14 days", "warranty 14 days", "fuzzy")
+    assert not _score("hello world", "completely unrelated topic here", "fuzzy")
+    assert _score("abc-123", r"abc-\d+", "regex")
+    assert _score("Hello", "hello", "exact")

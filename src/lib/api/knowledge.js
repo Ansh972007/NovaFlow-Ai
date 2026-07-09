@@ -83,3 +83,15 @@ export async function searchKnowledgeChunks(knowledgeId, keyword, { page = 1, li
     });
   }
 }
+
+/** Grounded answer over one knowledge base */
+export async function answerKnowledgeQuestion(knowledgeId, question, { limit = 5 } = {}) {
+  if (!question?.trim()) {
+    return { answer: "", data: [], total: 0, method: "none", citations: [] };
+  }
+  return client.post("/knowledge/answer", {
+    knowledge_id: knowledgeId,
+    q: question.trim(),
+    limit,
+  });
+}

@@ -1,7 +1,7 @@
 import { getApiBaseUrl, getServerApiBaseUrl } from "@/lib/api/config";
 
-const TIMEOUT_MS = 20_000;
-const RETRIES = 3;
+const TIMEOUT_MS = 5_000;
+const RETRIES = 2;
 
 async function probe(url) {
   const res = await fetch(url, {
@@ -32,10 +32,7 @@ export async function GET() {
   const apiUrl = getServerApiBaseUrl().replace(/\/$/, "");
   const publicUrl = getApiBaseUrl().replace(/\/$/, "");
 
-  const urls = [
-    `${apiUrl}/health`,
-    `${apiUrl}/api/v1/user/public_key`,
-  ];
+  const urls = [`${apiUrl}/health`];
 
   for (const url of urls) {
     if (await probeWithRetry(url)) {

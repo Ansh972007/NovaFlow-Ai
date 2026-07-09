@@ -136,6 +136,12 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
       setError("");
       setStreaming(true);
 
+      const historyForModel = messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .filter((m) => String(m.content || "").trim())
+        .map((m) => ({ role: m.role, content: m.content }))
+        .slice(-12);
+
       const userMsg = {
         id: generateId(),
         role: "user",
@@ -151,13 +157,13 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
         ) {
           await connect();
         }
-        socketRef.current.sendMessage(trimmed);
+        socketRef.current.sendMessage(trimmed, historyForModel);
       } catch (err) {
         setError(err.message || "Failed to send message");
         setStreaming(false);
       }
     },
-    [app, streaming, connect]
+    [app, streaming, connect, messages]
   );
 
   const stop = useCallback(() => {
@@ -165,5 +171,53 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
     setStreaming(false);
   }, []);
 
-  return { messages, streaming, error, sendMessage, stop, setError };
+  const regenerate = useCallback(async () => {
+    if (streaming || !app) return;
+
+    let lastUser = "";
+    let historyForModel = [];
+
+    setMessages((prev) => {
+      const copy = [...prev];
+      while (copy.length && copy[copy.length - 1].role === "assistant") {
+        copy.pop();
+      }
+      const uIdx = [...copy].map((m) => m.role).lastIndexOf("user");
+      if (uIdx < 0) return prev;
+      lastUser = copy[uIdx].content || "";
+      historyForModel = copy
+        .slice(0, uIdx)
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .filter((m) => String(m.content || "").trim())
+        .map((m) => ({ role: m.role, content: m.content }))
+        .slice(-12);
+      return copy.slice(0, uIdx);
+    });
+
+    setError("");
+    await new Promise((r) => setTimeout(r, 0));
+    const trimmed = (lastUser || "").trim();
+    if (!trimmed) return;
+
+    setStreaming(true);
+    setMessages((prev) => [
+      ...prev,
+      { id: generateId(), role: "user", content: trimmed, streaming: false },
+    ]);
+
+    try {
+      if (
+        !socketRef.current?.connected ||
+        socketRef.current?.ws?.readyState !== WebSocket.OPEN
+      ) {
+        await connect();
+      }
+      socketRef.current.sendMessage(trimmed, historyForModel);
+    } catch (err) {
+      setError(err.message || "Failed to regenerate");
+      setStreaming(false);
+    }
+  }, [app, streaming, connect]);
+
+  return { messages, streaming, error, sendMessage, stop, regenerate, setError };
 }

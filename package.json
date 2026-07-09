@@ -1,6 +1,6 @@
 {
   "name": "novaflow-ai",
-  "version": "9.7.0",
+  "version": "9.9.0",
   "description": "NovaFlow AI — Enterprise AI workspace with unified UI for chat, knowledge, and apps",
   "private": true,
   "scripts": {

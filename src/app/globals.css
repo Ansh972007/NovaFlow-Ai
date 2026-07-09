@@ -408,6 +408,39 @@ body {
   animation: marquee 40s linear infinite;
 }
 
+.animate-marquee-reverse {
+  animation: marquee-reverse 45s linear infinite;
+}
+
+@keyframes marquee-reverse {
+  from { transform: translateX(-50%); }
+  to { transform: translateX(0); }
+}
+
+.nf-landing-badge {
+  position: relative;
+  overflow: hidden;
+}
+
+.nf-landing-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.65) 50%,
+    transparent 65%
+  );
+  transform: translateX(-120%);
+  animation: nf-landing-badge-shine 4.5s ease-in-out infinite;
+}
+
+@keyframes nf-landing-badge-shine {
+  0%, 70% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+
 .animate-shimmer {
   animation: shimmer 2s ease-in-out infinite;
 }

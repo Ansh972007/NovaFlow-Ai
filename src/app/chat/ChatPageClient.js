@@ -55,7 +55,7 @@ export default function ChatPageClient() {
 
   const chatKey = `${selectedApp?.id || "none"}-${sessionId || "none"}`;
 
-  const { messages, streaming, error, sendMessage, stop } = useAssistantChat({
+  const { messages, streaming, error, sendMessage, stop, regenerate, setError } = useAssistantChat({
     app: selectedApp,
     sessionId,
     initialMessages,
@@ -335,6 +335,9 @@ export default function ChatPageClient() {
                   error={error}
                   assistantName={selectedApp?.name}
                   onSuggest={sendMessage}
+                  onRegenerate={regenerate}
+                  onClearError={() => setError("")}
+                  hasKnowledge={Boolean(selectedApp?.knowledge_list?.length || selectedApp?.knowledge_ids?.length)}
                 />
                 <ChatInput
                   onSend={sendMessage}

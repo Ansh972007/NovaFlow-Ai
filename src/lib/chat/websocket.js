@@ -25,11 +25,16 @@ function buildInitPayload(app, chatId) {
   };
 }
 
-function buildSendPayload(app, chatId, message) {
+function buildSendPayload(app, chatId, message, history = []) {
+  const prior = (history || [])
+    .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
+    .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) }))
+    .slice(-12);
+
   const flowType = app.flow_type ?? FLOW_TYPE.ASSISTANT;
   if (flowType === FLOW_TYPE.ASSISTANT) {
     return {
-      chatHistory: [],
+      chatHistory: prior,
       flow_id: app.id,
       chat_id: chatId,
       name: app.name,
@@ -44,6 +49,7 @@ function buildSendPayload(app, chatId, message) {
     action: "input",
     chat_id: chatId,
     flow_id: app.id,
+    chatHistory: prior,
     data: {
       dialog_input: {
         data: { user_input: message },
@@ -57,12 +63,24 @@ function buildSendPayload(app, chatId, message) {
 function parseError(data) {
   try {
     if (typeof data.message === "string") {
-      const parsed = JSON.parse(data.message);
-      return parsed.status_message || data.message;
+      const raw = data.message.trim();
+      // Structured API errors are JSON; friendly LLM errors are plain text
+      if (raw.startsWith("{") || raw.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed.status_message || parsed.message || raw;
+        } catch {
+          return raw || "Something went wrong";
+        }
+      }
+      return raw || "Something went wrong";
     }
-    return data.message?.status_message || "Something went wrong";
-  } catch {
+    if (data.message && typeof data.message === "object") {
+      return data.message.status_message || data.message.message || "Something went wrong";
+    }
     return "Something went wrong";
+  } catch {
+    return typeof data?.message === "string" ? data.message : "Something went wrong";
   }
 }
 
@@ -172,11 +190,11 @@ export class AssistantChatSocket {
     }
   }
 
-  sendMessage(text) {
+  sendMessage(text, history = []) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected");
     }
-    this.ws.send(JSON.stringify(buildSendPayload(this.app, this.chatId, text)));
+    this.ws.send(JSON.stringify(buildSendPayload(this.app, this.chatId, text, history)));
   }
 
   stop() {

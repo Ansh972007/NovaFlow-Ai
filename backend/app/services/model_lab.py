@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,64 @@ def dataset_dict_from_row(row: FineTuneDataset) -> dict:
     return dataset_dict(row)
 
 
+_QUESTION_TEMPLATES = [
+    (
+        "What is the main takeaway from «{doc}» regarding this excerpt?\n\n{excerpt}",
+        "Takeaway: {lede}\n\nKey points:\n{bullets}\n\nSource: {doc}",
+    ),
+    (
+        "A teammate asks: \"Can you explain this from «{doc}»?\"\n\n{excerpt}",
+        "{lede}\n\nDetails:\n{bullets}\n\n(From {doc})",
+    ),
+    (
+        "Summarize the critical facts in this «{doc}» passage for someone new to the topic.\n\n{excerpt}",
+        "{lede}\n\n{bullets}\n\nDocument: {doc}",
+    ),
+    (
+        "Based on «{doc}», what should someone remember from the following?\n\n{excerpt}",
+        "Remember:\n{bullets}\n\nIn short: {lede}\n\n— {doc}",
+    ),
+]
+
+
+def _first_sentence(text: str, limit: int = 220) -> str:
+    text = re.sub(r"\s+", " ", (text or "")).strip()
+    if not text:
+        return ""
+    m = re.search(r"^(.+?[.!?])(\s|$)", text)
+    sent = m.group(1).strip() if m else text
+    return sent[:limit]
+
+
+def _bulletize(text: str, max_bullets: int = 4) -> str:
+    text = re.sub(r"\s+", " ", (text or "")).strip()
+    # Split on sentence boundaries
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    bullets = []
+    for p in parts:
+        p = p.strip()
+        if len(p) < 20:
+            continue
+        # Keep short clauses
+        if len(p) > 160:
+            p = p[:157] + "…"
+        bullets.append(f"- {p}")
+        if len(bullets) >= max_bullets:
+            break
+    if not bullets and text:
+        bullets = [f"- {text[:160]}{'…' if len(text) > 160 else ''}"]
+    return "\n".join(bullets)
+
+
+def _near_dup(a: str, b: str) -> bool:
+    ta = set(re.findall(r"[a-z0-9]{3,}", (a or "").lower()))
+    tb = set(re.findall(r"[a-z0-9]{3,}", (b or "").lower()))
+    if not ta or not tb:
+        return False
+    inter = len(ta & tb)
+    return inter / min(len(ta), len(tb)) >= 0.85
+
+
 def knowledge_to_training_rows(
     db: Session,
     knowledge_ids: list[int],
@@ -23,7 +82,11 @@ def knowledge_to_training_rows(
     ),
     max_rows: int = 200,
 ) -> list[dict]:
+    """Build diversified Q→A rows (not echo stubs) from knowledge chunks."""
     rows: list[dict] = []
+    seen_previews: list[str] = []
+    tpl_i = 0
+
     for kid in knowledge_ids:
         kb = db.get(KnowledgeBase, kid)
         if not kb or kb.workspace_id != workspace_id:
@@ -36,24 +99,44 @@ def knowledge_to_training_rows(
                 KnowledgeFile.status == 2,
             )
             .order_by(KnowledgeChunk.id)
-            .limit(max_rows)
+            .limit(max(max_rows * 2, 50))
             .all()
         )
         for chunk, file in chunks:
             text = (chunk.text or "").strip()
             if len(text) < 40:
                 continue
-            preview = text[:400]
+            preview = text[:420]
+            if any(_near_dup(preview, prev) for prev in seen_previews[-40:]):
+                continue
+            seen_previews.append(preview)
+
+            lede = _first_sentence(text)
+            bullets = _bulletize(text)
+            doc = file.file_name or "document"
+            q_tpl, a_tpl = _QUESTION_TEMPLATES[tpl_i % len(_QUESTION_TEMPLATES)]
+            tpl_i += 1
+
+            user = q_tpl.format(doc=doc, excerpt=preview)
+            assistant = a_tpl.format(doc=doc, lede=lede, bullets=bullets, excerpt=preview)
+
             rows.append(
                 {
                     "system": system_prompt,
-                    "user": (
-                        f"From document «{file.file_name}», explain the key points a user should know. "
-                        f"Start with a one-sentence takeaway, then 2–4 bullets.\n\nExcerpt:\n{preview}"
-                    ),
-                    "assistant": text[:1500],
+                    "user": user,
+                    "assistant": assistant[:1800],
                 }
             )
+            # Add a terse factoid variant for longer passages
+            if len(text) > 280 and len(rows) < max_rows:
+                fact = lede or preview[:180]
+                rows.append(
+                    {
+                        "system": system_prompt,
+                        "user": f"Quick fact check from «{doc}»: what does this say?\n\n{preview[:280]}",
+                        "assistant": f"{fact}\n\n(Source: {doc})",
+                    }
+                )
             if len(rows) >= max_rows:
                 return rows
     return rows

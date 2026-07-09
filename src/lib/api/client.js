@@ -15,7 +15,7 @@ function formatApiError(error) {
     if (error.code === "ECONNABORTED") {
       return "NovaFlow API timed out. Check that the backend is running and try again.";
     }
-    return `Cannot reach the NovaFlow API at ${apiUrl}. Start the NovaFlow backend, then refresh this page.`;
+    return `Cannot reach the NovaFlow API at ${apiUrl}. Start the NovaFlow backend (port 3001), then hard-refresh this page. If you are on Windows, use http://127.0.0.1:3001 instead of localhost.`;
   }
 
   const status = error.response.status;
@@ -27,6 +27,10 @@ function formatApiError(error) {
 
   if (data?.status_message) {
     return data.status_message;
+  }
+
+  if (data?.detail) {
+    return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
   }
 
   if (typeof data === "string" && data.includes("Internal Server Error")) {
@@ -60,9 +64,23 @@ client.interceptors.response.use(
   },
   (error) => {
     const status = error.response?.status;
-    if (typeof window !== "undefined" && (status === 401 || status === 403)) {
+    if (typeof window !== "undefined") {
       const path = window.location?.pathname || "";
-      if (!path.startsWith("/login") && !path.startsWith("/setup")) {
+      const detail = error.response?.data?.detail || error.response?.data?.status_message || "";
+      const staleWorkspace =
+        status === 404 &&
+        typeof detail === "string" &&
+        detail.toLowerCase().includes("workspace");
+
+      if (staleWorkspace) {
+        try {
+          localStorage.removeItem("nf_workspace_id");
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if ((status === 401 || status === 403) && !path.startsWith("/login") && !path.startsWith("/setup")) {
         try {
           localStorage.removeItem("nf_token");
           localStorage.removeItem("nf_workspace_id");

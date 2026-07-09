@@ -4,13 +4,34 @@ NovaFlow ships its **own backend** (FastAPI + MySQL + Redis + optional Milvus). 
 
 ## Profiles
 
-| Script | Stack | Use case |
-|--------|-------|----------|
-| `start-backend.ps1` | API + MySQL + Redis + Milvus | Local frontend dev |
+| Command / script | Stack | Use case |
+|------------------|-------|----------|
+| `docker compose up -d --build` | Web + API + MySQL + Redis + Milvus | **One command — run everything** |
+| `.\deploy\start.ps1` | Same as above | Same + waits for health |
+| `start-backend.ps1` | API + MySQL + Redis + Milvus | Local `npm run dev` frontend |
 | `start-prod.ps1` | Web + API + all data services | Production |
 | `start-demo.ps1` | Same as prod + seeded demo data | Try NovaFlow quickly |
 
-## Local development
+## One command (web + API)
+
+```powershell
+cd novaflow-ai
+docker compose up -d --build
+```
+
+| Service | Port |
+|---------|------|
+| NovaFlow Web | **3000** |
+| NovaFlow API | **3001** |
+| MySQL | 3307 |
+| Redis | 6381 |
+| Milvus | internal only (no host port) |
+
+Default admin: **admin** / **admin123**
+
+Stop: `docker compose down`
+
+## Local development (hot reload frontend)
 
 ### Backend only (Docker)
 
@@ -19,16 +40,7 @@ cd novaflow-ai
 .\deploy\start-backend.ps1
 ```
 
-| Service | Port |
-|---------|------|
-| NovaFlow API | **3001** |
-| MySQL | 3307 |
-| Redis | 6381 |
-| Milvus | 19530 |
-
-Default admin: **admin** / **admin123**
-
-### Frontend
+### Frontend (local)
 
 ```powershell
 cd novaflow-ai
@@ -89,6 +101,7 @@ Without a key, chat runs in demo mode with placeholder replies.
 
 | File | Purpose |
 |------|---------|
-| `docker-compose.yml` | Dev backend stack |
+| `docker-compose.yml` | Dev backend stack (API + data) |
+| `../docker-compose.yml` | Full stack — web + API + data |
 | `docker-compose.prod.yml` | Production (web + api + data) |
 | `.env.production.example` | Production env template |

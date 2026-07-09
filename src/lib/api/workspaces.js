@@ -16,14 +16,25 @@ export async function ensureActiveWorkspace() {
   try {
     const data = await listWorkspaces();
     const items = data?.items || [];
-    if (!items.length) return null;
+    if (!items.length) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+      }
+      return null;
+    }
     const stored = getActiveWorkspaceId();
     const storedValid = stored && items.some((w) => String(w.id) === String(stored));
+    if (stored && !storedValid && typeof window !== "undefined") {
+      localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    }
     const id = storedValid ? Number(stored) : data?.current_id || items[0]?.id;
     if (id) setActiveWorkspaceId(id);
     return id;
   } catch {
-    return getActiveWorkspaceId() ? Number(getActiveWorkspaceId()) : null;
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    }
+    return null;
   }
 }
 

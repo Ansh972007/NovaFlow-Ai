@@ -14,9 +14,42 @@
 - **Analytics** — dashboard charts, usage tracking
 - **Milvus** — optional vector store (SQLite fallback for dev)
 
-## Quick start (development)
+## Quick start (one command — Docker)
 
-### 1. Backend
+From the `novaflow-ai` folder, with **Docker Desktop** running:
+
+```powershell
+cd novaflow-ai
+docker compose up -d --build
+```
+
+Or use the helper script (waits until web + API are ready):
+
+```powershell
+.\deploy\start.ps1
+```
+
+| Service | URL |
+|---------|-----|
+| Web UI | **http://localhost:3000** |
+| API | **http://localhost:3001** |
+| Login | **admin** / **admin123** |
+
+Stop: `docker compose down`
+
+**Troubleshooting:** If you see `container name already in use`, run `.\deploy\start.ps1` (auto-cleans orphans) or:
+
+```powershell
+docker compose down --remove-orphans
+docker rm -f novaflow-web novaflow-api novaflow-mysql novaflow-redis novaflow-milvus
+docker compose up -d --build
+```
+
+If Bisheng is also running on this machine, NovaFlow Milvus uses the internal Docker network only (no port 19530 conflict).
+
+## Quick start (development — frontend hot reload)
+
+### 1. Backend only (Docker)
 
 ```powershell
 cd novaflow-ai
@@ -25,7 +58,7 @@ cd novaflow-ai
 
 API: **http://localhost:3001** · default login **admin** / **admin123**
 
-### 2. Frontend
+### 2. Frontend (local)
 
 ```powershell
 cd novaflow-ai

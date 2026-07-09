@@ -94,6 +94,7 @@ const ADD_NODE_DEFAULTS = {
 
 export default function WorkflowBuilderClient({ workflowId }) {
   const router = useRouter();
+  const safeWorkflowId = useMemo(() => String(workflowId || "").trim(), [workflowId]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -141,10 +142,15 @@ export default function WorkflowBuilderClient({ workflowId }) {
   );
 
   const load = useCallback(async () => {
+    if (!safeWorkflowId || safeWorkflowId === "undefined" || safeWorkflowId === "null") {
+      setError("Invalid workflow link. Return to the workflows list and open a workflow again.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const info = await getWorkflowInfo(workflowId);
+      const info = await getWorkflowInfo(safeWorkflowId);
       setName(info?.name || "");
       setDesc(info?.desc || "");
       setStatus(info?.status ?? 0);
@@ -181,7 +187,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
     } finally {
       setLoading(false);
     }
-  }, [workflowId]);
+  }, [safeWorkflowId]);
 
   useEffect(() => {
     getUserInfo()
@@ -249,7 +255,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
         });
     };
     syncPresence();
-    const poll = setInterval(syncPresence, 5000);
+    const poll = setInterval(syncPresence, 15000);
     return () => clearInterval(poll);
   }, [user, workflowId, selectedId]);
 

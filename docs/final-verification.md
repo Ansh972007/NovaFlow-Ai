@@ -1,4 +1,4 @@
-# Final verification checklist (v9.6)
+# Final verification checklist (v9.9)
 
 Run from `novaflow-ai/`:
 
@@ -16,7 +16,7 @@ python -m pytest -q
 
 ## Covered by automated smoke (`backend/tests/test_smoke.py`)
 
-- Health `/health` version 9.6.0
+- Health `/health` version 9.9.0
 - Login + `/user/info`
 - Unauthorized access blocked
 - Workflow templates, create, run, runs list/detail

@@ -1,4 +1,5 @@
 import json
+import math
 import re
 from pathlib import Path
 
@@ -74,18 +75,51 @@ def extract_text(path: Path, db: Session | None = None) -> str:
 
 
 def chunk_text(text: str, size: int = 1000, overlap: int = 100) -> list[str]:
-    text = re.sub(r"\s+", " ", text).strip()
+    """Sentence-aware sliding windows; falls back to char windows when needed."""
+    text = re.sub(r"\s+", " ", (text or "")).strip()
     if not text:
         return []
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(len(text), start + size)
-        chunks.append(text[start:end])
-        if end >= len(text):
-            break
-        start = max(start + 1, end - overlap)
+
+    # Prefer splitting on sentence boundaries for cleaner RAG passages
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    if len(sentences) <= 1:
+        sentences = [text]
+
+    chunks: list[str] = []
+    buf = ""
+    for sent in sentences:
+        candidate = f"{buf} {sent}".strip() if buf else sent
+        if len(candidate) <= size:
+            buf = candidate
+            continue
+        if buf:
+            chunks.append(buf)
+        if len(sent) <= size:
+            # Overlap: keep a trailing slice of the previous chunk
+            if chunks and overlap > 0:
+                tail = chunks[-1][-overlap:]
+                buf = f"{tail} {sent}".strip()
+                if len(buf) > size:
+                    buf = sent
+            else:
+                buf = sent
+        else:
+            # Long sentence — hard-split with overlap
+            start = 0
+            while start < len(sent):
+                end = min(len(sent), start + size)
+                chunks.append(sent[start:end])
+                if end >= len(sent):
+                    break
+                start = max(start + 1, end - overlap)
+            buf = ""
+    if buf:
+        chunks.append(buf)
     return chunks
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
 
 
 def _embed_chunks(db: Session, kb: KnowledgeBase, chunk_rows: list[KnowledgeChunk]):
@@ -155,9 +189,14 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
 
 
 def _token_search(db: Session, knowledge_id: int, query: str, limit: int) -> list[dict]:
-    q_tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
+    """Lightweight BM25-ish keyword ranking over chunk tokens (no external deps)."""
+    q_tokens = _tokenize(query)
     if not q_tokens:
         return []
+    q_set = set(q_tokens)
+    q_tf: dict[str, int] = {}
+    for t in q_tokens:
+        q_tf[t] = q_tf.get(t, 0) + 1
 
     rows = (
         db.query(KnowledgeChunk, KnowledgeFile)
@@ -165,19 +204,52 @@ def _token_search(db: Session, knowledge_id: int, query: str, limit: int) -> lis
         .filter(KnowledgeChunk.knowledge_id == knowledge_id, KnowledgeFile.status == 2)
         .all()
     )
-    scored: list[tuple[float, KnowledgeChunk, KnowledgeFile]] = []
+    if not rows:
+        return []
+
+    # Document frequency for IDF
+    df: dict[str, int] = {}
+    docs: list[tuple[KnowledgeChunk, KnowledgeFile, list[str]]] = []
     for chunk, file in rows:
-        text = chunk.text or ""
-        c_tokens = set(re.findall(r"[a-z0-9]+", text.lower()))
-        if not c_tokens:
+        tokens = _tokenize(chunk.text or "")
+        if not tokens:
             continue
-        overlap = q_tokens & c_tokens
-        if not overlap:
+        docs.append((chunk, file, tokens))
+        for t in set(tokens):
+            if t in q_set:
+                df[t] = df.get(t, 0) + 1
+
+    n_docs = max(len(docs), 1)
+    avgdl = sum(len(t) for _, _, t in docs) / n_docs
+    k1, b = 1.5, 0.75
+
+    scored: list[tuple[float, KnowledgeChunk, KnowledgeFile]] = []
+    for chunk, file, tokens in docs:
+        # Skip docs with no query overlap quickly
+        if not (q_set & set(tokens)):
             continue
-        score = len(overlap) / (len(q_tokens) ** 0.5)
-        if any(len(t) > 4 for t in overlap):
-            score += 0.5
-        scored.append((score, chunk, file))
+        tf: dict[str, int] = {}
+        for t in tokens:
+            tf[t] = tf.get(t, 0) + 1
+        dl = len(tokens)
+        score = 0.0
+        for term, qf in q_tf.items():
+            f = tf.get(term, 0)
+            if not f:
+                continue
+            idf = math.log(1 + (n_docs - df.get(term, 0) + 0.5) / (df.get(term, 0) + 0.5))
+            denom = f + k1 * (1 - b + b * dl / max(avgdl, 1.0))
+            score += idf * ((f * (k1 + 1)) / denom) * (1.0 + 0.1 * min(qf, 3))
+        # Phrase / consecutive token bonus
+        text_l = (chunk.text or "").lower()
+        q_raw = (query or "").lower().strip()
+        if len(q_raw) > 4 and q_raw in text_l:
+            score += 1.25
+        name = (file.file_name or "").lower()
+        if any(t in name for t in q_set if len(t) > 3):
+            score += 0.4
+        if score > 0:
+            scored.append((score, chunk, file))
 
     scored.sort(key=lambda x: -x[0])
     data = []
@@ -188,7 +260,7 @@ def _token_search(db: Session, knowledge_id: int, query: str, limit: int) -> lis
                 "chunk_index": chunk.chunk_index,
                 "file_id": file.id,
                 "file_name": file.file_name,
-                "score": round(score, 3),
+                "score": round(score, 4),
                 "method": "keyword",
             }
         )
@@ -366,11 +438,20 @@ def set_assistant_knowledge(db: Session, assistant_id: str, knowledge_ids: list[
 
 def rag_hits_for_assistant(db: Session, assistant_id: str, query: str, limit: int = 5) -> list[dict]:
     ids = get_assistant_knowledge_ids(db, assistant_id)
-    hits: list[dict] = []
+    if not ids:
+        return []
+    # Gather per-KB lists then fuse with RRF so vector vs keyword / cross-KB scores are comparable
+    lists: list[list[dict]] = []
+    fetch = max(limit * 2, 8)
     for kid in ids:
-        hits.extend(search_chunks_semantic(db, kid, query, limit))
-    hits.sort(key=lambda h: -(h.get("score") or 0))
-    return hits[:limit]
+        hits = search_chunks_semantic(db, kid, query, fetch)
+        if hits:
+            lists.append(hits)
+    if not lists:
+        return []
+    if len(lists) == 1:
+        return lists[0][:limit]
+    return _rrf_fuse(lists, limit)
 
 
 def rag_context_for_assistant(db: Session, assistant_id: str, query: str, limit: int = 5) -> str:

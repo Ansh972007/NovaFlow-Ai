@@ -38,7 +38,7 @@ export default function HeroMockup() {
   }, []);
 
   return (
-    <div className="gradient-border shadow-[0_32px_80px_rgba(0,0,0,0.12)]">
+    <div className="gradient-border shadow-[0_32px_80px_rgba(0,0,0,0.1)] transition-shadow duration-500 hover:shadow-[0_40px_100px_rgba(0,0,0,0.14)]">
       <div className="relative overflow-hidden rounded-[1.2rem] bg-[#fafafa]">
         {/* Window chrome */}
         <div className="flex items-center justify-between border-b border-border bg-white px-4 py-3">
@@ -65,9 +65,9 @@ export default function HeroMockup() {
             {messages.slice(0, step + 1).map((msg, idx) => (
               <motion.div
                 key={idx}
-                initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
+                initial={{ opacity: 0, y: 12, filter: "blur(6px)" }}
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div

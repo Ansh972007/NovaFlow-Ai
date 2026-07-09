@@ -718,7 +718,7 @@ export default function EvaluationClient() {
                             value={scoringMode}
                             onChange={(e) => setScoringMode(e.target.value)}
                           >
-                            <option value="rules">Rules (contains / exact)</option>
+                            <option value="rules">Rules (contains / exact / fuzzy)</option>
                             <option value="judge">LLM judge</option>
                           </select>
                         </label>
@@ -743,7 +743,7 @@ export default function EvaluationClient() {
                       </div>
                     )}
                     <p className="mt-2 text-xs text-neutral-400">
-                      CSV columns: input, expected, match_type (optional)
+                      CSV columns: input, expected, match_type (contains|exact|fuzzy|regex|judge)
                     </p>
                     {lastRun && (
                       <div className="mt-4 rounded-xl bg-emerald-50/80 px-4 py-3 text-sm">
