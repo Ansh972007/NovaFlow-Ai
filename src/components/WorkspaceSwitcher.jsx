@@ -14,6 +14,7 @@ export default function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState("personal");
   const ref = useRef(null);
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export default function WorkspaceSwitcher() {
     const name = newName.trim();
     if (!name) return;
     try {
-      const ws = await createWorkspace(name);
+      const ws = await createWorkspace(name, { workspace_type: newType });
       setActiveWorkspaceId(ws.id);
       window.location.reload();
     } catch {
@@ -90,7 +91,14 @@ export default function WorkspaceSwitcher() {
                 ws.id === currentId ? "font-medium text-foreground" : "text-muted"
               }`}
             >
-              <span className="truncate">{ws.name}</span>
+              <span className="min-w-0 truncate">
+                <span className="block truncate">{ws.name}</span>
+                {ws.workspace_type ? (
+                  <span className="block text-[10px] uppercase tracking-wide text-muted">
+                    {ws.workspace_type}
+                  </span>
+                ) : null}
+              </span>
               {ws.role ? (
                 <span className="ml-2 shrink-0 text-[10px] uppercase text-muted">{ws.role}</span>
               ) : null}
@@ -98,18 +106,41 @@ export default function WorkspaceSwitcher() {
           ))}
           <div className="border-t border-border px-3 py-2">
             {creating ? (
-              <form onSubmit={handleCreate} className="flex gap-1">
+              <form onSubmit={handleCreate} className="space-y-1.5">
                 <input
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Workspace name"
-                  className="min-w-0 flex-1 rounded-lg border border-border px-2 py-1 text-xs"
+                  className="w-full rounded-lg border border-border px-2 py-1 text-xs"
                   autoFocus
                 />
-                <button type="submit" className="rounded-lg bg-foreground px-2 py-1 text-xs text-white">
-                  Add
-                </button>
+                <select
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value)}
+                  className="w-full rounded-lg border border-border px-2 py-1 text-xs text-muted"
+                >
+                  <option value="personal">Personal</option>
+                  <option value="team">Team</option>
+                  <option value="organization">Organization</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+                <div className="flex gap-1">
+                  <button type="submit" className="rounded-lg bg-foreground px-2 py-1 text-xs text-white">
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreating(false);
+                      setNewName("");
+                      setNewType("personal");
+                    }}
+                    className="rounded-lg border border-border px-2 py-1 text-xs text-muted"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </form>
             ) : (
               <button

@@ -25,14 +25,74 @@ class User(Base):
 
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     user_name = Column(String(64), unique=True, nullable=False, index=True)
-    password = Column(String(128), nullable=False)
+    password = Column(String(255), nullable=False)  # argon2id (legacy md5 migrated on login)
     email = Column(String(255), nullable=True, index=True)
     oauth_provider = Column(String(32), nullable=True)
     oauth_subject = Column(String(128), nullable=True, index=True)
-    role = Column(String(16), default="editor")  # admin | editor | viewer
+    role = Column(String(32), default="editor")
+    email_verified = Column(Integer, default=0)
+    mfa_enabled = Column(Integer, default=0)
+    mfa_secret_enc = Column(Text, default="")
+    password_changed_at = Column(DateTime, nullable=True)
     delete = Column(Integer, default=0)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String(32), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    fingerprint = Column(String(64), default="")
+    user_agent = Column(String(512), default="")
+    ip_address = Column(String(64), default="")
+    device_name = Column(String(120), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
+    absolute_expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    revoke_reason = Column(String(64), default="")
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(String(32), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    session_id = Column(String(32), ForeignKey("auth_sessions.id"), nullable=False, index=True)
+    family_id = Column(String(32), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    revoked_at = Column(DateTime, nullable=True)
+    revoke_reason = Column(String(64), default="")
+    replaced_by = Column(String(64), default="")
+
+
+class PasswordHistory(Base):
+    __tablename__ = "password_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SecurityAuditLog(Base):
+    __tablename__ = "security_audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    action = Column(String(120), nullable=False, index=True)
+    actor_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True, index=True)
+    workspace_id = Column(Integer, nullable=True, index=True)
+    resource_type = Column(String(64), default="")
+    resource_id = Column(String(128), default="")
+    ip_address = Column(String(64), default="")
+    user_agent = Column(String(512), default="")
+    success = Column(Integer, default=1)
+    detail_json = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class Assistant(Base):
@@ -504,6 +564,33 @@ class SavedAgent(Base):
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class Organization(Base):
+    """Top-level tenant container (company / university / government)."""
+
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(160), nullable=False)
+    slug = Column(String(80), unique=True, nullable=False, index=True)
+    logo_url = Column(String(500), default="")
+    owner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    plan = Column(String(32), default="free")  # free | team | business | enterprise
+    deleted_at = Column(DateTime, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class OrganizationMember(Base):
+    __tablename__ = "organization_members"
+
+    organization_id = Column(Integer, ForeignKey("organizations.id"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), primary_key=True)
+    role = Column(String(32), default="member")  # owner | admin | member | billing
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
 
@@ -511,6 +598,16 @@ class Workspace(Base):
     name = Column(String(120), nullable=False)
     slug = Column(String(64), unique=True, nullable=False, index=True)
     owner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    workspace_type = Column(String(32), default="personal")  # personal | team | organization | enterprise
+    logo_url = Column(String(500), default="")
+    region = Column(String(64), default="global")
+    timezone = Column(String(64), default="UTC")
+    language = Column(String(16), default="en")
+    visibility = Column(String(16), default="private")
+    deleted_at = Column(DateTime, nullable=True, index=True)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -521,6 +618,7 @@ class WorkspaceQuota(Base):
     workspace_id = Column(Integer, ForeignKey("workspaces.id"), primary_key=True)
     eval_runs_monthly_limit = Column(Integer, default=0)
     finetune_jobs_monthly_limit = Column(Integer, default=0)
+    seat_limit = Column(Integer, default=0)  # 0 = unlimited
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -539,17 +637,113 @@ class AbModelRoute(Base):
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class Team(Base):
+    __tablename__ = "teams"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    parent_team_id = Column(Integer, ForeignKey("teams.id"), nullable=True, index=True)
+    name = Column(String(120), nullable=False)
+    slug = Column(String(80), nullable=False, index=True)
+    description = Column(String(500), default="")
+    leader_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+
+    team_id = Column(Integer, ForeignKey("teams.id"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), primary_key=True)
+    role = Column(String(32), default="member")  # lead | member
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"
 
     workspace_id = Column(Integer, ForeignKey("workspaces.id"), primary_key=True)
     user_id = Column(Integer, ForeignKey("users.user_id"), primary_key=True)
-    role = Column(String(16), default="editor")  # admin | editor | viewer
+    role = Column(String(32), default="editor")
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True, index=True)
     create_time = Column(DateTime, default=datetime.utcnow)
 
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
+class WorkspaceInvite(Base):
+    __tablename__ = "workspace_invites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    role = Column(String(32), default="editor")
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    status = Column(String(16), default="pending")  # pending | accepted | rejected | expired | revoked
+    invited_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    accepted_at = Column(DateTime, nullable=True)
+    accepted_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class EmergencyAccessGrant(Base):
+    """Break-glass platform access to customer workspaces — always audited."""
+
+    __tablename__ = "emergency_access_grants"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    grantee_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    reason = Column(String(500), nullable=False)
+    status = Column(String(16), default="pending")  # pending | active | revoked | expired | denied
+    starts_at = Column(DateTime, nullable=True)
+    ends_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class ObjectFile(Base):
+    """Object storage metadata — bytes live in R2/S3/MinIO/local, not in PostgreSQL."""
+
+    __tablename__ = "object_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    organization_id = Column(Integer, nullable=True, index=True)
+    team_id = Column(Integer, nullable=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.user_id"), nullable=True, index=True)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    visibility = Column(String(16), default="workspace")
+    tenant_version = Column(Integer, default=1)
+    storage_key = Column(String(512), nullable=False, index=True)
+    bucket = Column(String(128), default="")
+    provider = Column(String(32), default="local")
+    content_type = Column(String(128), default="application/octet-stream")
+    size_bytes = Column(Integer, default=0)
+    checksum_sha256 = Column(String(64), default="")
+    version_id = Column(String(128), default="")
+    original_name = Column(String(255), default="")
+    deleted_at = Column(DateTime, nullable=True, index=True)
+    legal_hold = Column(Integer, default=0)
+    row_version = Column(Integer, default=1)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+try:
+    from app.data.engine import create_data_engine
+    from app.data.observability import attach_engine_metrics
+
+    engine = create_data_engine(DATABASE_URL)
+    attach_engine_metrics(engine)
+except Exception:
+    connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -688,6 +882,109 @@ def migrate_schema():
         if "run_webhook_url" not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE workflows ADD COLUMN run_webhook_url VARCHAR(500) DEFAULT ''"))
+
+    # Enterprise security + multi-tenant platform tables
+    for table in (
+        "auth_sessions",
+        "refresh_tokens",
+        "password_history",
+        "security_audit_logs",
+        "organizations",
+        "organization_members",
+        "teams",
+        "team_members",
+        "workspace_invites",
+        "emergency_access_grants",
+    ):
+        if table not in insp.get_table_names() and table in Base.metadata.tables:
+            Base.metadata.tables[table].create(bind=engine, checkfirst=True)
+
+    if "workspaces" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("workspaces")}
+        for col, ddl in [
+            ("organization_id", "ALTER TABLE workspaces ADD COLUMN organization_id INTEGER"),
+            ("workspace_type", "ALTER TABLE workspaces ADD COLUMN workspace_type VARCHAR(32) DEFAULT 'personal'"),
+            ("logo_url", "ALTER TABLE workspaces ADD COLUMN logo_url VARCHAR(500) DEFAULT ''"),
+            ("region", "ALTER TABLE workspaces ADD COLUMN region VARCHAR(64) DEFAULT 'global'"),
+            ("timezone", "ALTER TABLE workspaces ADD COLUMN timezone VARCHAR(64) DEFAULT 'UTC'"),
+            ("language", "ALTER TABLE workspaces ADD COLUMN language VARCHAR(16) DEFAULT 'en'"),
+            ("visibility", "ALTER TABLE workspaces ADD COLUMN visibility VARCHAR(16) DEFAULT 'private'"),
+            ("deleted_at", "ALTER TABLE workspaces ADD COLUMN deleted_at DATETIME"),
+            ("created_by", "ALTER TABLE workspaces ADD COLUMN created_by INTEGER"),
+            ("updated_by", "ALTER TABLE workspaces ADD COLUMN updated_by INTEGER"),
+        ]:
+            if col not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+    if "workspace_members" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("workspace_members")}
+        if "team_id" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE workspace_members ADD COLUMN team_id INTEGER"))
+
+    if "workspace_quotas" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("workspace_quotas")}
+        if "seat_limit" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE workspace_quotas ADD COLUMN seat_limit INTEGER DEFAULT 0"))
+
+    if "users" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("users")}
+        for col, ddl in [
+            ("email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0"),
+            ("mfa_enabled", "ALTER TABLE users ADD COLUMN mfa_enabled INTEGER DEFAULT 0"),
+            ("mfa_secret_enc", "ALTER TABLE users ADD COLUMN mfa_secret_enc TEXT DEFAULT ''"),
+            ("password_changed_at", "ALTER TABLE users ADD COLUMN password_changed_at DATETIME"),
+        ]:
+            if col not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+        # Widen password column for Argon2id hashes (MySQL); SQLite ignores type width.
+        if not DATABASE_URL.startswith("sqlite"):
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE users MODIFY COLUMN password VARCHAR(255) NOT NULL"))
+            except Exception:
+                pass
+
+    # Enterprise data platform — soft delete / optimistic lock / visibility (additive, nullable)
+    enterprise_tables = (
+        "assistants",
+        "knowledge_bases",
+        "workflows",
+        "workflow_runs",
+        "saved_agents",
+        "eval_suites",
+        "eval_runs",
+        "dev_projects",
+        "api_keys",
+        "fine_tune_datasets",
+        "fine_tune_jobs",
+    )
+    enterprise_cols = {
+        "deleted_at": "ALTER TABLE {t} ADD COLUMN deleted_at DATETIME",
+        "legal_hold": "ALTER TABLE {t} ADD COLUMN legal_hold INTEGER DEFAULT 0",
+        "row_version": "ALTER TABLE {t} ADD COLUMN row_version INTEGER DEFAULT 1",
+        "visibility": "ALTER TABLE {t} ADD COLUMN visibility VARCHAR(16) DEFAULT 'workspace'",
+        "organization_id": "ALTER TABLE {t} ADD COLUMN organization_id INTEGER",
+        "team_id": "ALTER TABLE {t} ADD COLUMN team_id INTEGER",
+        "owner_id": "ALTER TABLE {t} ADD COLUMN owner_id INTEGER",
+        "created_by": "ALTER TABLE {t} ADD COLUMN created_by INTEGER",
+        "updated_by": "ALTER TABLE {t} ADD COLUMN updated_by INTEGER",
+        "tenant_version": "ALTER TABLE {t} ADD COLUMN tenant_version INTEGER DEFAULT 1",
+    }
+    for table in enterprise_tables:
+        if table not in insp.get_table_names():
+            continue
+        cols = {c["name"] for c in insp.get_columns(table)}
+        for col, ddl_tmpl in enterprise_cols.items():
+            if col not in cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(ddl_tmpl.format(t=table)))
+                except Exception:
+                    pass
 
 
 def init_db():

@@ -1,0 +1,67 @@
+# PostgreSQL 17 + PgBouncer overlay for the Enterprise Data Platform.
+# Usage (from repo root):
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+#
+# Zero-downtime cutover: keep MySQL stack running; stand up this overlay;
+# run Alembic against Postgres; dual-write / migrate; switch DATABASE_URL.
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: novaflow-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: novaflow
+      POSTGRES_USER: novaflow
+      POSTGRES_PASSWORD: novaflow
+      TZ: UTC
+    volumes:
+      - novaflow_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novaflow -d novaflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.1
+    container_name: novaflow-pgbouncer
+    restart: unless-stopped
+    ports:
+      - "6432:5432"
+    environment:
+      DATABASE_URL: postgres://novaflow:novaflow@postgres:5432/novaflow
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 40
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    environment:
+      DATABASE_URL: postgresql+psycopg://novaflow:novaflow@pgbouncer:5432/novaflow
+      DB_PGBOUNCER_MODE: "1"
+      VECTOR_PROVIDER: ${VECTOR_PROVIDER:-auto}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+
+volumes:
+  novaflow_postgres:

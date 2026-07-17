@@ -1,4 +1,4 @@
-# Start NovaFlow full stack (web + API + MySQL + Redis + Milvus) — one command
+# Start NovaFlow full stack (web + API + MySQL + Redis + Milvus) - one command
 # Run from novaflow-ai root: .\deploy\start.ps1
 # Or: docker compose up -d --build
 
@@ -66,7 +66,7 @@ try {
   Write-Host "First run may take several minutes. Milvus alone can need ~90s." -ForegroundColor Gray
   docker compose up -d --build --remove-orphans
   if ($LASTEXITCODE -ne 0) {
-    Write-Host "Compose failed — retrying after cleanup..." -ForegroundColor Yellow
+    Write-Host "Compose failed - retrying after cleanup..." -ForegroundColor Yellow
     docker compose down --remove-orphans 2>$null | Out-Null
     Remove-OrphanNovaContainers
     docker compose up -d --build --remove-orphans

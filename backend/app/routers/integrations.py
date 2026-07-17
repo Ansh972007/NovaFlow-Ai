@@ -198,8 +198,8 @@ def bind_slack_events(
     workflow_id = (body.get("workflow_id") or "").strip()
     if not workflow_id:
         return fail(400, "workflow_id required")
-    wf = db.get(Workflow, workflow_id)
-    if not wf or wf.workspace_id != ctx.workspace_id:
+    wf = ctx.fetch(Workflow, workflow_id)
+    if not wf:
         return fail(404, "Workflow not found")
     if wf.status != 1:
         return fail(400, "Publish the workflow before binding Slack events")
@@ -316,8 +316,8 @@ async def register_webhook(
     workflow_id = (body.get("workflow_id") or "").strip()
     if not workflow_id:
         return fail(400, "workflow_id required")
-    wf = db.get(Workflow, workflow_id)
-    if not wf or wf.workspace_id != ctx.workspace_id:
+    wf = ctx.fetch(Workflow, workflow_id)
+    if not wf:
         return fail(404, "Workflow not found")
     if wf.status != 1:
         return fail(400, "Publish the workflow before registering a Telegram webhook")
@@ -416,8 +416,8 @@ async def telegram_webhook(workflow_id: str, request: Request, db: Session = Dep
 
 @router.get("/integrations/telegram/setup/{workflow_id}")
 def telegram_setup(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    wf = db.get(Workflow, workflow_id)
-    if not wf or wf.workspace_id != ctx.workspace_id:
+    wf = ctx.fetch(Workflow, workflow_id)
+    if not wf:
         return fail(404, "Workflow not found")
     settings = integrations_dict(db, ctx.workspace_id)
     public_base = resolve_public_base_url(db, ctx.workspace_id)

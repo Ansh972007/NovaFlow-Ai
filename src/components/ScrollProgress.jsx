@@ -6,13 +6,19 @@ import { subscribeScroll } from "@/lib/runtime/scrollBus";
 
 export default function ScrollProgress() {
   const { scrollYProgress } = useScroll();
-  const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30 });
+  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 28, restDelta: 0.001 });
 
   return (
-    <motion.div
-      className="scroll-progress fixed top-0 left-0 right-0 z-[100] h-[2px] bg-black origin-left"
-      style={{ scaleX }}
-    />
+    <div className="pointer-events-none fixed top-0 left-0 right-0 z-[100] h-[3px] overflow-hidden">
+      <motion.div
+        className="absolute inset-0 origin-left bg-gradient-to-r from-neutral-400 via-black to-neutral-600"
+        style={{ scaleX }}
+      />
+      <motion.div
+        className="absolute inset-0 origin-left bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-70"
+        style={{ scaleX }}
+      />
+    </div>
   );
 }
 

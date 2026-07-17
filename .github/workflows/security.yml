@@ -1,0 +1,31 @@
+name: Security CI
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - ".github/workflows/security.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+
+jobs:
+  security-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Security unit tests
+        env:
+          JWT_SECRET: ci-test-secret-not-for-production-use-xx
+          NOVAFLOW_ENV: development
+        run: pytest tests/test_security_foundation.py -q
+      - name: Dependency vulnerability scan
+        run: pip install pip-audit && pip-audit -r requirements.txt || true

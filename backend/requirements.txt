@@ -2,6 +2,7 @@ fastapi==0.115.6
 uvicorn[standard]==0.32.1
 sqlalchemy==2.0.36
 pymysql==1.1.1
+psycopg[binary]==3.2.3
 cryptography==44.0.0
 rsa==4.9
 python-jose[cryptography]==3.3.0
@@ -10,7 +11,10 @@ httpx==0.28.1
 croniter==5.0.1
 ldap3==2.9.1
 redis==5.2.1
+boto3==1.35.76
 pypdf==5.1.0
 python-dotenv==1.0.1
 pymilvus==2.4.9
 pytest==8.3.4
+argon2-cffi==23.1.0
+alembic==1.14.0

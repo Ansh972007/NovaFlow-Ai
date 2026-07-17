@@ -26,8 +26,17 @@ import {
   verifyLlmProvider,
 } from "@/lib/api/llm";
 import { getApiBaseUrl } from "@/lib/api/config";
-import { getTeamMembers, updateMemberRole, downloadAuditExport, getAuditEvents } from "@/lib/api/analytics";
-import { getWorkspaceQuotas, updateWorkspaceQuotas, getActiveWorkspaceId } from "@/lib/api/workspaces";
+import { downloadAuditExport, getAuditEvents } from "@/lib/api/analytics";
+import {
+  getWorkspaceQuotas,
+  updateWorkspaceQuotas,
+  getActiveWorkspaceId,
+  listWorkspaceMembers,
+  updateWorkspaceMemberRole,
+  inviteWorkspaceMember,
+  listWorkspaceInvites,
+  revokeWorkspaceInvite,
+} from "@/lib/api/workspaces";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { createApiKey, deleteApiKey, listApiKeys } from "@/lib/api/apiKeys";
 import {
@@ -132,6 +141,10 @@ export default function SettingsClient() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
   const [team, setTeam] = useState([]);
+  const [invites, setInvites] = useState([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("viewer");
+  const [inviteMsg, setInviteMsg] = useState("");
   const [teamBusy, setTeamBusy] = useState(null);
   const [provider, setProvider] = useState(null);
   const [providerSaving, setProviderSaving] = useState(false);
@@ -230,11 +243,29 @@ export default function SettingsClient() {
     if (user) load();
   }, [user, load]);
 
+  const reloadWorkspaceTeam = useCallback(async () => {
+    const wid = getActiveWorkspaceId();
+    if (!wid) {
+      setTeam([]);
+      setInvites([]);
+      return;
+    }
+    try {
+      const [members, pending] = await Promise.all([
+        listWorkspaceMembers(wid),
+        listWorkspaceInvites(wid).catch(() => []),
+      ]);
+      setTeam(Array.isArray(members) ? members : []);
+      setInvites(Array.isArray(pending) ? pending : []);
+    } catch {
+      setTeam([]);
+      setInvites([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAdmin) return;
-    getTeamMembers()
-      .then((m) => setTeam(Array.isArray(m) ? m : m?.data || []))
-      .catch(() => setTeam([]));
+    reloadWorkspaceTeam();
     getLlmSettings()
       .then(setProvider)
       .catch(() => setProvider(null));
@@ -293,7 +324,7 @@ export default function SettingsClient() {
     getIntegrationHealth()
       .then(setIntegrationHealth)
       .catch(() => setIntegrationHealth(null));
-  }, [isAdmin]);
+  }, [isAdmin, reloadWorkspaceTeam]);
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
@@ -309,11 +340,39 @@ export default function SettingsClient() {
   }, [searchParams]);
 
   async function handleRoleChange(memberId, role) {
+    const wid = getActiveWorkspaceId();
+    if (!wid) return;
     setTeamBusy(memberId);
     try {
-      await updateMemberRole(memberId, role);
-      const m = await getTeamMembers();
-      setTeam(Array.isArray(m) ? m : m?.data || []);
+      await updateWorkspaceMemberRole(wid, memberId, role);
+      await reloadWorkspaceTeam();
+    } finally {
+      setTeamBusy(null);
+    }
+  }
+
+  async function handleInvite(e) {
+    e.preventDefault();
+    const wid = getActiveWorkspaceId();
+    if (!wid || !inviteEmail.trim()) return;
+    setInviteMsg("");
+    try {
+      await inviteWorkspaceMember(wid, { email: inviteEmail.trim(), role: inviteRole });
+      setInviteEmail("");
+      setInviteMsg("Invitation sent.");
+      await reloadWorkspaceTeam();
+    } catch (err) {
+      setInviteMsg(err.message || "Invite failed");
+    }
+  }
+
+  async function handleRevokeInvite(inviteId) {
+    const wid = getActiveWorkspaceId();
+    if (!wid) return;
+    setTeamBusy(inviteId);
+    try {
+      await revokeWorkspaceInvite(wid, inviteId);
+      await reloadWorkspaceTeam();
     } finally {
       setTeamBusy(null);
     }
@@ -2347,37 +2406,124 @@ export default function SettingsClient() {
               )}
 
               {activeTab === "team" && isAdmin && (
-                <SettingsSection
-                  icon={SECTION_ICONS.team}
-                  title="Team & roles"
-                  description="Manage workspace access for your team."
-                  delay={0.05}
-                >
-                  {team.length === 0 ? (
-                    <SettingsEmpty>No team members found.</SettingsEmpty>
-                  ) : (
-                    <ul className="space-y-2">
-                      {team.map((member) => (
-                        <SettingsListItem key={member.user_id}>
-                          <div>
-                            <p className="text-sm font-medium">{member.user_name}</p>
-                            <p className="text-[11px] text-neutral-400">ID {member.user_id}</p>
-                          </div>
-                          <select
-                            value={member.role || "editor"}
-                            disabled={teamBusy === member.user_id}
-                            onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
-                            className="settings-role-select rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs font-semibold"
-                          >
-                            <option value="admin">Admin</option>
-                            <option value="editor">Editor</option>
-                            <option value="viewer">Viewer</option>
-                          </select>
-                        </SettingsListItem>
-                      ))}
-                    </ul>
-                  )}
-                </SettingsSection>
+                <>
+                  <SettingsSection
+                    icon={SECTION_ICONS.team}
+                    title="Invite members"
+                    description="Send an email invite to join the active workspace."
+                    delay={0.05}
+                  >
+                    <form onSubmit={handleInvite} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <label className="min-w-0 flex-1 space-y-1">
+                        <span className="text-xs font-semibold text-neutral-600">Email</span>
+                        <input
+                          type="email"
+                          required
+                          value={inviteEmail}
+                          onChange={(e) => setInviteEmail(e.target.value)}
+                          placeholder="colleague@company.com"
+                          className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <label className="space-y-1 sm:w-36">
+                        <span className="text-xs font-semibold text-neutral-600">Role</span>
+                        <select
+                          value={inviteRole}
+                          onChange={(e) => setInviteRole(e.target.value)}
+                          className="settings-role-select w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-xs font-semibold"
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="manager">Manager</option>
+                          <option value="developer">Developer</option>
+                          <option value="editor">Editor</option>
+                          <option value="analyst">Analyst</option>
+                          <option value="viewer">Viewer</option>
+                          <option value="guest">Guest</option>
+                        </select>
+                      </label>
+                      <button
+                        type="submit"
+                        className="rounded-lg bg-foreground px-4 py-2 text-xs font-semibold text-white"
+                      >
+                        Send invite
+                      </button>
+                    </form>
+                    {inviteMsg ? <SettingsMessage>{inviteMsg}</SettingsMessage> : null}
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.team}
+                    title="Team & roles"
+                    description="Manage workspace access for your team."
+                    delay={0.08}
+                  >
+                    {team.length === 0 ? (
+                      <SettingsEmpty>No team members found.</SettingsEmpty>
+                    ) : (
+                      <ul className="space-y-2">
+                        {team.map((member) => (
+                          <SettingsListItem key={member.user_id}>
+                            <div>
+                              <p className="text-sm font-medium">{member.user_name}</p>
+                              <p className="text-[11px] text-neutral-400">
+                                {member.email || `ID ${member.user_id}`}
+                              </p>
+                            </div>
+                            <select
+                              value={member.role || "editor"}
+                              disabled={teamBusy === member.user_id || member.role === "owner"}
+                              onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
+                              className="settings-role-select rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs font-semibold"
+                            >
+                              <option value="owner">Owner</option>
+                              <option value="admin">Admin</option>
+                              <option value="manager">Manager</option>
+                              <option value="developer">Developer</option>
+                              <option value="editor">Editor</option>
+                              <option value="analyst">Analyst</option>
+                              <option value="viewer">Viewer</option>
+                              <option value="guest">Guest</option>
+                            </select>
+                          </SettingsListItem>
+                        ))}
+                      </ul>
+                    )}
+                  </SettingsSection>
+
+                  <SettingsSection
+                    icon={SECTION_ICONS.team}
+                    title="Pending invites"
+                    description="Invitations waiting to be accepted."
+                    delay={0.11}
+                  >
+                    {invites.filter((i) => i.status === "pending").length === 0 ? (
+                      <SettingsEmpty>No pending invitations.</SettingsEmpty>
+                    ) : (
+                      <ul className="space-y-2">
+                        {invites
+                          .filter((i) => i.status === "pending")
+                          .map((inv) => (
+                            <SettingsListItem key={inv.id}>
+                              <div>
+                                <p className="text-sm font-medium">{inv.email}</p>
+                                <p className="text-[11px] text-neutral-400">
+                                  {inv.role} · expires {inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : "—"}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={teamBusy === inv.id}
+                                onClick={() => handleRevokeInvite(inv.id)}
+                                className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-50"
+                              >
+                                Revoke
+                              </button>
+                            </SettingsListItem>
+                          ))}
+                      </ul>
+                    )}
+                  </SettingsSection>
+                </>
               )}
             </div>
           </div>

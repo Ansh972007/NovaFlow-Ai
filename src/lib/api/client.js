@@ -8,6 +8,8 @@ const client = axios.create({
   timeout: 60000,
 });
 
+let refreshPromise = null;
+
 function formatApiError(error) {
   const apiUrl = getApiBaseUrl();
 
@@ -40,6 +42,45 @@ function formatApiError(error) {
   return error.message || `Request failed (${status})`;
 }
 
+export function storeAuthTokens(data) {
+  if (typeof window === "undefined" || !data) return;
+  if (data.access_token) {
+    localStorage.setItem("nf_token", data.access_token);
+  }
+  if (data.refresh_token) {
+    localStorage.setItem("nf_refresh_token", data.refresh_token);
+  }
+}
+
+export function clearAuthTokens() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem("nf_token");
+    localStorage.removeItem("nf_refresh_token");
+    localStorage.removeItem("nf_workspace_id");
+  } catch {
+    /* ignore */
+  }
+}
+
+async function refreshAccessToken() {
+  const refresh = localStorage.getItem("nf_refresh_token");
+  if (!refresh) {
+    throw new Error("No refresh token");
+  }
+  const res = await axios.post(
+    "/api/v1/user/refresh",
+    { refresh_token: refresh },
+    { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+  );
+  const payload = res.data?.data || res.data;
+  if (!payload?.access_token) {
+    throw new Error("Refresh failed");
+  }
+  storeAuthTokens(payload);
+  return payload.access_token;
+}
+
 client.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("nf_token");
@@ -62,10 +103,41 @@ client.interceptors.response.use(
     const message = response.data?.status_message || "Request failed";
     return Promise.reject(new Error(message));
   },
-  (error) => {
+  async (error) => {
     const status = error.response?.status;
+    const original = error.config;
+    const path = typeof window !== "undefined" ? window.location?.pathname || "" : "";
+
+    if (
+      typeof window !== "undefined" &&
+      status === 401 &&
+      original &&
+      !original._nfRetry &&
+      !String(original.url || "").includes("/user/login") &&
+      !String(original.url || "").includes("/user/refresh") &&
+      !String(original.url || "").includes("/user/regist")
+    ) {
+      original._nfRetry = true;
+      try {
+        if (!refreshPromise) {
+          refreshPromise = refreshAccessToken().finally(() => {
+            refreshPromise = null;
+          });
+        }
+        const newToken = await refreshPromise;
+        original.headers = original.headers || {};
+        original.headers.Authorization = `Bearer ${newToken}`;
+        return client(original);
+      } catch {
+        clearAuthTokens();
+        if (!path.startsWith("/login") && !path.startsWith("/setup")) {
+          window.location.assign(`/login?next=${encodeURIComponent(path)}`);
+        }
+        return Promise.reject(new Error(formatApiError(error)));
+      }
+    }
+
     if (typeof window !== "undefined") {
-      const path = window.location?.pathname || "";
       const detail = error.response?.data?.detail || error.response?.data?.status_message || "";
       const staleWorkspace =
         status === 404 &&
@@ -81,13 +153,8 @@ client.interceptors.response.use(
       }
 
       if ((status === 401 || status === 403) && !path.startsWith("/login") && !path.startsWith("/setup")) {
-        try {
-          localStorage.removeItem("nf_token");
-          localStorage.removeItem("nf_workspace_id");
-        } catch {
-          /* ignore */
-        }
         if (status === 401) {
+          clearAuthTokens();
           window.location.assign(`/login?next=${encodeURIComponent(path)}`);
         }
       }

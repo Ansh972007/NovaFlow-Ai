@@ -6,8 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
-import { WorkspaceSkeletonList } from "@/components/workspace/WorkspaceTabs";
+import { WorkspaceSkeletonList, WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
+import WorkspaceEmpty from "@/components/workspace/WorkspaceEmpty";
 import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
+import TiltCard from "@/components/TiltCard";
 import { getUserInfo } from "@/lib/api/auth";
 import { ensureActiveWorkspace } from "@/lib/api/workspaces";
 import {
@@ -142,16 +144,7 @@ export default function WorkflowsClient() {
               { label: "Published", value: publishedCount },
               { label: "Templates", value: displayTemplates.length },
             ].map((s, i) => (
-              <motion.div
-                key={s.label}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.08 + i * 0.05, ease }}
-                className="workspace-stat rounded-2xl px-5 py-4"
-              >
-                <p className="text-2xl font-semibold tracking-tight">{s.value}</p>
-                <p className="text-xs text-neutral-500">{s.label}</p>
-              </motion.div>
+              <WorkspaceStatCard key={s.label} label={s.label} value={s.value} index={i} />
             ))}
           </div>
 
@@ -165,17 +158,24 @@ export default function WorkflowsClient() {
             {loading ? (
               <WorkspaceSkeletonList count={4} height="h-20" />
             ) : workflows.length === 0 ? (
-              <div className="workspace-empty rounded-2xl p-10 text-center">
-                <p className="font-medium">No workflows yet</p>
-                <p className="mt-1 text-sm text-neutral-500">Start from a template and open the visual builder.</p>
-                <button type="button" onClick={() => setShowCreate(true)} className="btn-primary mt-5">
-                  Create workflow
-                </button>
-              </div>
+              <WorkspaceEmpty
+                title="No workflows yet"
+                description="Start from a template and open the visual builder."
+                actionLabel="Create workflow"
+                onAction={() => setShowCreate(true)}
+                icon="⚡"
+              />
             ) : (
               <ul className="space-y-3">
-                {workflows.map((wf) => (
-                  <li key={wf.id} className="workspace-list-row flex flex-col gap-3 rounded-2xl px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                {workflows.map((wf, i) => (
+                  <motion.li
+                    key={wf.id}
+                    initial={{ opacity: 0, x: -12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + i * 0.04, ease }}
+                    whileHover={{ x: 4 }}
+                    className="workspace-list-row flex flex-col gap-3 rounded-2xl px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="truncate font-semibold">{wf.name}</p>
@@ -210,7 +210,7 @@ export default function WorkflowsClient() {
                         Delete
                       </button>
                     </div>
-                  </li>
+                  </motion.li>
                 ))}
               </ul>
             )}
@@ -225,33 +225,52 @@ export default function WorkflowsClient() {
             <p className="workspace-section-label mb-5">Starter templates</p>
             <div className="grid gap-4 md:grid-cols-3">
               {displayTemplates.map((tpl, i) => (
-                <motion.button
+                <motion.div
                   key={tpl.id}
-                  type="button"
                   initial={{ opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.22 + i * 0.05, ease }}
-                  onClick={() => {
-                    setTemplateId(tpl.id);
-                    setName(tpl.name);
-                    setShowCreate(true);
-                  }}
-                  className="workspace-card rounded-2xl p-6 text-left transition-transform hover:scale-[1.01]"
                 >
-                  <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase text-neutral-500">
-                    Template
-                  </span>
-                  <h3 className="mt-4 text-lg font-semibold tracking-tight">{tpl.name}</h3>
-                  <p className="mt-2 text-sm text-neutral-500">{tpl.desc}</p>
-                </motion.button>
+                  <TiltCard>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTemplateId(tpl.id);
+                        setName(tpl.name);
+                        setShowCreate(true);
+                      }}
+                      className="workspace-card w-full rounded-2xl p-6 text-left"
+                    >
+                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase text-neutral-500">
+                        Template
+                      </span>
+                      <h3 className="mt-4 text-lg font-semibold tracking-tight">{tpl.name}</h3>
+                      <p className="mt-2 text-sm text-neutral-500">{tpl.desc}</p>
+                      <p className="mt-4 text-xs font-semibold text-neutral-900 opacity-60 transition-opacity group-hover:opacity-100">
+                        Use template →
+                      </p>
+                    </button>
+                  </TiltCard>
+                </motion.div>
               ))}
             </div>
           </motion.section>
       </WorkspacePageShell>
 
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
-          <form onSubmit={handleCreate} className="workspace-modal w-full max-w-md rounded-2xl p-6">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
+        >
+          <motion.form
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.45, ease }}
+            onSubmit={handleCreate}
+            className="workspace-modal w-full max-w-md rounded-2xl p-6"
+          >
             <h2 className="text-lg font-semibold">New workflow</h2>
             <label className="mt-4 block text-sm font-medium">
               Name
@@ -285,8 +304,8 @@ export default function WorkflowsClient() {
                 {creating ? "Creating…" : "Create & open studio"}
               </button>
             </div>
-          </form>
-        </div>
+          </motion.form>
+        </motion.div>
       )}
     </>
   );

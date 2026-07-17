@@ -15,7 +15,7 @@ from app.config import (
     MICROSOFT_CLIENT_SECRET,
     OAUTH_REDIRECT_BASE,
 )
-from app.crypto import md5_hash
+from app.crypto import hash_password
 from app.services.tenancy import ensure_personal_workspace
 from app.database import User
 from sqlalchemy.orm import Session
@@ -186,7 +186,7 @@ def find_or_create_oauth_user(
     user = User(
         user_name=username,
         email=email,
-        password=md5_hash(secrets.token_urlsafe(32)),
+        password=hash_password(secrets.token_urlsafe(32)),
         oauth_provider=provider,
         oauth_subject=sub,
         role="editor",

@@ -1,0 +1,394 @@
+================================================================================
+  NOVAFLOW AI — COMPLETE PROJECT DETAILS
+================================================================================
+  Generated for local reference
+  Product version : 9.9.0
+  Package         : novaflow-ai
+  License         : Proprietary
+================================================================================
+
+
+--------------------------------------------------------------------------------
+1. WHAT IS THIS PROJECT?
+--------------------------------------------------------------------------------
+
+NovaFlow AI is an enterprise AI workspace. It gives teams one place to:
+
+  • Chat with AI assistants
+  • Build knowledge bases (RAG — Retrieval Augmented Generation)
+  • Design visual AI workflows
+  • Run tool-using agents
+  • Schedule digests and automations
+  • Fine-tune / evaluate models
+  • Share workflows in a marketplace
+  • Manage team, integrations, and analytics
+
+It is a full-stack product: Next.js frontend + FastAPI backend + MySQL +
+Redis + optional Milvus vector DB, runnable with one Docker Compose command.
+
+
+--------------------------------------------------------------------------------
+2. HOW TO RUN
+--------------------------------------------------------------------------------
+
+Docker (recommended — full stack):
+
+  cd novaflow-ai
+  docker compose up -d --build
+
+  Web  : http://127.0.0.1:3000
+  API  : http://127.0.0.1:3001
+  Health: http://127.0.0.1:3001/health
+
+  On Windows, prefer 127.0.0.1 instead of localhost.
+
+Default login:
+  Username : admin
+  Password : admin123
+
+Local scripts (deploy/):
+  start.ps1          — start stack
+  start-backend.ps1  — API only
+  start-demo.ps1     — demo seed data
+  start-prod.ps1     — production style
+
+Dev frontend (without Docker web image):
+  copy .env.example .env.local
+  npm install
+  npm run dev
+
+
+--------------------------------------------------------------------------------
+3. DOCKER SERVICES & PORTS
+--------------------------------------------------------------------------------
+
+  Service   Container         Host port        Purpose
+  --------- ----------------- ---------------- -------------------------
+  web       novaflow-web      3000             Next.js frontend
+  api       novaflow-api      3001             FastAPI backend
+  mysql     novaflow-mysql    3307 → 3306      Primary database
+  redis     novaflow-redis    6381 → 6379      Cache / sessions
+  milvus    novaflow-milvus   (internal only)  Vector search (19530)
+
+MySQL credentials (Docker):
+  DB name  : novaflow
+  User     : novaflow
+  Password : novaflow
+  Root     : novaflow
+
+
+--------------------------------------------------------------------------------
+4. TECH STACK
+--------------------------------------------------------------------------------
+
+FRONTEND
+  • Next.js 16.2.10 (App Router, standalone output)
+  • React 19
+  • Tailwind CSS 4
+  • Framer Motion (animations)
+  • Recharts (analytics charts)
+  • Axios (HTTP)
+  • JSEncrypt (RSA-encrypted login passwords)
+  • WebSockets for streaming chat / workflow runs
+
+BACKEND
+  • FastAPI 0.115.x + Uvicorn
+  • SQLAlchemy 2 + PyMySQL
+  • python-jose (JWT)
+  • RSA crypto for login
+  • httpx, croniter, ldap3, pypdf, pymilvus
+  • OpenAI-compatible LLM + embeddings API
+
+DATA / INFRA
+  • MySQL 8 (primary) or SQLite fallback (backend/data/novaflow.db)
+  • Redis 7
+  • Milvus v2.4 (optional); else embeddings stored as JSON / SQLite path
+  • Docker Compose
+
+
+--------------------------------------------------------------------------------
+5. DATABASE DETAILS
+--------------------------------------------------------------------------------
+
+Primary store: MySQL (Docker) or SQLite (local without DATABASE_URL).
+
+Key tables / domains:
+
+  AUTH & TENANCY
+    users
+    workspaces
+    workspace_members
+    workspace_quotas
+    workspace_settings
+    workspace_integrations
+    api_keys
+
+  ASSISTANTS & RAG
+    assistants
+    knowledge_bases
+    knowledge_files
+    knowledge_chunks
+    assistant_knowledge
+
+  WORKFLOWS
+    workflows
+    workflow_runs
+    workflow_versions
+    workflow_schedules
+    workflow_presence
+    workflow_presence_sessions
+    workflow_pending_runs
+    workflow_ratings
+    workflow_comments
+
+  AGENTS & PROJECTS
+    saved_agents
+    dev_projects
+
+  LLM / ROUTING
+    llm_providers
+    ab_model_routes
+
+  EVALUATION
+    eval_suites
+    eval_cases
+    eval_runs
+    eval_schedules
+    eval_regression_alerts
+    eval_comparisons
+
+  MODEL LAB / FINE-TUNE
+    finetune_datasets
+    finetune_jobs
+
+  ANALYTICS
+    usage_events
+
+User / member roles: admin | editor | viewer
+
+
+--------------------------------------------------------------------------------
+6. BACKEND DETAILS
+--------------------------------------------------------------------------------
+
+Entry     : backend/app/main.py
+API title : NovaFlow API
+Prefix    : /api/v1/  (except / and /health)
+Auth      : JWT after RSA-encrypted password login
+            Optional Google / Microsoft OAuth, LDAP, SAML 2.0
+            Bootstrap admin created when DB is empty
+
+Main router areas (backend/app/routers/):
+
+  user            Login, register, profile, password, LDAP status
+  auth_oauth      Google / Microsoft OAuth
+  auth_saml       SAML SSO
+  assistant       CRUD, publish, link knowledge, online apps
+  chat_ws         WebSocket chat & workflow run streams
+  knowledge       Libraries, upload, process, search, answer, URL ingest
+  workflow        Graphs, runs, versions, schedules, webhooks, presence
+  agents          Saved agents, tools, run
+  llm             Provider vault, settings, verify
+  marketplace     Public workflows, clone, rate, comments
+  api_keys        Developer API keys
+  analytics       Summary, timeseries, audit, export, A/B
+  workspace       Workspaces, members, quotas
+  evaluation      Suites, cases, runs, schedules, alerts
+  finetune        Datasets & jobs
+  model_lab       Drift, train-and-eval pipelines, deploy to assistant
+  projects        Dev projects + run linked workflows
+  integrations    Gmail, Jira, Slack, Discord, Linear, Telegram, email
+
+
+--------------------------------------------------------------------------------
+7. FRONTEND DETAILS
+--------------------------------------------------------------------------------
+
+Framework : Next.js App Router under src/app/
+Shell     : WorkspacePageShell, AppHeader, WorkspaceHero, shared motion
+API layer : src/lib/api/*  (client, auth, workflows, knowledge, etc.)
+Chat WS   : src/lib/chat/websocket.js
+
+Main pages / routes:
+
+  /                         Marketing landing page
+  /login                    Sign in / register
+  /login/oauth-callback     OAuth return
+  /setup                    First-run setup wizard
+  /dashboard                Command center (stats, modules, analytics)
+  /chat                     Streaming AI chat
+  /apps  /apps/[id]         Assistant Studio
+  /knowledge  /knowledge/[id]  Knowledge base management
+  /workflows  /workflows/[id]  Visual workflow builder
+  /runs                     Workflow execution history
+  /digests                  Cron / scheduled digests
+  /agents                   Tool-augmented agents
+  /marketplace              Community workflow templates
+  /model-lab                Fine-tune / train-and-eval
+  /projects  /projects/[id] Dev project hubs
+  /evaluation               Eval suites & regression
+  /developer                API keys / developer tools
+  /docs                     In-app documentation
+  /settings                 Profile, security, models, integrations, team
+
+
+--------------------------------------------------------------------------------
+8. WHAT THIS PROJECT DOES FOR THE USER (FEATURES)
+--------------------------------------------------------------------------------
+
+1) CHAT
+   Talk to published AI assistants over WebSocket streaming.
+   Supports RAG answers with citations when knowledge is linked.
+   Can cancel in-flight responses.
+
+2) APPS (ASSISTANT STUDIO)
+   Create assistants, set system prompts, publish online,
+   attach knowledge bases, view usage.
+
+3) KNOWLEDGE (RAG)
+   Upload PDF / TXT / MD / CSV.
+   Chunk + embed documents.
+   Hybrid search (vector + keyword).
+   URL ingest and Q&A preview.
+   Power accurate, grounded answers in chat/workflows.
+
+4) WORKFLOWS
+   Visual pipeline builder (trigger → retrieve → LLM → output).
+   Live test runs over WebSocket.
+   Version history / diff.
+   Publish / unpublish.
+   Collaborative presence.
+   Webhooks and inbound Slack / Telegram triggers.
+
+5) DIGESTS
+   Schedule cron-based digests (retrieve → summarize → deliver).
+   Enable / disable schedules and run-now.
+
+6) AGENTS
+   Save and run agents with tools such as:
+   calculator, kb_search, summarize, translate, datetime,
+   web_fetch, regex, json_parse, word_count.
+
+7) MARKETPLACE
+   Browse / share public workflows.
+   Clone templates into your workspace.
+   Rate and comment.
+
+8) MODEL LAB / FINE-TUNE
+   Datasets and training jobs.
+   A/B model routes.
+   Prompt drift checks.
+   Deploy a fine-tuned model onto an assistant.
+
+9) PROJECTS
+   Group workflows + integration configs in a project hub.
+   Run linked workflows from one place.
+
+10) EVALUATION
+    Build eval suites and cases (including CSV import).
+    Schedule eval runs.
+    Regression alerts (Slack / PagerDuty / Opsgenie / email).
+    Compare runs and trends.
+
+11) INTEGRATIONS
+    Connect Gmail / SMTP, Jira, Slack, Discord, Linear,
+    GitHub Issues, Telegram bots, email notify.
+
+12) DASHBOARD & ANALYTICS
+    Workspace stats, live pulse cards, usage charts,
+    module launcher, workflow activity.
+
+13) SETTINGS & TEAM
+    Profile / security, LLM providers & limits,
+    integrations health, workspace team roles
+    (admin / editor / viewer).
+
+14) DEVELOPER
+    Create API keys for programmatic access.
+    Proxy to backend under /api/v1.
+
+15) DEMO MODE
+    Without OPENAI_API_KEY, chat can return placeholder demo replies
+    so the UI still works for exploration.
+
+
+--------------------------------------------------------------------------------
+9. ENVIRONMENT / CONFIG HIGHLIGHTS
+--------------------------------------------------------------------------------
+
+Frontend (.env.local / Docker):
+  NEXT_PUBLIC_API_URL     Default http://127.0.0.1:3001
+  NEXT_PUBLIC_APP_NAME    NovaFlow AI
+  API_INTERNAL_URL        http://api:3001  (inside Docker)
+
+Backend:
+  DATABASE_URL            MySQL or SQLite connection string
+  REDIS_URL               Redis
+  MILVUS_URI              Optional vector DB
+  JWT_SECRET              Auth signing secret (change in production)
+  JWT_EXPIRE_HOURS        Default ~72h
+  NOVAFLOW_ADMIN_USER     Bootstrap admin username
+  NOVAFLOW_ADMIN_PASSWORD Bootstrap admin password
+  NOVAFLOW_DEMO_SEED      Seed sample data (1/true)
+  OPENAI_API_KEY          LLM key
+  OPENAI_BASE_URL         OpenAI-compatible base URL
+  OPENAI_MODEL            Chat model
+  EMBEDDING_MODEL         Embedding model
+  EMBEDDING_DIM           Default 1536
+  GOOGLE_* / MICROSOFT_*  OAuth
+  LDAP_* / SAML_*         Enterprise SSO
+  SMTP_* / TELEGRAM_*     Notifications / bots
+  DATA_DIR                Uploads + local data
+
+
+--------------------------------------------------------------------------------
+10. FOLDER STRUCTURE (TOP LEVEL)
+--------------------------------------------------------------------------------
+
+novaflow-ai/
+  src/                 Next.js frontend (app, components, lib)
+  backend/             FastAPI app (routers, services, database.py)
+  deploy/              Docker compose fragments, start scripts, prod env
+  docs/                Architecture, deployment, user guide, roadmap, SSO
+  public/              Static assets
+  docker-compose.yml   Full stack (web + include deploy services)
+  Dockerfile           Production Next.js web image
+  package.json         Frontend package (v9.9.0)
+  README.md            Project readme
+  PROJECT_DETAILS.txt  This file
+  .env.example         Frontend env template
+  next.config.mjs      Next config (standalone output)
+
+
+--------------------------------------------------------------------------------
+11. QUICK REFERENCE — USER JOURNEY
+--------------------------------------------------------------------------------
+
+  1. Open http://127.0.0.1:3000
+  2. Complete /setup if first run (or skip if already done)
+  3. Login as admin / admin123
+  4. From Dashboard: open Chat, Knowledge, Workflows, Apps, etc.
+  5. Add an LLM API key in Settings → Models for real AI answers
+  6. Upload docs in Knowledge → link to an App → chat with grounded answers
+  7. Build a workflow from a template → publish → run from Runs / Digests
+
+
+--------------------------------------------------------------------------------
+12. IMPORTANT NOTES (WINDOWS)
+--------------------------------------------------------------------------------
+
+  • Use http://127.0.0.1:3000 and http://127.0.0.1:3001
+    (localhost can hit broken IPv6 / WSL relay on some Windows setups)
+
+  • Docker Desktop must be running before `docker compose up`
+
+  • If the UI looks old after rebuild: hard refresh (Ctrl+Shift+R)
+    or open an Incognito window
+
+  • Sibling bisheng-main/ folder is reference-only; NovaFlow does not
+    need Bisheng at runtime
+
+
+================================================================================
+  END OF PROJECT DETAILS
+================================================================================

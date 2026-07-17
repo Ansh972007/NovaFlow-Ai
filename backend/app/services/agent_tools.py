@@ -147,13 +147,21 @@ async def _run_tool(
     if tool_id == "datetime":
         return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     if tool_id == "web_fetch":
+        from app.security.ssrf import SafeUrlError, assert_safe_url
+
         url_match = re.search(r"https?://[^\s]+", user_input)
         if not url_match:
             return "No URL found in input"
         url = url_match.group(0).rstrip(".,)")
         try:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            url = assert_safe_url(url, allow_http=True)
+        except SafeUrlError as exc:
+            return f"URL blocked by security policy: {exc}"
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
                 res = await client.get(url)
+                if res.is_redirect:
+                    return "Redirects are blocked for security"
                 text = re.sub(r"<script[\s\S]*?</script>", " ", res.text or "", flags=re.I)
                 text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
                 text = re.sub(r"<[^>]+>", " ", text)

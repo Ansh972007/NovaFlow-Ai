@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.config import FRONTEND_URL
-from app.crypto import create_token, md5_hash
+from app.crypto import create_token, hash_password
 from app.database import User, get_db
 from app.schemas import fail, ok
 from app.services.oauth import frontend_callback_url
@@ -28,7 +28,7 @@ def _find_or_create_saml_user(db: Session, profile: dict) -> User:
     if not user:
         user = User(
             user_name=username,
-            password=md5_hash(secrets.token_hex(16)),
+            password=hash_password(secrets.token_hex(16)),
             email=(profile.get("email") or "")[:255],
             oauth_provider="saml",
             role="editor",

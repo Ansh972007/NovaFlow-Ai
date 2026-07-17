@@ -92,9 +92,7 @@ function LoginForm() {
       const data = isRegister
         ? await register(name, password)
         : await login(name, password);
-      if (data?.access_token) {
-        localStorage.setItem("nf_token", data.access_token);
-      }
+      // login()/register() already persist access + refresh tokens via storeAuthTokens
       setGreeting((g) => g + 1);
       await new Promise((resolve) => setTimeout(resolve, 1400));
       router.push(nextPath);

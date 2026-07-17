@@ -59,14 +59,14 @@ async def train_and_eval(
     dataset_id = body.get("dataset_id")
     if not dataset_id:
         return fail(400, "dataset_id required")
-    dataset = db.get(FineTuneDataset, dataset_id)
-    if not dataset or dataset.workspace_id != ctx.workspace_id:
+    dataset = ctx.fetch(FineTuneDataset, dataset_id)
+    if not dataset:
         return fail(404, "Dataset not found")
 
     auto_eval_suite_id = body.get("auto_eval_suite_id")
     if auto_eval_suite_id:
-        suite = db.get(EvalSuite, int(auto_eval_suite_id))
-        if not suite or suite.workspace_id != ctx.workspace_id:
+        suite = ctx.fetch(EvalSuite, int(auto_eval_suite_id))
+        if not suite:
             return fail(404, "Eval suite not found")
 
     try:
@@ -88,8 +88,8 @@ async def train_and_eval(
 @router.get("/model-lab/pipelines")
 def list_pipelines(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(FineTuneJob)
-        .filter(FineTuneJob.workspace_id == ctx.workspace_id)
+        ctx.query(FineTuneJob)
+        
         .order_by(FineTuneJob.create_time.desc())
         .limit(30)
         .all()
@@ -113,8 +113,8 @@ async def refresh_pipeline_job(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    job = db.get(FineTuneJob, job_id)
-    if not job or job.workspace_id != ctx.workspace_id:
+    job = ctx.fetch(FineTuneJob, job_id)
+    if not job:
         return fail(404, "Job not found")
     job = await refresh_finetune_job(db, job)
     eval_run = None
@@ -135,8 +135,8 @@ def deploy_pipeline_assistant(
     ctx=Depends(require_workspace_editor),
 ):
     """Apply fine-tuned model workspace-wide and create a live Chat assistant."""
-    job = db.get(FineTuneJob, job_id)
-    if not job or job.workspace_id != ctx.workspace_id:
+    job = ctx.fetch(FineTuneJob, job_id)
+    if not job:
         return fail(404, "Job not found")
     body = body or {}
     try:

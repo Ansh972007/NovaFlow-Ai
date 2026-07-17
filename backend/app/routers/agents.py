@@ -39,8 +39,8 @@ def get_tools():
 @router.get("/agents")
 def list_agents(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(SavedAgent)
-        .filter(SavedAgent.workspace_id == ctx.workspace_id)
+        ctx.query(SavedAgent)
+        
         .order_by(SavedAgent.update_time.desc())
         .all()
     )
@@ -74,8 +74,8 @@ def create_agent(body: dict, db: Session = Depends(get_db), ctx=Depends(require_
 
 @router.put("/agents/{agent_id}")
 def update_agent(agent_id: str, body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    a = db.get(SavedAgent, agent_id)
-    if not a or a.workspace_id != ctx.workspace_id:
+    a = ctx.fetch(SavedAgent, agent_id)
+    if not a:
         return fail(404, "Agent not found")
     if "name" in body:
         a.name = str(body.get("name") or a.name).strip()[:80]
@@ -100,8 +100,8 @@ def update_agent(agent_id: str, body: dict, db: Session = Depends(get_db), ctx=D
 
 @router.delete("/agents/{agent_id}")
 def delete_agent(agent_id: str, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    a = db.get(SavedAgent, agent_id)
-    if not a or a.workspace_id != ctx.workspace_id:
+    a = ctx.fetch(SavedAgent, agent_id)
+    if not a:
         return fail(404, "Agent not found")
     db.delete(a)
     db.commit()
@@ -120,8 +120,8 @@ async def run_agent_api(body: dict, db: Session = Depends(get_db), ctx=Depends(r
     knowledge_id = body.get("knowledge_id")
 
     if agent_id:
-        a = db.get(SavedAgent, agent_id)
-        if not a or a.workspace_id != ctx.workspace_id:
+        a = ctx.fetch(SavedAgent, agent_id)
+        if not a:
             return fail(404, "Agent not found")
         try:
             tools = json.loads(a.tools_json or "[]") or tools

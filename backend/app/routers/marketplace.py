@@ -112,8 +112,8 @@ def share_workflow(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     w.is_public = 1 if body.get("is_public") else 0
     db.commit()

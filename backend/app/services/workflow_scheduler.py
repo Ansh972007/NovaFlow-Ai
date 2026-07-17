@@ -1,7 +1,8 @@
-import logging
+﻿import logging
 from datetime import datetime
 
 from app.database import SessionLocal, Workflow, WorkflowSchedule
+from app.platform.worker import worker_tenant
 from app.services.cron_schedule import next_cron_run
 from app.services.workflow import run_workflow
 
@@ -29,7 +30,6 @@ def compute_schedule_next_run(sched: WorkflowSchedule, base: datetime | None = N
 
 
 async def run_schedule_now(db, schedule_id: int, workspace_id: int) -> dict:
-    """Trigger a schedule immediately (does not wait for cron)."""
     sched = db.get(WorkflowSchedule, schedule_id)
     if not sched or sched.workspace_id != workspace_id:
         raise ValueError("Schedule not found")
@@ -39,13 +39,21 @@ async def run_schedule_now(db, schedule_id: int, workspace_id: int) -> dict:
     if wf.status != 1:
         raise ValueError("Workflow must be published")
     now = datetime.utcnow()
-    result = await run_workflow(
-        db,
-        wf,
-        sched.user_id,
-        (sched.input_text or "Manual schedule run").strip(),
-        sched.workspace_id,
-    )
+    with worker_tenant(
+        workspace_id,
+        user_id=sched.user_id,
+        source="workflow_scheduler",
+        job_type="workflow_schedule_manual",
+        job_id=str(sched.id),
+        db=db,
+    ):
+        result = await run_workflow(
+            db,
+            wf,
+            sched.user_id,
+            (sched.input_text or "Manual schedule run").strip(),
+            sched.workspace_id,
+        )
     sched.last_run_at = now
     sched.next_run_at = compute_schedule_next_run(sched, now)
     sched.update_time = now
@@ -69,19 +77,31 @@ async def tick_workflow_schedules() -> None:
             .all()
         )
         for sched in due:
+            if not sched.workspace_id:
+                sched.enabled = 0
+                db.commit()
+                continue
             wf = db.get(Workflow, sched.workflow_id)
-            if not wf or wf.status != 1:
+            if not wf or wf.status != 1 or wf.workspace_id != sched.workspace_id:
                 sched.enabled = 0
                 db.commit()
                 continue
             try:
-                await run_workflow(
-                    db,
-                    wf,
-                    sched.user_id,
-                    (sched.input_text or "Scheduled run").strip(),
+                with worker_tenant(
                     sched.workspace_id,
-                )
+                    user_id=sched.user_id,
+                    source="workflow_scheduler",
+                    job_type="workflow_schedule",
+                    job_id=str(sched.id),
+                    db=db,
+                ):
+                    await run_workflow(
+                        db,
+                        wf,
+                        sched.user_id,
+                        (sched.input_text or "Scheduled run").strip(),
+                        sched.workspace_id,
+                    )
                 sched.last_run_at = now
                 sched.next_run_at = compute_schedule_next_run(sched, now)
                 sched.update_time = now

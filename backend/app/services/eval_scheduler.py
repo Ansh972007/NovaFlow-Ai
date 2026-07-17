@@ -40,15 +40,25 @@ async def tick_eval_schedules() -> None:
                 db.commit()
                 continue
             try:
-                await run_eval_suite(
-                    db,
-                    suite,
-                    sched.user_id,
+                from app.platform.worker import worker_tenant
+
+                with worker_tenant(
                     sched.workspace_id,
-                    scoring=sched.scoring or "rules",
-                    judge_threshold=sched.judge_threshold or 4,
-                    webhook_url=sched.webhook_url or "",
-                )
+                    user_id=sched.user_id,
+                    source="eval_scheduler",
+                    job_type="eval_suite",
+                    job_id=str(sched.id),
+                    db=db,
+                ):
+                    await run_eval_suite(
+                        db,
+                        suite,
+                        sched.user_id,
+                        sched.workspace_id,
+                        scoring=sched.scoring or "rules",
+                        judge_threshold=sched.judge_threshold or 4,
+                        webhook_url=sched.webhook_url or "",
+                    )
                 sched.last_run_at = now
                 sched.next_run_at = compute_schedule_next_run(sched, now)
                 sched.update_time = now

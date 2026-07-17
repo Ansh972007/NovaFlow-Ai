@@ -7,46 +7,60 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.database import Assistant, KnowledgeBase, UsageEvent, Workflow, WorkflowRun, User, get_db
-from app.deps import get_workspace_ctx, require_admin
+from app.database import (
+    Assistant,
+    KnowledgeBase,
+    SecurityAuditLog,
+    UsageEvent,
+    Workflow,
+    WorkflowRun,
+    User,
+    WorkspaceMember,
+    get_db,
+)
+from app.deps import require_permission
 from app.schemas import ok, fail
+from app.security.rbac import Permission
 
 router = APIRouter(tags=["Analytics"])
 
 
 @router.get("/analytics/summary")
-def analytics_summary(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    wid = ctx.workspace_id
+def analytics_summary(db: Session = Depends(get_db), ctx=Depends(require_permission(Permission.ANALYTICS_READ))):
     since = datetime.utcnow() - timedelta(days=7)
 
-    assistants_total = db.query(Assistant).filter(Assistant.workspace_id == wid).count()
-    assistants_online = db.query(Assistant).filter(Assistant.workspace_id == wid, Assistant.status == 1).count()
-    knowledge_total = db.query(KnowledgeBase).filter(KnowledgeBase.workspace_id == wid).count()
-    workflows_total = db.query(Workflow).filter(Workflow.workspace_id == wid).count()
-    workflows_published = db.query(Workflow).filter(Workflow.workspace_id == wid, Workflow.status == 1).count()
-    workflow_runs = db.query(WorkflowRun).filter(WorkflowRun.workspace_id == wid).count()
-    workflow_runs_7d = (
-        db.query(WorkflowRun).filter(WorkflowRun.workspace_id == wid, WorkflowRun.create_time >= since).count()
-    )
+    assistants_total = ctx.query(Assistant).count()
+    assistants_online = ctx.query(Assistant).filter(Assistant.status == 1).count()
+    knowledge_total = ctx.query(KnowledgeBase).count()
+    workflows_total = ctx.query(Workflow).count()
+    workflows_published = ctx.query(Workflow).filter(Workflow.status == 1).count()
+    workflow_runs = ctx.query(WorkflowRun).count()
+    workflow_runs_7d = ctx.query(WorkflowRun).filter(WorkflowRun.create_time >= since).count()
     chat_events_7d = (
-        db.query(UsageEvent)
-        .filter(UsageEvent.workspace_id == wid, UsageEvent.event_type == "chat", UsageEvent.create_time >= since)
+        ctx.query(UsageEvent)
+        .filter(UsageEvent.event_type == "chat", UsageEvent.create_time >= since)
         .count()
     )
     workflow_chat_7d = (
-        db.query(UsageEvent)
-        .filter(UsageEvent.workspace_id == wid, UsageEvent.event_type == "workflow_chat", UsageEvent.create_time >= since)
+        ctx.query(UsageEvent)
+        .filter(UsageEvent.event_type == "workflow_chat", UsageEvent.create_time >= since)
         .count()
     )
 
     recent_runs = (
-        db.query(WorkflowRun, Workflow)
+        ctx.query(WorkflowRun)
         .join(Workflow, WorkflowRun.workflow_id == Workflow.id)
-        .filter(WorkflowRun.workspace_id == wid)
         .order_by(WorkflowRun.create_time.desc())
         .limit(5)
         .all()
     )
+    # Re-attach workflow names
+    recent_payload = []
+    for run in recent_runs:
+        wf = ctx.fetch(Workflow, run.workflow_id)
+        if not wf:
+            continue
+        recent_payload.append((run, wf))
 
     return ok(
         {
@@ -66,16 +80,19 @@ def analytics_summary(db: Session = Depends(get_db), ctx=Depends(get_workspace_c
                     "duration_ms": run.duration_ms,
                     "create_time": run.create_time.isoformat() if run.create_time else None,
                 }
-                for run, wf in recent_runs
+                for run, wf in recent_payload
             ],
         }
     )
 
 
 @router.get("/analytics/timeseries")
-def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+def analytics_timeseries(
+    days: int = 7,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.ANALYTICS_READ)),
+):
     days = max(1, min(days, 30))
-    wid = ctx.workspace_id
     start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
 
     buckets: dict[str, dict] = {}
@@ -83,11 +100,7 @@ def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), ctx=Depen
         d = (start + timedelta(days=i)).date().isoformat()
         buckets[d] = {"date": d, "chat": 0, "workflow_run": 0, "workflow_chat": 0}
 
-    events = (
-        db.query(UsageEvent)
-        .filter(UsageEvent.workspace_id == wid, UsageEvent.create_time >= start)
-        .all()
-    )
+    events = ctx.query(UsageEvent).filter(UsageEvent.create_time >= start).all()
     for ev in events:
         if not ev.create_time:
             continue
@@ -99,11 +112,7 @@ def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), ctx=Depen
         elif ev.event_type == "workflow_chat":
             buckets[key]["workflow_chat"] += 1
 
-    runs = (
-        db.query(WorkflowRun)
-        .filter(WorkflowRun.workspace_id == wid, WorkflowRun.create_time >= start)
-        .all()
-    )
+    runs = ctx.query(WorkflowRun).filter(WorkflowRun.create_time >= start).all()
     for run in runs:
         if not run.create_time:
             continue
@@ -116,14 +125,16 @@ def analytics_timeseries(days: int = 7, db: Session = Depends(get_db), ctx=Depen
 
 
 @router.get("/analytics/assistants")
-def analytics_assistants(days: int = 7, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    wid = ctx.workspace_id
+def analytics_assistants(
+    days: int = 7,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.ANALYTICS_READ)),
+):
     since = datetime.utcnow() - timedelta(days=max(1, min(days, 30)))
 
     rows = (
-        db.query(UsageEvent)
+        ctx.query(UsageEvent)
         .filter(
-            UsageEvent.workspace_id == wid,
             UsageEvent.event_type.in_(["chat", "workflow_chat"]),
             UsageEvent.create_time >= since,
         )
@@ -134,14 +145,8 @@ def analytics_assistants(days: int = 7, db: Session = Depends(get_db), ctx=Depen
     for ev in rows:
         counts[ev.resource_id or "unknown"] += 1
 
-    assistants = {
-        a.id: a.name
-        for a in db.query(Assistant).filter(Assistant.workspace_id == wid).all()
-    }
-    workflows = {
-        w.id: w.name
-        for w in db.query(Workflow).filter(Workflow.workspace_id == wid).all()
-    }
+    assistants = {a.id: a.name for a in ctx.query(Assistant).all()}
+    workflows = {w.id: w.name for w in ctx.query(Workflow).all()}
 
     items = []
     for rid, count in sorted(counts.items(), key=lambda x: -x[1])[:12]:
@@ -157,11 +162,10 @@ def analytics_assistant_detail(
     assistant_id: str,
     days: int = 7,
     db: Session = Depends(get_db),
-    ctx=Depends(get_workspace_ctx),
+    ctx=Depends(require_permission(Permission.ANALYTICS_READ)),
 ):
-    wid = ctx.workspace_id
-    assistant = db.get(Assistant, assistant_id)
-    if not assistant or assistant.workspace_id != wid:
+    assistant = ctx.fetch(Assistant, assistant_id)
+    if not assistant:
         return fail(404, "Assistant not found")
 
     days = max(1, min(days, 30))
@@ -173,9 +177,8 @@ def analytics_assistant_detail(
         buckets[d] = {"date": d, "messages": 0}
 
     events = (
-        db.query(UsageEvent)
+        ctx.query(UsageEvent)
         .filter(
-            UsageEvent.workspace_id == wid,
             UsageEvent.event_type == "chat",
             UsageEvent.resource_id == assistant_id,
             UsageEvent.create_time >= start,
@@ -203,17 +206,24 @@ def analytics_assistant_detail(
 
 
 @router.get("/team/members")
-def team_members(db: Session = Depends(get_db), user=Depends(require_admin)):
-    members = db.query(User).filter(User.delete == 0).order_by(User.user_id).all()
+def team_members(db: Session = Depends(get_db), ctx=Depends(require_permission(Permission.TEAM_MANAGE))):
+    """Workspace members (tenant-scoped). Prefer /workspaces/{id}/members for new clients."""
+    rows = (
+        db.query(WorkspaceMember, User)
+        .join(User, WorkspaceMember.user_id == User.user_id)
+        .filter(WorkspaceMember.workspace_id == ctx.workspace_id, User.delete == 0)
+        .order_by(User.user_id)
+        .all()
+    )
     return ok(
         [
             {
-                "user_id": m.user_id,
-                "user_name": m.user_name,
+                "user_id": u.user_id,
+                "user_name": u.user_name,
                 "role": m.role or "editor",
                 "create_time": m.create_time.isoformat() if m.create_time else None,
             }
-            for m in members
+            for m, u in rows
         ]
     )
 
@@ -223,19 +233,34 @@ def update_member_role(
     member_id: int,
     body: dict,
     db: Session = Depends(get_db),
-    user=Depends(require_admin),
+    ctx=Depends(require_permission(Permission.TEAM_MANAGE)),
 ):
-    role = (body.get("role") or "").strip().lower()
-    if role not in {"admin", "editor", "viewer"}:
+    from app.platform.roles import WORKSPACE_ROLES, normalize_workspace_role
+
+    role = normalize_workspace_role(body.get("role") or "")
+    if role not in WORKSPACE_ROLES or role == "owner":
         return fail(400, "Invalid role")
-    member = db.get(User, member_id)
-    if not member or member.delete:
-        return fail(404, "User not found")
-    if member.user_id == user.user_id and role != "admin":
+    row = (
+        db.query(WorkspaceMember)
+        .filter(
+            WorkspaceMember.workspace_id == ctx.workspace_id,
+            WorkspaceMember.user_id == member_id,
+        )
+        .first()
+    )
+    if not row:
+        return fail(404, "Member not found")
+    if member_id == ctx.user.user_id and role != "admin":
         return fail(400, "Cannot demote yourself")
-    member.role = role
+    row.role = role
     db.commit()
-    return ok({"user_id": member.user_id, "role": member.role})
+    ctx.audit(
+        "workspace.member.role_changed",
+        resource_type="workspace_member",
+        resource_id=str(member_id),
+        detail={"role": role},
+    )
+    return ok({"user_id": member_id, "role": role})
 
 
 @router.get("/analytics/audit")
@@ -243,29 +268,31 @@ def list_audit_events(
     days: int = 7,
     limit: int = 100,
     db: Session = Depends(get_db),
-    user=Depends(require_admin),
+    ctx=Depends(require_permission(Permission.SECURITY_AUDIT)),
 ):
+    """Tenant-scoped security audit trail (immutable SecurityAuditLog)."""
     days = max(1, min(days, 90))
     limit = max(1, min(limit, 500))
     since = datetime.utcnow() - timedelta(days=days)
     events = (
-        db.query(UsageEvent, User)
-        .join(User, UsageEvent.user_id == User.user_id)
-        .filter(UsageEvent.create_time >= since)
-        .order_by(UsageEvent.create_time.desc())
+        ctx.query(SecurityAuditLog)
+        .filter(SecurityAuditLog.created_at >= since)
+        .order_by(SecurityAuditLog.created_at.desc())
         .limit(limit)
         .all()
     )
     return ok(
         [
             {
-                "timestamp": ev.create_time.isoformat() if ev.create_time else None,
-                "user": u.user_name,
-                "event_type": ev.event_type,
+                "timestamp": ev.created_at.isoformat() if ev.created_at else None,
+                "user_id": ev.actor_user_id,
+                "event_type": ev.action,
                 "resource_id": ev.resource_id or "",
-                "meta": ev.meta or "",
+                "resource_type": ev.resource_type or "",
+                "success": bool(ev.success),
+                "meta": ev.detail_json or "",
             }
-            for ev, u in events
+            for ev in events
         ]
     )
 
@@ -274,35 +301,37 @@ def list_audit_events(
 def export_audit_log(
     days: int = 30,
     db: Session = Depends(get_db),
-    user=Depends(require_admin),
+    ctx=Depends(require_permission(Permission.ANALYTICS_EXPORT)),
 ):
     days = max(1, min(days, 90))
     since = datetime.utcnow() - timedelta(days=days)
 
     events = (
-        db.query(UsageEvent, User)
-        .join(User, UsageEvent.user_id == User.user_id)
-        .filter(UsageEvent.create_time >= since)
-        .order_by(UsageEvent.create_time.desc())
+        ctx.query(SecurityAuditLog)
+        .filter(SecurityAuditLog.created_at >= since)
+        .order_by(SecurityAuditLog.created_at.desc())
         .all()
     )
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["timestamp", "user", "event_type", "resource_id", "meta"])
-    for ev, u in events:
+    writer.writerow(["timestamp", "user_id", "action", "resource_type", "resource_id", "success", "detail"])
+    for ev in events:
         writer.writerow(
             [
-                ev.create_time.isoformat() if ev.create_time else "",
-                u.user_name,
-                ev.event_type,
+                ev.created_at.isoformat() if ev.created_at else "",
+                ev.actor_user_id or "",
+                ev.action,
+                ev.resource_type or "",
                 ev.resource_id or "",
-                ev.meta or "",
+                ev.success,
+                ev.detail_json or "",
             ]
         )
 
     buf.seek(0)
     filename = f"novaflow-audit-{datetime.utcnow().date().isoformat()}.csv"
+    ctx.audit("audit.exported", resource_type="security_audit", detail={"days": days, "rows": len(events)})
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
@@ -311,15 +340,17 @@ def export_audit_log(
 
 
 @router.get("/analytics/ab-routing")
-def analytics_ab_routing(days: int = 30, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
+def analytics_ab_routing(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.ANALYTICS_READ)),
+):
     import json
 
-    wid = ctx.workspace_id
     since = datetime.utcnow() - timedelta(days=max(1, min(days, 90)))
     rows = (
-        db.query(UsageEvent)
+        ctx.query(UsageEvent)
         .filter(
-            UsageEvent.workspace_id == wid,
             UsageEvent.event_type == "chat",
             UsageEvent.create_time >= since,
         )

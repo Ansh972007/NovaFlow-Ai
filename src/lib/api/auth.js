@@ -1,5 +1,5 @@
 import JSEncrypt from "jsencrypt";
-import client from "./client";
+import client, { clearAuthTokens, storeAuthTokens } from "./client";
 
 let userCache = null;
 let userCacheAt = 0;
@@ -32,6 +32,7 @@ export async function login(userName, password) {
     user_name: userName,
     password: encryptedPassword,
   });
+  storeAuthTokens(data);
   clearUserCache();
   return data;
 }
@@ -42,6 +43,7 @@ export async function register(userName, password) {
     user_name: userName,
     password: encryptedPassword,
   });
+  storeAuthTokens(data);
   clearUserCache();
   return data;
 }
@@ -76,5 +78,12 @@ export async function getLdapStatus() {
 
 export async function logout() {
   clearUserCache();
-  return client.post("/user/logout");
+  const refresh_token =
+    typeof window !== "undefined" ? localStorage.getItem("nf_refresh_token") || "" : "";
+  try {
+    await client.post("/user/logout", { refresh_token });
+  } catch {
+    /* still clear local session */
+  }
+  clearAuthTokens();
 }

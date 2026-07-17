@@ -4,8 +4,9 @@ from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import Assistant, AssistantKnowledge, KnowledgeBase, get_db
-from app.deps import get_current_user, get_workspace_ctx, require_workspace_editor
+from app.deps import require_permission
 from app.schemas import AssistantCreate, AssistantKnowledgeUpdate, AssistantUpdate, fail, ok
+from app.security.rbac import Permission
 from app.services.knowledge import get_assistant_knowledge_ids, set_assistant_knowledge
 
 router = APIRouter(tags=["Assistant"])
@@ -36,9 +37,9 @@ def list_assistants(
     status: int | None = Query(None),
     name: str | None = Query(None),
     db: Session = Depends(get_db),
-    ctx=Depends(get_workspace_ctx),
+    ctx=Depends(require_permission(Permission.ASSISTANT_READ)),
 ):
-    q = db.query(Assistant).filter(Assistant.workspace_id == ctx.workspace_id)
+    q = ctx.query(Assistant)
     if status is not None:
         q = q.filter(Assistant.status == status)
     if name:
@@ -49,9 +50,13 @@ def list_assistants(
 
 
 @router.get("/assistant/info/{assistant_id}")
-def assistant_info(assistant_id: str, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    a = db.get(Assistant, assistant_id)
-    if not a or a.workspace_id != ctx.workspace_id:
+def assistant_info(
+    assistant_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.ASSISTANT_READ)),
+):
+    a = ctx.fetch(Assistant, assistant_id)
+    if not a:
         return fail(404, "Assistant not found")
     data = assistant_dict(a)
     data["prompt"] = a.prompt
@@ -59,9 +64,7 @@ def assistant_info(assistant_id: str, db: Session = Depends(get_db), ctx=Depends
     data["flow_list"] = []
     kid_list = get_assistant_knowledge_ids(db, assistant_id)
     kbs = (
-        db.query(KnowledgeBase)
-        .filter(KnowledgeBase.id.in_(kid_list), KnowledgeBase.workspace_id == ctx.workspace_id)
-        .all()
+        ctx.query(KnowledgeBase).filter(KnowledgeBase.id.in_(kid_list)).all()
         if kid_list
         else []
     )
@@ -73,25 +76,33 @@ def assistant_info(assistant_id: str, db: Session = Depends(get_db), ctx=Depends
 
 
 @router.post("/assistant")
-def create_assistant(body: AssistantCreate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+def create_assistant(
+    body: AssistantCreate,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.ASSISTANT_WRITE)),
+):
     a = Assistant(
         name=body.name.strip(),
         prompt=body.prompt.strip(),
         logo=body.logo or "",
-        user_id=ctx.user.user_id,
-        workspace_id=ctx.workspace_id,
         status=0,
     )
+    ctx.attach(a)
     db.add(a)
     db.commit()
     db.refresh(a)
+    ctx.audit("assistant.created", resource_type="assistant", resource_id=str(a.id))
     return ok(assistant_dict(a))
 
 
 @router.put("/assistant")
-def update_assistant(body: AssistantUpdate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    a = db.get(Assistant, body.id)
-    if not a or a.workspace_id != ctx.workspace_id:
+def update_assistant(
+    body: AssistantUpdate,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.ASSISTANT_WRITE)),
+):
+    a = ctx.fetch(Assistant, body.id)
+    if not a:
         return fail(404, "Assistant not found")
     if body.name:
         a.name = body.name.strip()
@@ -102,6 +113,7 @@ def update_assistant(body: AssistantUpdate, db: Session = Depends(get_db), ctx=D
     a.update_time = datetime.utcnow()
     db.commit()
     db.refresh(a)
+    ctx.audit("assistant.updated", resource_type="assistant", resource_id=str(a.id))
     return ok(assistant_dict(a))
 
 
@@ -110,14 +122,15 @@ def set_status(
     id: str = Body(..., alias="id"),
     status: int = Body(...),
     db: Session = Depends(get_db),
-    ctx=Depends(require_workspace_editor),
+    ctx=Depends(require_permission(Permission.ASSISTANT_PUBLISH)),
 ):
-    a = db.get(Assistant, id)
-    if not a or a.workspace_id != ctx.workspace_id:
+    a = ctx.fetch(Assistant, id)
+    if not a:
         return fail(404, "Assistant not found")
     a.status = status
     a.update_time = datetime.utcnow()
     db.commit()
+    ctx.audit("assistant.status", resource_type="assistant", resource_id=str(id), detail={"status": status})
     return ok(None)
 
 
@@ -125,14 +138,15 @@ def set_status(
 def delete_assistant(
     assistant_id: str = Body(...),
     db: Session = Depends(get_db),
-    ctx=Depends(require_workspace_editor),
+    ctx=Depends(require_permission(Permission.ASSISTANT_WRITE)),
 ):
-    a = db.get(Assistant, assistant_id)
-    if not a or a.workspace_id != ctx.workspace_id:
+    a = ctx.fetch(Assistant, assistant_id)
+    if not a:
         return fail(404, "Assistant not found")
     db.query(AssistantKnowledge).filter(AssistantKnowledge.assistant_id == assistant_id).delete()
     db.delete(a)
     db.commit()
+    ctx.audit("assistant.deleted", resource_type="assistant", resource_id=str(assistant_id))
     return ok(None)
 
 
@@ -140,19 +154,25 @@ def delete_assistant(
 def update_assistant_knowledge(
     body: AssistantKnowledgeUpdate,
     db: Session = Depends(get_db),
-    ctx=Depends(require_workspace_editor),
+    ctx=Depends(require_permission(Permission.ASSISTANT_WRITE)),
 ):
-    a = db.get(Assistant, body.assistant_id)
-    if not a or a.workspace_id != ctx.workspace_id:
+    a = ctx.fetch(Assistant, body.assistant_id)
+    if not a:
         return fail(404, "Assistant not found")
     valid_ids = []
     for kid in body.knowledge_ids:
-        kb = db.get(KnowledgeBase, kid)
-        if kb and kb.workspace_id == ctx.workspace_id:
+        kb = ctx.fetch(KnowledgeBase, kid)
+        if kb:
             valid_ids.append(kid)
     set_assistant_knowledge(db, body.assistant_id, valid_ids)
     a.update_time = datetime.utcnow()
     db.commit()
+    ctx.audit(
+        "assistant.knowledge_updated",
+        resource_type="assistant",
+        resource_id=str(body.assistant_id),
+        detail={"knowledge_ids": valid_ids},
+    )
     return ok({"knowledge_ids": valid_ids})
 
 
@@ -161,8 +181,8 @@ def online_chat(
     page: int = Query(1),
     limit: int = Query(50),
     db: Session = Depends(get_db),
-    ctx=Depends(get_workspace_ctx),
+    ctx=Depends(require_permission(Permission.ASSISTANT_READ)),
 ):
-    q = db.query(Assistant).filter(Assistant.workspace_id == ctx.workspace_id, Assistant.status == 1)
+    q = ctx.query(Assistant).filter(Assistant.status == 1)
     rows = q.order_by(Assistant.update_time.desc()).limit(limit).all()
     return ok([assistant_dict(a) for a in rows])

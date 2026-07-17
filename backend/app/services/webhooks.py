@@ -9,10 +9,17 @@ logger = logging.getLogger("novaflow.webhooks")
 async def post_webhook(url: str, payload: dict[str, Any], *, event: str) -> bool:
     if not (url or "").strip():
         return False
+    from app.security.ssrf import SafeUrlError, assert_safe_url
+
+    try:
+        target = assert_safe_url(url.strip(), allow_http=True)
+    except SafeUrlError as exc:
+        logger.warning("Webhook %s blocked by SSRF policy: %s", event, exc)
+        return False
     body = {"event": event, **payload}
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url.strip(), json=body)
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+            resp = await client.post(target, json=body)
             resp.raise_for_status()
         return True
     except Exception as exc:

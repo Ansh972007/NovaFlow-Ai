@@ -39,7 +39,7 @@ def list_knowledge(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    q = db.query(KnowledgeBase).filter(KnowledgeBase.workspace_id == ctx.workspace_id)
+    q = ctx.query(KnowledgeBase)
     if name:
         q = q.filter(KnowledgeBase.name.contains(name))
     total = q.count()
@@ -59,13 +59,13 @@ def create_knowledge(body: KnowledgeCreate, db: Session = Depends(get_db), ctx=D
         description=body.description or "",
         model=body.model or EMBEDDING_MODELS[0],
         type=body.type,
-        user_id=ctx.user.user_id,
-        workspace_id=ctx.workspace_id,
     )
+    ctx.attach(kb)
     db.add(kb)
     db.commit()
     db.refresh(kb)
     kb_upload_dir(kb.id)
+    ctx.audit("knowledge.created", resource_type="knowledge", resource_id=str(kb.id))
     return ok(kb_dict(kb))
 
 
@@ -77,8 +77,8 @@ def file_list(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
         return fail(404, "Knowledge base not found")
     rows = (
         db.query(KnowledgeFile)
@@ -109,11 +109,13 @@ async def upload_file(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    from app.security.files import FileSecurityError, validate_upload
+
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
         return fail(404, "Knowledge base not found")
-    safe_name = file.filename or "upload.bin"
-    suffix = ("." + safe_name.rsplit(".", 1)[-1].lower()) if "." in safe_name else ""
+    raw_name = file.filename or "upload.bin"
+    suffix = ("." + raw_name.rsplit(".", 1)[-1].lower()) if "." in raw_name else ""
     if suffix in UNSUPPORTED_OFFICE:
         return fail(
             400,
@@ -124,27 +126,31 @@ async def upload_file(
             400,
             f"Unsupported file type {suffix}. Accepted: pdf, docx, txt, md, csv, tsv, xlsx, pptx, html, json, images.",
         )
+    content = await file.read()
+    try:
+        meta = validate_upload(filename=raw_name, content=content, content_type=file.content_type)
+    except FileSecurityError as exc:
+        return fail(400, str(exc))
     dest_dir = kb_upload_dir(knowledge_id)
-    dest = dest_dir / f"{uuid.uuid4().hex}_{safe_name}"
-    with dest.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    dest = dest_dir / meta["storage_name"]
+    dest.write_bytes(content)
     rel = f"{knowledge_id}/{dest.name}"
     record = KnowledgeFile(
         knowledge_id=knowledge_id,
-        file_name=safe_name,
+        file_name=meta["safe_name"],
         file_path=rel,
         status=5,
     )
     db.add(record)
     db.commit()
     db.refresh(record)
-    return ok({"file_path": rel, "file_name": safe_name, "id": record.id})
+    return ok({"file_path": rel, "file_name": meta["safe_name"], "id": record.id})
 
 
 @router.post("/knowledge/process")
 def process_files(body: ProcessFiles, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    kb = db.get(KnowledgeBase, body.knowledge_id)
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    kb = ctx.fetch(KnowledgeBase, body.knowledge_id)
+    if not kb:
         return fail(404, "Knowledge base not found")
     for item in body.file_list:
         fp = item.get("file_path")
@@ -167,8 +173,8 @@ def get_chunks(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
         return fail(404, "Knowledge base not found")
     data, total = search_chunks(db, knowledge_id, keyword, page, limit)
     return ok({"data": data, "total": total})
@@ -183,8 +189,8 @@ def semantic_search(
     ctx=Depends(get_workspace_ctx),
 ):
     """Semantic (vector) search with keyword fallback — used by Knowledge Q&A preview."""
-    kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
         return fail(404, "Knowledge base not found")
     query = (q or "").strip()
     if not query:
@@ -209,8 +215,8 @@ async def knowledge_answer(
     if not query:
         return fail(400, "question required")
 
-    kb = db.get(KnowledgeBase, int(knowledge_id))
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    kb = ctx.fetch(KnowledgeBase, int(knowledge_id))
+    if not kb:
         return fail(404, "Knowledge base not found")
 
     hits = search_chunks_semantic(db, int(knowledge_id), query, limit)
@@ -278,8 +284,8 @@ def retry_file(body: dict, db: Session = Depends(get_db), ctx=Depends(require_wo
     record = db.get(KnowledgeFile, int(file_id))
     if not record:
         return fail(404, "File not found")
-    kb = db.get(KnowledgeBase, record.knowledge_id)
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    kb = ctx.fetch(KnowledgeBase, record.knowledge_id)
+    if not kb:
         return fail(404, "File not found")
     process_file_record(
         db,
@@ -314,16 +320,21 @@ async def ingest_url(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    kb = db.get(KnowledgeBase, knowledge_id)
-    if not kb or kb.workspace_id != ctx.workspace_id:
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
         return fail(404, "Knowledge base not found")
+    from app.security.ssrf import SafeUrlError, assert_safe_url
+
     url = body.url.strip()
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return fail(400, "URL must start with http:// or https://")
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        url = assert_safe_url(url, allow_http=True)
+    except SafeUrlError as exc:
+        return fail(400, f"URL blocked by security policy: {exc}")
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
             res = await client.get(url, headers={"User-Agent": "NovaFlow-KB-Ingest/1.0"})
+            if res.is_redirect:
+                return fail(400, "Redirects are blocked for security")
             res.raise_for_status()
             content_type = (res.headers.get("content-type") or "").lower()
             if "html" in content_type or "<html" in (res.text or "")[:200].lower():

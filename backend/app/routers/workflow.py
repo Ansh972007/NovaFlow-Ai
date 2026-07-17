@@ -30,8 +30,8 @@ router = APIRouter(tags=["Workflow"])
 @router.get("/workflow/schedules")
 def list_workspace_schedules(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(WorkflowSchedule)
-        .filter(WorkflowSchedule.workspace_id == ctx.workspace_id)
+        ctx.query(WorkflowSchedule)
+        
         .order_by(WorkflowSchedule.create_time.desc())
         .all()
     )
@@ -61,7 +61,7 @@ def list_workspace_runs(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    q = db.query(WorkflowRun).filter(WorkflowRun.workspace_id == ctx.workspace_id)
+    q = ctx.query(WorkflowRun)
     if workflow_id:
         q = q.filter(WorkflowRun.workflow_id == workflow_id)
     rows = q.order_by(WorkflowRun.create_time.desc()).limit(limit).all()
@@ -93,8 +93,8 @@ def list_workspace_runs(
 
 @router.get("/workflow/runs/{run_id}")
 def get_workflow_run(run_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    run = db.get(WorkflowRun, run_id)
-    if not run or run.workspace_id != ctx.workspace_id:
+    run = ctx.fetch(WorkflowRun, run_id)
+    if not run:
         return fail(404, "Run not found")
     try:
         steps = json.loads(run.steps_json or "[]")
@@ -126,7 +126,7 @@ def list_workflows(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    q = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id)
+    q = ctx.query(Workflow)
     if status is not None:
         q = q.filter(Workflow.status == status)
     total = q.count()
@@ -145,8 +145,8 @@ def workflow_templates(ctx=Depends(get_workspace_ctx)):
 
 @router.get("/workflow/info/{workflow_id}")
 def workflow_info(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     data = workflow_dict(w)
     runs = (
@@ -190,8 +190,8 @@ def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), ctx=Dep
 
 @router.put("/workflow")
 def update_workflow(body: WorkflowUpdate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    w = db.get(Workflow, body.id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, body.id)
+    if not w:
         return fail(404, "Workflow not found")
     if body.name is not None:
         w.name = body.name.strip()
@@ -217,8 +217,8 @@ def set_workflow_status(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    w = db.get(Workflow, id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, id)
+    if not w:
         return fail(404, "Workflow not found")
     w.status = status
     w.update_time = datetime.utcnow()
@@ -234,8 +234,8 @@ def delete_workflow(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).delete()
     db.query(WorkflowSchedule).filter(WorkflowSchedule.workflow_id == workflow_id).delete()
@@ -250,8 +250,8 @@ async def execute_workflow(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    w = db.get(Workflow, body.workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, body.workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     result = await run_workflow(db, w, ctx.user.user_id, body.input.strip(), ctx.workspace_id)
     return ok(result)
@@ -264,8 +264,8 @@ def online_workflows(
     ctx=Depends(get_workspace_ctx),
 ):
     rows = (
-        db.query(Workflow)
-        .filter(Workflow.workspace_id == ctx.workspace_id, Workflow.status == 1)
+        ctx.query(Workflow)
+        .filter(Workflow.status == 1)
         .order_by(Workflow.update_time.desc())
         .limit(limit)
         .all()
@@ -309,8 +309,8 @@ def workflow_version_diff(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     old_v = get_workflow_version(db, workflow_id, from_id)
     if not old_v:
@@ -346,8 +346,8 @@ def workflow_version_diff_export(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     old_v = get_workflow_version(db, workflow_id, from_id)
     if not old_v:
@@ -402,8 +402,8 @@ def workflow_version_detail(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     data = get_workflow_version(db, workflow_id, version_id)
     if not data:
@@ -418,8 +418,8 @@ def touch_workflow_presence(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     now = datetime.utcnow()
     row = (
@@ -478,8 +478,8 @@ def get_workflow_presence(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     cutoff = datetime.utcnow()
     rows = (
@@ -510,8 +510,8 @@ def get_workflow_presence(
 
 @router.get("/workflow/{workflow_id}/versions")
 def workflow_versions(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     return ok(list_workflow_versions(db, workflow_id))
 
@@ -523,8 +523,8 @@ def restore_version(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     data = restore_workflow_version(db, w, version_id, ctx.user.user_id)
     if not data:
@@ -538,12 +538,12 @@ def list_workflow_schedules(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     rows = (
-        db.query(WorkflowSchedule)
-        .filter(WorkflowSchedule.workflow_id == workflow_id, WorkflowSchedule.workspace_id == ctx.workspace_id)
+        ctx.query(WorkflowSchedule)
+        .filter(WorkflowSchedule.workflow_id == workflow_id)
         .order_by(WorkflowSchedule.create_time.desc())
         .all()
     )
@@ -557,8 +557,8 @@ def create_workflow_schedule(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    w = db.get(Workflow, workflow_id)
-    if not w or w.workspace_id != ctx.workspace_id:
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
         return fail(404, "Workflow not found")
     if w.status != 1:
         return fail(400, "Publish workflow before scheduling")
@@ -590,8 +590,8 @@ def update_workflow_schedule(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    row = db.get(WorkflowSchedule, schedule_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(WorkflowSchedule, schedule_id)
+    if not row:
         return fail(404, "Schedule not found")
     if "cron_expression" in body and body["cron_expression"]:
         try:
@@ -615,8 +615,8 @@ def delete_workflow_schedule(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    row = db.get(WorkflowSchedule, schedule_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(WorkflowSchedule, schedule_id)
+    if not row:
         return fail(404, "Schedule not found")
     db.delete(row)
     db.commit()

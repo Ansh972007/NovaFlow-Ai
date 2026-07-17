@@ -41,14 +41,14 @@ def authenticate_ldap(username: str, password: str) -> dict | None:
 
 def find_or_create_ldap_user(db, username: str, profile: dict) -> "User":
     from app.database import User
-    from app.crypto import md5_hash
+    from app.crypto import hash_password
     from app.services.tenancy import ensure_personal_workspace
 
     user = db.query(User).filter(User.user_name == username).first()
     if not user:
         user = User(
             user_name=username,
-            password=md5_hash(secrets.token_hex(16)),
+            password=hash_password(secrets.token_hex(16)),
             email=(profile.get("email") or "")[:255],
             role="editor",
         )

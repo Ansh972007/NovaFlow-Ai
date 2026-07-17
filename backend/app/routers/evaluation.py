@@ -52,8 +52,8 @@ def create_suite_from_template(
     tpl = get_template(template_id)
     if not tpl:
         return fail(404, "Template not found")
-    assistant = db.get(Assistant, assistant_id)
-    if not assistant or assistant.workspace_id != ctx.workspace_id:
+    assistant = ctx.fetch(Assistant, assistant_id)
+    if not assistant:
         return fail(404, "Assistant not found")
 
     name = (body.get("name") or tpl["name"]).strip()[:120]
@@ -84,8 +84,8 @@ def create_suite_from_template(
 @router.get("/eval/suites")
 def list_suites(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(EvalSuite)
-        .filter(EvalSuite.workspace_id == ctx.workspace_id)
+        ctx.query(EvalSuite)
+        
         .order_by(EvalSuite.update_time.desc())
         .all()
     )
@@ -98,8 +98,8 @@ def create_suite(body: dict, db: Session = Depends(get_db), ctx=Depends(require_
     assistant_id = (body.get("assistant_id") or "").strip()
     if not name or not assistant_id:
         return fail(400, "Name and assistant_id required")
-    assistant = db.get(Assistant, assistant_id)
-    if not assistant or assistant.workspace_id != ctx.workspace_id:
+    assistant = ctx.fetch(Assistant, assistant_id)
+    if not assistant:
         return fail(404, "Assistant not found")
 
     suite = EvalSuite(
@@ -133,8 +133,8 @@ def create_suite(body: dict, db: Session = Depends(get_db), ctx=Depends(require_
 
 @router.get("/eval/suites/{suite_id}")
 def get_suite(suite_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     data = suite_dict(suite)
     data["cases"] = [case_dict(c) for c in suite.cases]
@@ -151,8 +151,8 @@ def get_suite(suite_id: int, db: Session = Depends(get_db), ctx=Depends(get_work
 
 @router.delete("/eval/suites/{suite_id}")
 def delete_suite(suite_id: int, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     db.delete(suite)
     db.commit()
@@ -161,8 +161,8 @@ def delete_suite(suite_id: int, db: Session = Depends(get_db), ctx=Depends(requi
 
 @router.post("/eval/suites/{suite_id}/cases")
 def add_case(suite_id: int, body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     inp = (body.get("input") or "").strip()
     if not inp:
@@ -188,8 +188,8 @@ def delete_case(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     case = db.get(EvalCase, case_id)
     if not case or case.suite_id != suite_id:
@@ -208,8 +208,8 @@ async def import_cases_csv(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
 
     text = ""
@@ -249,8 +249,8 @@ async def run_suite(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     if not suite.cases:
         return fail(400, "Add at least one test case before running")
@@ -279,8 +279,8 @@ async def compare_suite(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     assistant_ids = body.get("assistant_ids") or []
     if not isinstance(assistant_ids, list):
@@ -305,8 +305,8 @@ async def compare_suite(
 @router.get("/eval/comparisons")
 def list_comparisons(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(EvalComparison)
-        .filter(EvalComparison.workspace_id == ctx.workspace_id)
+        ctx.query(EvalComparison)
+        
         .order_by(EvalComparison.create_time.desc())
         .limit(20)
         .all()
@@ -331,8 +331,8 @@ def get_comparison_trends(
 
 @router.get("/eval/comparisons/{comparison_id}")
 def get_comparison(comparison_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    row = db.get(EvalComparison, comparison_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(EvalComparison, comparison_id)
+    if not row:
         return fail(404, "Comparison not found")
     return ok(comparison_dict(row))
 
@@ -340,8 +340,8 @@ def get_comparison(comparison_id: int, db: Session = Depends(get_db), ctx=Depend
 @router.get("/eval/schedules")
 def list_schedules(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(EvalSchedule)
-        .filter(EvalSchedule.workspace_id == ctx.workspace_id)
+        ctx.query(EvalSchedule)
+        
         .order_by(EvalSchedule.update_time.desc())
         .all()
     )
@@ -353,8 +353,8 @@ def create_schedule(body: dict, db: Session = Depends(get_db), ctx=Depends(requi
     suite_id = body.get("suite_id")
     if not suite_id:
         return fail(400, "suite_id required")
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     interval = max(1, int(body.get("interval_hours") or 24))
     cron_expr = (body.get("cron_expression") or "").strip()
@@ -390,8 +390,8 @@ def update_schedule(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    sched = db.get(EvalSchedule, schedule_id)
-    if not sched or sched.workspace_id != ctx.workspace_id:
+    sched = ctx.fetch(EvalSchedule, schedule_id)
+    if not sched:
         return fail(404, "Schedule not found")
     if "enabled" in body:
         sched.enabled = 1 if body["enabled"] else 0
@@ -421,8 +421,8 @@ def update_schedule(
 
 @router.delete("/eval/schedules/{schedule_id}")
 def delete_schedule(schedule_id: int, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    sched = db.get(EvalSchedule, schedule_id)
-    if not sched or sched.workspace_id != ctx.workspace_id:
+    sched = ctx.fetch(EvalSchedule, schedule_id)
+    if not sched:
         return fail(404, "Schedule not found")
     db.delete(sched)
     db.commit()
@@ -435,8 +435,8 @@ async def trigger_schedule(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    sched = db.get(EvalSchedule, schedule_id)
-    if not sched or sched.workspace_id != ctx.workspace_id:
+    sched = ctx.fetch(EvalSchedule, schedule_id)
+    if not sched:
         return fail(404, "Schedule not found")
     suite = db.get(EvalSuite, sched.suite_id)
     if not suite:
@@ -468,8 +468,8 @@ def get_suite_trends(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     return ok({"suite_id": suite_id, "points": suite_trends(db, suite_id, ctx.workspace_id, limit=limit)})
 
@@ -477,8 +477,8 @@ def get_suite_trends(
 @router.get("/eval/alerts")
 def list_alerts(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(EvalRegressionAlert)
-        .filter(EvalRegressionAlert.workspace_id == ctx.workspace_id)
+        ctx.query(EvalRegressionAlert)
+        
         .order_by(EvalRegressionAlert.update_time.desc())
         .all()
     )
@@ -490,8 +490,8 @@ def create_alert(body: dict, db: Session = Depends(get_db), ctx=Depends(require_
     suite_id = body.get("suite_id")
     if not suite_id:
         return fail(400, "suite_id required")
-    suite = db.get(EvalSuite, suite_id)
-    if not suite or suite.workspace_id != ctx.workspace_id:
+    suite = ctx.fetch(EvalSuite, suite_id)
+    if not suite:
         return fail(404, "Suite not found")
     row = EvalRegressionAlert(
         suite_id=suite_id,
@@ -520,8 +520,8 @@ def update_alert(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    row = db.get(EvalRegressionAlert, alert_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(EvalRegressionAlert, alert_id)
+    if not row:
         return fail(404, "Alert not found")
     if "min_pass_rate" in body:
         row.min_pass_rate = int(body["min_pass_rate"])
@@ -549,8 +549,8 @@ def update_alert(
 
 @router.delete("/eval/alerts/{alert_id}")
 def delete_alert(alert_id: int, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    row = db.get(EvalRegressionAlert, alert_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(EvalRegressionAlert, alert_id)
+    if not row:
         return fail(404, "Alert not found")
     db.delete(row)
     db.commit()
@@ -564,13 +564,13 @@ def get_run_diff(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    current = db.get(EvalRun, run_id)
-    if not current or current.workspace_id != ctx.workspace_id:
+    current = ctx.fetch(EvalRun, run_id)
+    if not current:
         return fail(404, "Run not found")
 
     if baseline_run_id:
-        baseline = db.get(EvalRun, baseline_run_id)
-        if not baseline or baseline.workspace_id != ctx.workspace_id:
+        baseline = ctx.fetch(EvalRun, baseline_run_id)
+        if not baseline:
             return fail(404, "Baseline run not found")
         if baseline.suite_id != current.suite_id:
             return fail(400, "Runs must belong to the same suite")
@@ -589,7 +589,7 @@ def get_run_diff(
 
 @router.get("/eval/runs/{run_id}")
 def get_run(run_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    run = db.get(EvalRun, run_id)
-    if not run or run.workspace_id != ctx.workspace_id:
+    run = ctx.fetch(EvalRun, run_id)
+    if not run:
         return fail(404, "Run not found")
     return ok(run_dict(run))

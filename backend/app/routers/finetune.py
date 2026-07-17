@@ -23,8 +23,8 @@ router = APIRouter(tags=["Fine-tune"])
 @router.get("/finetune/datasets")
 def list_datasets(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(FineTuneDataset)
-        .filter(FineTuneDataset.workspace_id == ctx.workspace_id)
+        ctx.query(FineTuneDataset)
+        
         .order_by(FineTuneDataset.update_time.desc())
         .all()
     )
@@ -59,16 +59,16 @@ def estimate_dataset_cost(
     db: Session = Depends(get_db),
     ctx=Depends(get_workspace_ctx),
 ):
-    row = db.get(FineTuneDataset, dataset_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(FineTuneDataset, dataset_id)
+    if not row:
         return fail(404, "Dataset not found")
     return ok(estimate_finetune_cost(row, base_model.strip()))
 
 
 @router.get("/finetune/datasets/{dataset_id}")
 def get_dataset(dataset_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    row = db.get(FineTuneDataset, dataset_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(FineTuneDataset, dataset_id)
+    if not row:
         return fail(404, "Dataset not found")
     return ok(dataset_dict(row))
 
@@ -82,8 +82,8 @@ def update_dataset(
 ):
     import json
 
-    row = db.get(FineTuneDataset, dataset_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(FineTuneDataset, dataset_id)
+    if not row:
         return fail(404, "Dataset not found")
     if "name" in body and body["name"]:
         row.name = str(body["name"]).strip()[:120]
@@ -99,8 +99,8 @@ def update_dataset(
 
 @router.delete("/finetune/datasets/{dataset_id}")
 def delete_dataset(dataset_id: int, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    row = db.get(FineTuneDataset, dataset_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(FineTuneDataset, dataset_id)
+    if not row:
         return fail(404, "Dataset not found")
     db.delete(row)
     db.commit()
@@ -110,8 +110,8 @@ def delete_dataset(dataset_id: int, db: Session = Depends(get_db), ctx=Depends(r
 @router.get("/finetune/jobs")
 def list_jobs(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(FineTuneJob)
-        .filter(FineTuneJob.workspace_id == ctx.workspace_id)
+        ctx.query(FineTuneJob)
+        
         .order_by(FineTuneJob.create_time.desc())
         .limit(50)
         .all()
@@ -124,8 +124,8 @@ async def create_job(body: dict, db: Session = Depends(get_db), ctx=Depends(requ
     dataset_id = body.get("dataset_id")
     if not dataset_id:
         return fail(400, "dataset_id required")
-    dataset = db.get(FineTuneDataset, dataset_id)
-    if not dataset or dataset.workspace_id != ctx.workspace_id:
+    dataset = ctx.fetch(FineTuneDataset, dataset_id)
+    if not dataset:
         return fail(404, "Dataset not found")
     try:
         job = await start_finetune_job(
@@ -153,8 +153,8 @@ async def import_dataset_csv(
 ):
     import json
 
-    row = db.get(FineTuneDataset, dataset_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(FineTuneDataset, dataset_id)
+    if not row:
         return fail(404, "Dataset not found")
 
     text = ""
@@ -189,8 +189,8 @@ def apply_job(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    job = db.get(FineTuneJob, job_id)
-    if not job or job.workspace_id != ctx.workspace_id:
+    job = ctx.fetch(FineTuneJob, job_id)
+    if not job:
         return fail(404, "Job not found")
     opts = body or {}
     try:
@@ -207,8 +207,8 @@ def apply_job(
 
 @router.post("/finetune/jobs/{job_id}/refresh")
 async def refresh_job(job_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    job = db.get(FineTuneJob, job_id)
-    if not job or job.workspace_id != ctx.workspace_id:
+    job = ctx.fetch(FineTuneJob, job_id)
+    if not job:
         return fail(404, "Job not found")
     try:
         job = await refresh_finetune_job(db, job)
@@ -220,8 +220,8 @@ async def refresh_job(job_id: int, db: Session = Depends(get_db), ctx=Depends(ge
 @router.get("/finetune/ab-routes")
 def list_ab_routes(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(AbModelRoute)
-        .filter(AbModelRoute.workspace_id == ctx.workspace_id)
+        ctx.query(AbModelRoute)
+        
         .order_by(AbModelRoute.update_time.desc())
         .all()
     )
@@ -256,8 +256,8 @@ def update_ab_route(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    row = db.get(AbModelRoute, route_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(AbModelRoute, route_id)
+    if not row:
         return fail(404, "Route not found")
     if "base_model" in body and body["base_model"]:
         row.base_model = str(body["base_model"]).strip()
@@ -275,8 +275,8 @@ def update_ab_route(
 
 @router.delete("/finetune/ab-routes/{route_id}")
 def delete_ab_route(route_id: int, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
-    row = db.get(AbModelRoute, route_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(AbModelRoute, route_id)
+    if not row:
         return fail(404, "Route not found")
     db.delete(row)
     db.commit()

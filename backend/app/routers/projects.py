@@ -13,8 +13,8 @@ router = APIRouter(tags=["Projects"])
 @router.get("/projects")
 def list_projects(db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     rows = (
-        db.query(DevProject)
-        .filter(DevProject.workspace_id == ctx.workspace_id)
+        ctx.query(DevProject)
+        
         .order_by(DevProject.update_time.desc())
         .all()
     )
@@ -45,8 +45,8 @@ def patch_project(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    row = db.get(DevProject, project_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(DevProject, project_id)
+    if not row:
         return fail(404, "Project not found")
     row = update_project(db, row, body)
     return ok(project_dict(row))
@@ -58,8 +58,8 @@ def delete_project(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    row = db.get(DevProject, project_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(DevProject, project_id)
+    if not row:
         return fail(404, "Project not found")
     db.delete(row)
     db.commit()
@@ -68,14 +68,14 @@ def delete_project(
 
 @router.get("/projects/{project_id}")
 def get_project(project_id: int, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
-    row = db.get(DevProject, project_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(DevProject, project_id)
+    if not row:
         return fail(404, "Project not found")
     payload = project_dict(row)
     workflows = []
     for wid in payload.get("workflow_ids") or []:
-        wf = db.get(Workflow, str(wid))
-        if wf and wf.workspace_id == ctx.workspace_id:
+        wf = ctx.fetch(Workflow, str(wid))
+        if wf:
             workflows.append(workflow_dict(wf))
     payload["workflows"] = workflows
     return ok(payload)
@@ -89,11 +89,11 @@ async def run_project_workflow(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    row = db.get(DevProject, project_id)
-    if not row or row.workspace_id != ctx.workspace_id:
+    row = ctx.fetch(DevProject, project_id)
+    if not row:
         return fail(404, "Project not found")
-    wf = db.get(Workflow, workflow_id)
-    if not wf or wf.workspace_id != ctx.workspace_id:
+    wf = ctx.fetch(Workflow, workflow_id)
+    if not wf:
         return fail(404, "Workflow not found")
     user_input = (body.get("input") or body.get("message") or "").strip()
     if not user_input:

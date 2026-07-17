@@ -17,42 +17,81 @@ router = APIRouter(tags=["Chat"])
 
 
 def get_user_id_from_ws(websocket: WebSocket) -> int | None:
-    token = websocket.query_params.get("t") or websocket.query_params.get("token")
+    from app.security.rate_limit import rate_limiter
+    from app.security.config import RATE_LIMIT_WS_PER_MINUTE
+    from app.security.tokens import session_is_active
+
+    # Prefer Authorization header; fall back to query token for browser WS clients.
+    token = None
+    auth = websocket.headers.get("authorization")
+    if auth and auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1].strip()
     if not token:
+        token = websocket.query_params.get("t") or websocket.query_params.get("token")
+    if not token:
+        return None
+    client = websocket.client.host if websocket.client else "ws"
+    if not rate_limiter.allow("ws", client, limit=RATE_LIMIT_WS_PER_MINUTE, window_seconds=60):
         return None
     payload = decode_token(token)
     if not payload:
         return None
+    sid = payload.get("sid")
+    if sid:
+        db = SessionLocal()
+        try:
+            if not session_is_active(db, sid):
+                return None
+        finally:
+            db.close()
     return int(payload["sub"])
 
 
 def get_ws_workspace(db: Session, websocket: WebSocket, user_id: int) -> tuple[int, str] | None:
+    """Resolve tenant for WebSocket — same kernel as HTTP (emergency + soft-delete)."""
+    from app.platform.context import resolve_tenant
+    from app.platform.emergency import expire_stale_grants
+    from app.platform.permissions import workspace_has_permission
+    from app.security.rbac import Permission
+
+    user = db.get(User, user_id)
+    if not user or user.delete:
+        return None
+
     raw = websocket.query_params.get("workspace_id")
+    wid = None
     if raw:
         try:
             wid = int(raw)
         except ValueError:
             return None
-        membership = get_membership(db, user_id, wid)
-        if not membership:
-            return None
-        return wid, membership.role or "editor"
 
-    user = db.get(User, user_id)
-    if not user:
+    expire_stale_grants(db)
+    try:
+        tenant = resolve_tenant(db, user, workspace_id=wid, request=None)
+    except Exception:
         return None
-    ws = ensure_personal_workspace(db, user)
-    membership = get_membership(db, user_id, ws.id)
-    return ws.id, (membership.role if membership else "editor")
 
+    # Subscriptions require at least read permission on assistants/workflows
+    if not workspace_has_permission(
+        tenant.role,
+        Permission.ASSISTANT_READ,
+        via_emergency_access=tenant.via_emergency_access,
+    ):
+        return None
+
+    return tenant.workspace_id, tenant.role
 
 def _parse_user_message(payload: dict) -> str:
-    return (
+    from app.security.ai_guard import sanitize_user_prompt
+
+    raw = (
         payload.get("inputs", {}).get("input")
         or payload.get("data", {}).get("dialog_input", {}).get("message")
         or payload.get("data", {}).get("dialog_input", {}).get("data", {}).get("user_input")
         or ""
     )
+    return sanitize_user_prompt(str(raw))
 
 
 def _parse_chat_history(payload: dict) -> list[dict]:
@@ -387,7 +426,9 @@ async def workflow_run_ws(websocket: WebSocket, workflow_id: str):
             await websocket.send_json({"type": "error", "message": "Unauthorized"})
             await websocket.close()
             return
-        if ws_role == "viewer" or effective_role(user) == "viewer":
+        from app.platform.roles import has_workspace_min_role
+
+        if not has_workspace_min_role(ws_role, "editor"):
             await websocket.send_json({"type": "error", "message": "Viewer access is read-only"})
             await websocket.close()
             return

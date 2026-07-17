@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import DATA_DIR
-from app.crypto import md5_hash
+from app.crypto import hash_password
 from app.database import Assistant, AssistantKnowledge, KnowledgeBase, KnowledgeFile, User, Workflow
 from app.services.knowledge import kb_upload_dir, process_file_record
 from app.services.tenancy import ensure_personal_workspace
@@ -63,7 +63,7 @@ def seed_demo_data(db: Session) -> bool:
     wid = ws.id
 
     if not db.query(User).filter(User.user_name == "demo").first():
-        demo_user = User(user_name="demo", password=md5_hash("demo123"), role="viewer")
+        demo_user = User(user_name="demo", password=hash_password("demo123"), role="viewer")
         db.add(demo_user)
         db.flush()
         ensure_personal_workspace(db, demo_user)

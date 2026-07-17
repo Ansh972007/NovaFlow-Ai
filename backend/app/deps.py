@@ -1,36 +1,35 @@
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 import hashlib
 
-from fastapi import Depends, Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.crypto import decode_token
-from app.database import ApiKey, User, Workspace, get_db
-from app.services.tenancy import WorkspaceCtx, ensure_personal_workspace, get_membership
+from app.database import ApiKey, User, get_db
+from app.security.audit import audit_log
+from app.security.rbac import ROLE_RANK, Permission, has_min_role, normalize_role
+from app.security.tokens import session_is_active
+from app.services.tenancy import WorkspaceCtx
 
-ROLE_RANK = {"viewer": 0, "editor": 1, "admin": 2}
+# PlatformContext is the Phase-2 kernel type; WorkspaceCtx kept for typing aliases.
+PlatformCtx = Union["PlatformContext", WorkspaceCtx]
 
 
 def effective_role(user: User) -> str:
-    return user.role or ("admin" if user.user_id == 1 else "editor")
+    return normalize_role(user.role, user_id=user.user_id)
 
 
-def _extract_token(
-    authorization: Optional[str] = Header(None),
-    t: Optional[str] = Query(None),
-) -> str:
-    if t:
-        return t
+def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization.split(" ", 1)[1].strip()
-    raise HTTPException(status_code=401, detail="Not authenticated")
+    return None
 
 
 def get_current_user(
+    request: Request,
     db: Session = Depends(get_db),
     authorization: Optional[str] = Header(None),
-    t: Optional[str] = Query(None),
     x_api_key: Optional[str] = Header(None, alias="X-Api-Key"),
 ) -> User:
     if x_api_key and x_api_key.startswith("nf_"):
@@ -41,10 +40,27 @@ def get_current_user(
             if user and not user.delete:
                 return user
         raise HTTPException(status_code=401, detail="Invalid API key")
-    token = _extract_token(authorization, t)
+
+    token = _extract_bearer(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    sid = payload.get("sid")
+    if sid and not session_is_active(db, sid):
+        audit_log(
+            db,
+            action="auth.session_rejected",
+            actor_user_id=int(payload.get("sub") or 0) or None,
+            success=False,
+            detail={"reason": "session_revoked"},
+            ip=request.client.host if request.client else "",
+        )
+        raise HTTPException(status_code=401, detail="Session revoked or expired")
+
     user = db.get(User, int(payload["sub"]))
     if not user or user.delete:
         raise HTTPException(status_code=401, detail="User not found")
@@ -54,53 +70,60 @@ def get_current_user(
 def get_optional_user(
     db: Session = Depends(get_db),
     authorization: Optional[str] = Header(None),
-    t: Optional[str] = Query(None),
 ) -> Optional[User]:
-    try:
-        token = _extract_token(authorization, t)
-    except HTTPException:
+    token = _extract_bearer(authorization)
+    if not token:
         return None
     payload = decode_token(token)
     if not payload:
         return None
+    sid = payload.get("sid")
+    if sid and not session_is_active(db, sid):
+        return None
     return db.get(User, int(payload["sub"]))
 
 
-def get_workspace_ctx(
+def get_platform_ctx(
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     x_workspace_id: Optional[int] = Header(None, alias="X-Workspace-Id"),
-    # Named differently from path params like /workspaces/{workspace_id}/...
     workspace_id_q: Optional[int] = Query(None, alias="workspace_id"),
-) -> WorkspaceCtx:
+    x_team_id: Optional[int] = Header(None, alias="X-Team-Id"),
+):
+    """Resolve PlatformContext (tenant + permission + audit + ownership)."""
+    from app.platform.access import build_platform_context
+    from app.platform.emergency import expire_stale_grants
+
+    expire_stale_grants(db)
     wid = x_workspace_id or workspace_id_q
-    ws = None
-    membership = None
+    return build_platform_context(
+        db, user, workspace_id=wid, team_id=x_team_id, request=request
+    )
 
-    if wid:
-        ws = db.get(Workspace, wid)
-        if ws:
-            membership = get_membership(db, user.user_id, wid)
 
-    if not ws or not membership:
-        ws = ensure_personal_workspace(db, user)
-        wid = ws.id
-        membership = get_membership(db, user.user_id, wid)
-
-    if not membership:
-        raise HTTPException(status_code=403, detail="Not a member of this workspace")
-
-    return WorkspaceCtx(
+def get_workspace_ctx(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    x_workspace_id: Optional[int] = Header(None, alias="X-Workspace-Id"),
+    workspace_id_q: Optional[int] = Query(None, alias="workspace_id"),
+    x_team_id: Optional[int] = Header(None, alias="X-Team-Id"),
+):
+    """Backward-compatible alias — returns PlatformContext (superset of WorkspaceCtx)."""
+    return get_platform_ctx(
+        request=request,
+        db=db,
         user=user,
-        workspace_id=wid,
-        role=membership.role or "editor",
-        workspace=ws,
+        x_workspace_id=x_workspace_id,
+        workspace_id_q=workspace_id_q,
+        x_team_id=x_team_id,
     )
 
 
 def require_min_role(min_role: str) -> Callable:
     def _dep(user: User = Depends(get_current_user)) -> User:
-        if ROLE_RANK.get(effective_role(user), 0) < ROLE_RANK.get(min_role, 1):
+        if not has_min_role(effective_role(user), min_role, user_id=user.user_id):
             raise HTTPException(
                 status_code=403,
                 detail=f"{min_role.capitalize()} access required",
@@ -110,16 +133,22 @@ def require_min_role(min_role: str) -> Callable:
     return _dep
 
 
-def require_workspace_editor(ctx: WorkspaceCtx = Depends(get_workspace_ctx)) -> WorkspaceCtx:
-    if ROLE_RANK.get(ctx.role, 0) < ROLE_RANK.get("editor", 1):
-        raise HTTPException(status_code=403, detail="Editor access required in this workspace")
+def require_workspace_editor(ctx=Depends(get_platform_ctx)):
+    ctx.require_min_role("editor")
     return ctx
 
 
-def require_workspace_admin(ctx: WorkspaceCtx = Depends(get_workspace_ctx)) -> WorkspaceCtx:
-    if ROLE_RANK.get(ctx.role, 0) < ROLE_RANK.get("admin", 1):
-        raise HTTPException(status_code=403, detail="Workspace admin access required")
+def require_workspace_admin(ctx=Depends(get_platform_ctx)):
+    ctx.require_min_role("admin")
     return ctx
+
+
+def require_permission(permission: Permission | str) -> Callable:
+    def _dep(ctx=Depends(get_platform_ctx)):
+        ctx.require(permission)
+        return ctx
+
+    return _dep
 
 
 require_editor = require_min_role("editor")
