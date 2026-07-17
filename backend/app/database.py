@@ -564,6 +564,24 @@ class SavedAgent(Base):
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AIMemoryEntry(Base):
+    """Tenant-scoped AI memory (conversation, workspace, project, agent, pinned, semantic)."""
+
+    __tablename__ = "ai_memory_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    scope = Column(String(32), default="workspace", index=True)
+    scope_ref = Column(String(128), default="", index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    content = Column(Text, default="")
+    meta_json = Column(Text, default="")
+    pinned = Column(Integer, default=0)
+    deleted_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Organization(Base):
     """Top-level tenant container (company / university / government)."""
 

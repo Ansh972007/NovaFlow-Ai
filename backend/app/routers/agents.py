@@ -110,6 +110,9 @@ def delete_agent(agent_id: str, db: Session = Depends(get_db), ctx=Depends(requi
 
 @router.post("/agents/run")
 async def run_agent_api(body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+    from app.runtime.context import runtime_from_platform
+    from app.runtime.pipeline import AIRuntime, AgentRequest
+
     user_input = (body.get("input") or body.get("message") or "").strip()
     if not user_input:
         return fail(400, "input required")
@@ -131,16 +134,24 @@ async def run_agent_api(body: dict, db: Session = Depends(get_db), ctx=Depends(r
         knowledge_id = a.knowledge_id if knowledge_id is None else knowledge_id
 
     try:
-        result = await run_agent(
-            db,
-            user_input,
-            tools if isinstance(tools, list) else [tools],
-            knowledge_id=knowledge_id,
-            workspace_id=ctx.workspace_id,
-            system=system,
+        runtime = AIRuntime(runtime_from_platform(ctx))
+        result = await runtime.run_agent(
+            AgentRequest(
+                user_input=user_input,
+                tool_ids=tools if isinstance(tools, list) else [tools],
+                system=system,
+                knowledge_id=knowledge_id,
+                agent_id=agent_id,
+            )
         )
-        if isinstance(result, dict):
-            return ok(result)
-        return ok({"output": result, "tools": tools, "tool_results": []})
+        return ok(
+            {
+                "output": result.output,
+                "tool_results": result.tool_results,
+                "tools": tools,
+                "selected_tools": result.selected_tools,
+                "metrics": result.metrics.to_dict(),
+            }
+        )
     except Exception as exc:
         return fail(400, str(exc))

@@ -232,35 +232,28 @@ async def run_agent(
     workspace_id: int | None = None,
     system: str = DEFAULT_AGENT_SYSTEM,
 ) -> dict[str, Any]:
-    tool_ids = [t for t in (tool_ids or []) if t in BUILTIN_TOOLS][:5]
-    system = (system or "").strip() or DEFAULT_AGENT_SYSTEM
-    if not tool_ids:
-        output = await stream_chat_sync(system, user_input, db=db, workspace_id=workspace_id)
-        return {"output": output, "tool_results": [], "tools": [], "selected_tools": []}
+    """Backward-compatible facade — delegates to Enterprise AI Runtime."""
+    from app.runtime.context import RuntimeContext
+    from app.runtime.pipeline import AIRuntime, AgentRequest
 
-    selected = _select_tools(user_input, tool_ids, max_tools=min(3, len(tool_ids)))
-    selected = sorted(selected, key=lambda t: _TOOL_ORDER.get(t, 5))
-
-    tool_results: list[dict[str, Any]] = []
-    for tid in selected:
-        tool_arg = _followup_input(tid, user_input, tool_results)
-        result = await _run_tool(
-            db, tid, tool_arg, knowledge_id=knowledge_id, workspace_id=workspace_id
-        )
-        tool_results.append({"tool": tid, "result": result[:2000]})
-
-    block = _format_tool_block(tool_results)
-    prompt = (
-        f"## User request\n{user_input}\n\n"
-        f"## Tool results (selected: {', '.join(selected)})\n{block}\n\n"
-        f"## Your job\nSynthesize a final answer for the user. "
-        f"Prefer concrete statements grounded in the tool results. "
-        f"If a tool was irrelevant or empty, ignore it silently."
+    ctx = RuntimeContext.from_ws(
+        db,
+        user_id=0,
+        workspace_id=workspace_id or 0,
+        role="editor",
     )
-    output = await stream_chat_sync(system, prompt, db=db, workspace_id=workspace_id)
+    runtime = AIRuntime(ctx)
+    result = await runtime.run_agent(
+        AgentRequest(
+            user_input=user_input,
+            tool_ids=tool_ids,
+            system=system,
+            knowledge_id=knowledge_id,
+        )
+    )
     return {
-        "output": output,
-        "tool_results": tool_results,
+        "output": result.output,
+        "tool_results": result.tool_results,
         "tools": tool_ids,
-        "selected_tools": selected,
+        "selected_tools": result.selected_tools,
     }

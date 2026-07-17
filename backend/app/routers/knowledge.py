@@ -14,7 +14,6 @@ from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import KnowledgeCreate, KnowledgeUrlIngest, ProcessFiles, fail, ok
 from app.services.knowledge import kb_upload_dir, process_file_record, search_chunks, search_chunks_semantic
 from app.services.doc_parse import is_supported_suffix, UNSUPPORTED_OFFICE
-from app.services.llm import stream_chat_sync
 
 router = APIRouter(tags=["Knowledge"])
 
@@ -207,6 +206,9 @@ async def knowledge_answer(
     ctx=Depends(get_workspace_ctx),
 ):
     """Grounded Q&A over one knowledge base (retrieve + short cited answer)."""
+    from app.runtime.context import runtime_from_platform
+    from app.runtime.pipeline import AIRuntime
+
     knowledge_id = body.get("knowledge_id") or body.get("id")
     query = (body.get("q") or body.get("question") or body.get("query") or "").strip()
     limit = min(max(int(body.get("limit") or 5), 1), 10)
@@ -232,12 +234,10 @@ async def knowledge_answer(
             }
         )
 
-    parts = []
     citations = []
     for i, hit in enumerate(hits, 1):
         src = hit.get("file_name") or "document"
         text = (hit.get("text") or "").strip()[:1000]
-        parts.append(f"[{i}] ({src})\n{text}")
         citations.append(
             {
                 "n": i,
@@ -247,21 +247,22 @@ async def knowledge_answer(
                 "preview": text[:240] + ("…" if len(text) > 240 else ""),
             }
         )
-    context_block = "\n\n".join(parts)
+
     system = (
         f"You answer questions using only the retrieved passages from knowledge base «{kb.name}». "
         "Lead with a direct answer, then 2–4 short supporting bullets. "
         "Cite sources as [n] when you rely on a passage. "
         "If the passages do not contain the answer, say what is missing — do not invent facts."
     )
-    user_msg = f"## Question\n{query}\n\n## Retrieved context\n{context_block}"
     try:
-        answer = await stream_chat_sync(
-            system,
-            user_msg,
-            db=db,
-            workspace_id=ctx.workspace_id,
+        runtime = AIRuntime(runtime_from_platform(ctx))
+        result = await runtime.knowledge_answer(
+            int(knowledge_id),
+            query,
+            system_override=system,
+            limit=limit,
         )
+        answer = result.content
     except Exception as exc:
         return fail(500, f"Answer generation failed: {exc}")
 
@@ -272,6 +273,7 @@ async def knowledge_answer(
             "total": len(hits),
             "method": method,
             "citations": citations,
+            "metrics": result.metrics.to_dict(),
         }
     )
 

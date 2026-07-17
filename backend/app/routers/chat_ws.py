@@ -8,9 +8,7 @@ from app.crypto import decode_token
 from app.database import Assistant, SessionLocal, User, Workflow
 from app.deps import effective_role
 from app.services.tenancy import ensure_personal_workspace, get_membership
-from app.services.knowledge import rag_context_for_assistant, rag_hits_for_assistant
-from app.services.llm import stream_chat
-from app.services.receipt import build_chat_receipt
+from app.services.knowledge import rag_hits_for_assistant
 from app.services.workflow import log_usage, resolve_workflow_llm_messages, run_workflow_with_progress
 
 router = APIRouter(tags=["Chat"])
@@ -124,43 +122,73 @@ async def _stream_reply(
     receipt_extra: dict | None = None,
     cancel_event: asyncio.Event | None = None,
     history: list[dict] | None = None,
+    *,
+    assistant_id: str = "",
+    rag_query: str | None = None,
 ):
-    from app.services.ab_routing import pick_ab_model
-    from app.services.workspace_settings import get_chat_config
+    from app.runtime.context import RuntimeContext
+    from app.runtime.pipeline import AIRuntime, ChatRequest
+    from app.runtime.providers import resolve_provider
+    from app.runtime.router import route_model
+    from app.services.receipt import build_chat_receipt
 
+    role = (receipt_extra or {}).get("role") or "editor"
+    ctx = RuntimeContext.from_ws(
+        db,
+        user_id=user_id,
+        workspace_id=workspace_id or 0,
+        role=role,
+        cancel_event=cancel_event,
+    )
+    runtime = AIRuntime(ctx)
+
+    provider = resolve_provider(db)
+    route = route_model(db, workspace_id, provider)
     ab_meta = None
-    model_name = ""
-    if workspace_id:
-        cfg = get_chat_config(db)
-        model_name = cfg.get("model") or ""
-        ab_meta = pick_ab_model(db, workspace_id, model_name)
+    if route.route_id:
+        ab_meta = {"model": route.model, "variant": route.variant, "route_id": route.route_id}
+    elif route.model:
+        ab_meta = {"model": route.model, "variant": route.variant, "route_id": route.route_id}
 
     await websocket.send_json({"type": "start"})
     buffer = ""
     usage_out: dict = {}
     stopped = False
-    async for token in stream_chat(
-        system,
-        user_msg,
-        db=db,
-        workspace_id=workspace_id,
-        cancel_event=cancel_event,
-        usage_out=usage_out,
+    rag_hits = (receipt_extra or {}).get("rag_hits")
+
+    req = ChatRequest(
+        user_message=user_msg,
+        system_prompt=system,
+        assistant_id=assistant_id,
         history=history,
-    ):
-        if cancel_event is not None and cancel_event.is_set():
-            stopped = True
-            break
-        buffer += token
-        await websocket.send_json(
-            {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
-        )
-        await asyncio.sleep(0)
+        rag_query=rag_query or user_msg,
+    )
+    try:
+        async for token in runtime.chat_stream(req, usage_out=usage_out):
+            if cancel_event is not None and cancel_event.is_set():
+                stopped = True
+                break
+            buffer += token
+            await websocket.send_json(
+                {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
+            )
+            await asyncio.sleep(0)
+    except Exception as exc:
+        await websocket.send_json({"type": "error", "category": "error", "message": str(exc)})
+        await websocket.send_json({"type": "close"})
+        return
+
     if cancel_event is not None and cancel_event.is_set():
         stopped = True
+    if not rag_hits and assistant_id:
+        from app.runtime.knowledge import resolve_assistant_knowledge
+
+        kb = resolve_assistant_knowledge(ctx, assistant_id, rag_query or user_msg)
+        rag_hits = [h.to_dict() for h in kb.hits]
+
     receipt = build_chat_receipt(
-        model=ab_meta.get("model") if ab_meta else model_name,
-        rag_hits=(receipt_extra or {}).get("rag_hits"),
+        model=ab_meta.get("model") if ab_meta else (usage_out.get("model") or ""),
+        rag_hits=rag_hits,
         ab_meta=ab_meta,
         chars=len(buffer),
         event_type=event_type,
@@ -169,7 +197,7 @@ async def _stream_reply(
     )
     await websocket.send_json({"type": "end", "message": {"content": buffer}, "receipt": receipt})
     await websocket.send_json({"type": "close"})
-    meta = {"chars": len(buffer), "stopped": stopped}
+    meta = {"chars": len(buffer), "stopped": stopped, "trace_id": ctx.trace_id}
     if usage_out.get("total_tokens") is not None:
         meta["total_tokens"] = usage_out.get("total_tokens")
         meta["prompt_tokens"] = usage_out.get("prompt_tokens")
@@ -197,7 +225,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
             await websocket.send_json({"type": "error", "category": "error", "message": "Invalid workspace"})
             await websocket.close()
             return
-        wid, _role = ws_ctx
+        wid, role = ws_ctx
 
         assistant = db.get(Assistant, assistant_id)
         if not assistant or assistant.workspace_id != wid:
@@ -243,16 +271,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 if prev_users and len(query.split()) <= 8:
                     rag_query = f"{' '.join(prev_users[-1:])} {query}".strip()
             rag_hits = rag_hits_for_assistant(db, assistant_id, rag_query)
-            rag = rag_context_for_assistant(db, assistant_id, rag_query)
             system_prompt = assistant.prompt
-            if rag:
-                system_prompt = (
-                    f"{assistant.prompt}\n\n"
-                    "Use the retrieved context when it is relevant. Prefer: direct answer first, "
-                    "then short supporting bullets. Cite sources as [n] when you rely on a passage. "
-                    "If context is empty or does not help, say what is missing and answer cautiously.\n\n"
-                    f"--- Retrieved context ---\n{rag}\n--- End context ---"
-                )
 
             cancel_event = asyncio.Event()
 
@@ -282,9 +301,11 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     system_prompt,
                     query,
                     wid,
-                    receipt_extra={"rag_hits": rag_hits},
+                    receipt_extra={"rag_hits": rag_hits, "role": role},
                     cancel_event=cancel_event,
                     history=history,
+                    assistant_id=assistant_id,
+                    rag_query=rag_query,
                 )
             finally:
                 cancel_event.set()

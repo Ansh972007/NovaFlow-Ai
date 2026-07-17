@@ -151,6 +151,7 @@ def health():
             "security": "enterprise-v1",
             "platform": "multi-tenant-v2",
             "data_platform": "enterprise-v1",
+            "ai_runtime": "enterprise-v1",
         }
     )
 
