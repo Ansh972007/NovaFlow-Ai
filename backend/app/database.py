@@ -763,6 +763,163 @@ class AgentLearningRecord(Base):
     create_time = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class ConnectorConnection(Base):
+    """ECP connector connection — named instance per workspace."""
+
+    __tablename__ = "connector_connections"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    connector_type = Column(String(64), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    auth_type = Column(String(32), default="api_key")
+    status = Column(String(16), default="active", index=True)
+    lifecycle_status = Column(String(16), default="published")
+    capabilities_json = Column(Text, default="[]")
+    config_json = Column(Text, default="{}")
+    health_status = Column(String(16), default="unknown")
+    last_health_at = Column(DateTime, nullable=True)
+    version_no = Column(Integer, default=1)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    trace_id = Column(String(64), default="")
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ConnectorCredential(Base):
+    """ECP encrypted credential store with versioning."""
+
+    __tablename__ = "connector_credentials"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    connection_id = Column(String(32), ForeignKey("connector_connections.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    credential_type = Column(String(32), default="secret")
+    secret_enc = Column(Text, default="")
+    version_no = Column(Integer, default=1)
+    expires_at = Column(DateTime, nullable=True)
+    rotated_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class ConnectorSyncJob(Base):
+    """ECP sync job — incremental/scheduled/webhook sync."""
+
+    __tablename__ = "connector_sync_jobs"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    connection_id = Column(String(32), ForeignKey("connector_connections.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    direction = Column(String(16), default="inbound")
+    mode = Column(String(16), default="incremental")
+    status = Column(String(16), default="pending", index=True)
+    checkpoint_json = Column(Text, default="{}")
+    config_json = Column(Text, default="{}")
+    error_message = Column(Text, default="")
+    last_sync_at = Column(DateTime, nullable=True)
+    next_sync_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ConnectorWebhook(Base):
+    """ECP webhook subscription — inbound/outbound."""
+
+    __tablename__ = "connector_webhooks"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    connection_id = Column(String(32), ForeignKey("connector_connections.id"), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    direction = Column(String(16), default="inbound")
+    url = Column(String(500), default="")
+    secret_enc = Column(Text, default="")
+    events_json = Column(Text, default="[]")
+    status = Column(String(16), default="active")
+    last_delivery_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class ConnectorEvent(Base):
+    """ECP event log for replay and observability."""
+
+    __tablename__ = "connector_events"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    connection_id = Column(String(32), nullable=True, index=True)
+    event_type = Column(String(64), default="connector.action", index=True)
+    direction = Column(String(16), default="outbound")
+    status = Column(String(16), default="pending", index=True)
+    payload_json = Column(Text, default="{}")
+    trace_id = Column(String(64), default="", index=True)
+    latency_ms = Column(Integer, default=0)
+    error_message = Column(Text, default="")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class MCPRegistration(Base):
+    """ECP Model Context Protocol server/client registration."""
+
+    __tablename__ = "mcp_registrations"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    name = Column(String(120), nullable=False)
+    role = Column(String(16), default="client")
+    transport = Column(String(16), default="stdio")
+    endpoint = Column(String(500), default="")
+    capabilities_json = Column(Text, default="[]")
+    tools_json = Column(Text, default="[]")
+    auth_type = Column(String(32), default="none")
+    status = Column(String(16), default="active")
+    version = Column(String(16), default="1.0")
+    config_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EIAPRecommendation(Base):
+    """EIAP recommendation — approval-gated optimization suggestion. Never auto-applied."""
+
+    __tablename__ = "eiap_recommendations"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    domain = Column(String(32), default="workflow", index=True)  # workflow|agent|knowledge|connectivity|model|finops|prompt|search
+    category = Column(String(64), default="optimization")
+    severity = Column(String(16), default="info")  # info|low|medium|high|critical
+    title = Column(String(200), default="")
+    detail = Column(Text, default="")
+    resource_type = Column(String(64), default="")
+    resource_id = Column(String(64), default="")
+    evidence_json = Column(Text, default="{}")
+    estimated_impact = Column(String(200), default="")
+    status = Column(String(16), default="open", index=True)  # open|approved|applied|dismissed
+    reviewed_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    trace_id = Column(String(64), default="")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EIAPReport(Base):
+    """EIAP generated report — daily/weekly/monthly/executive snapshots."""
+
+    __tablename__ = "eiap_reports"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    report_type = Column(String(32), default="daily", index=True)
+    period = Column(String(32), default="")
+    payload_json = Column(Text, default="{}")
+    summary = Column(Text, default="")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class AIMemoryEntry(Base):
     """Tenant-scoped AI memory (conversation, workspace, project, agent, pinned, semantic)."""
 
@@ -1226,12 +1383,12 @@ def migrate_schema():
         cols = {c["name"] for c in insp.get_columns("knowledge_chunks")}
         if "embedding_json" not in cols:
             with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN embedding_json TEXT DEFAULT ''"))
+                conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN embedding_json TEXT"))
     if "knowledge_files" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("knowledge_files")}
         if "error_message" not in cols:
             with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE knowledge_files ADD COLUMN error_message TEXT DEFAULT ''"))
+                conn.execute(text("ALTER TABLE knowledge_files ADD COLUMN error_message TEXT"))
     if "users" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("users")}
         if "role" not in cols:
@@ -1286,25 +1443,25 @@ def migrate_schema():
             ("telegram_webhook_url", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_url VARCHAR(500) DEFAULT ''"),
             ("telegram_webhook_registered_at", "ALTER TABLE workspace_integrations ADD COLUMN telegram_webhook_registered_at DATETIME"),
             ("gmail_auth_mode", "ALTER TABLE workspace_integrations ADD COLUMN gmail_auth_mode VARCHAR(16) DEFAULT 'smtp'"),
-            ("gmail_oauth_refresh_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_refresh_token_enc TEXT DEFAULT ''"),
-            ("gmail_oauth_access_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_access_token_enc TEXT DEFAULT ''"),
+            ("gmail_oauth_refresh_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_refresh_token_enc TEXT"),
+            ("gmail_oauth_access_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_access_token_enc TEXT"),
             ("gmail_oauth_token_expiry", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_token_expiry DATETIME"),
             ("gmail_oauth_email", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_email VARCHAR(255) DEFAULT ''"),
             ("gmail_oauth_connected_at", "ALTER TABLE workspace_integrations ADD COLUMN gmail_oauth_connected_at DATETIME"),
             ("jira_base_url", "ALTER TABLE workspace_integrations ADD COLUMN jira_base_url VARCHAR(500) DEFAULT ''"),
             ("jira_email", "ALTER TABLE workspace_integrations ADD COLUMN jira_email VARCHAR(255) DEFAULT ''"),
-            ("jira_api_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN jira_api_token_enc TEXT DEFAULT ''"),
-            ("slack_webhook_url_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_webhook_url_enc TEXT DEFAULT ''"),
+            ("jira_api_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN jira_api_token_enc TEXT"),
+            ("slack_webhook_url_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_webhook_url_enc TEXT"),
             ("slack_default_channel", "ALTER TABLE workspace_integrations ADD COLUMN slack_default_channel VARCHAR(120) DEFAULT ''"),
-            ("github_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN github_token_enc TEXT DEFAULT ''"),
+            ("github_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN github_token_enc TEXT"),
             ("github_owner", "ALTER TABLE workspace_integrations ADD COLUMN github_owner VARCHAR(120) DEFAULT ''"),
             ("github_repo", "ALTER TABLE workspace_integrations ADD COLUMN github_repo VARCHAR(120) DEFAULT ''"),
-            ("discord_webhook_url_enc", "ALTER TABLE workspace_integrations ADD COLUMN discord_webhook_url_enc TEXT DEFAULT ''"),
+            ("discord_webhook_url_enc", "ALTER TABLE workspace_integrations ADD COLUMN discord_webhook_url_enc TEXT"),
             ("discord_default_channel", "ALTER TABLE workspace_integrations ADD COLUMN discord_default_channel VARCHAR(120) DEFAULT ''"),
-            ("linear_api_key_enc", "ALTER TABLE workspace_integrations ADD COLUMN linear_api_key_enc TEXT DEFAULT ''"),
+            ("linear_api_key_enc", "ALTER TABLE workspace_integrations ADD COLUMN linear_api_key_enc TEXT"),
             ("linear_team_id", "ALTER TABLE workspace_integrations ADD COLUMN linear_team_id VARCHAR(64) DEFAULT ''"),
-            ("slack_bot_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_bot_token_enc TEXT DEFAULT ''"),
-            ("slack_signing_secret_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_signing_secret_enc TEXT DEFAULT ''"),
+            ("slack_bot_token_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_bot_token_enc TEXT"),
+            ("slack_signing_secret_enc", "ALTER TABLE workspace_integrations ADD COLUMN slack_signing_secret_enc TEXT"),
             ("slack_events_workflow_id", "ALTER TABLE workspace_integrations ADD COLUMN slack_events_workflow_id VARCHAR(32) DEFAULT ''"),
             ("slack_events_url", "ALTER TABLE workspace_integrations ADD COLUMN slack_events_url VARCHAR(500) DEFAULT ''"),
             ("slack_events_registered_at", "ALTER TABLE workspace_integrations ADD COLUMN slack_events_registered_at DATETIME"),
@@ -1404,7 +1561,7 @@ def migrate_schema():
         for col, ddl in [
             ("email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0"),
             ("mfa_enabled", "ALTER TABLE users ADD COLUMN mfa_enabled INTEGER DEFAULT 0"),
-            ("mfa_secret_enc", "ALTER TABLE users ADD COLUMN mfa_secret_enc TEXT DEFAULT ''"),
+            ("mfa_secret_enc", "ALTER TABLE users ADD COLUMN mfa_secret_enc TEXT"),
             ("password_changed_at", "ALTER TABLE users ADD COLUMN password_changed_at DATETIME"),
         ]:
             if col not in cols:
@@ -1524,6 +1681,14 @@ def migrate_schema():
         "agent_plan_sessions",
         "agent_verification_reports",
         "agent_learning_records",
+        "connector_connections",
+        "connector_credentials",
+        "connector_sync_jobs",
+        "connector_webhooks",
+        "connector_events",
+        "mcp_registrations",
+        "eiap_recommendations",
+        "eiap_reports",
     ):
         if table_name not in insp.get_table_names() and table_name in Base.metadata.tables:
             Base.metadata.tables[table_name].create(bind=engine, checkfirst=True)
