@@ -66,6 +66,72 @@ AGENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "roles": ["research", "writer"],
         "tools": ["kb_search", "summarize"],
     },
+    "deep_research": {
+        "agent_type": "research",
+        "name": "Deep Research Agent",
+        "roles": ["research", "reviewer", "writer", "coordinator"],
+        "tools": ["kb_search", "web_fetch", "summarize"],
+    },
+    "coding_assistant": {
+        "agent_type": "coding",
+        "name": "Coding Agent",
+        "roles": ["developer", "reviewer", "writer"],
+        "tools": ["summarize", "json_parse", "regex_extract"],
+    },
+    "legal_assistant": {
+        "agent_type": "custom",
+        "name": "Legal Agent",
+        "roles": ["reviewer", "writer"],
+        "tools": ["kb_search", "summarize"],
+    },
+    "finance_assistant": {
+        "agent_type": "custom",
+        "name": "Finance Agent",
+        "roles": ["research", "writer"],
+        "tools": ["kb_search", "summarize"],
+    },
+    "hr_assistant": {
+        "agent_type": "custom",
+        "name": "HR Agent",
+        "roles": ["writer"],
+        "tools": ["kb_search", "summarize"],
+    },
+    "marketing_assistant": {
+        "agent_type": "custom",
+        "name": "Marketing Agent",
+        "roles": ["writer"],
+        "tools": ["kb_search", "summarize"],
+    },
+    "support_assistant": {
+        "agent_type": "custom",
+        "name": "Support Agent",
+        "roles": ["research", "writer"],
+        "tools": ["kb_search", "summarize"],
+    },
+    "database_assistant": {
+        "agent_type": "custom",
+        "name": "Database Agent",
+        "roles": ["developer", "writer"],
+        "tools": ["json_parse", "summarize"],
+    },
+    "security_assistant": {
+        "agent_type": "evaluation",
+        "name": "Security Agent",
+        "roles": ["reviewer", "writer"],
+        "tools": ["kb_search", "summarize"],
+    },
+    "devops_assistant": {
+        "agent_type": "monitoring",
+        "name": "DevOps Agent",
+        "roles": ["coordinator", "writer"],
+        "tools": ["datetime", "summarize"],
+    },
+    "meeting_assistant": {
+        "agent_type": "custom",
+        "name": "Meeting Assistant",
+        "roles": ["writer"],
+        "tools": ["summarize"],
+    },
 }
 
 
