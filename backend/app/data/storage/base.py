@@ -48,6 +48,10 @@ class ObjectStorageProvider(ABC):
         """Default: not supported — local/dev returns path reference."""
         raise NotImplementedError(f"{self.name} does not support signed URLs")
 
+    def list_objects(self, *, prefix: str = "", limit: int = 1000) -> list[StoredObject]:
+        """List stored objects under a key prefix. Default: empty (override per provider)."""
+        return []
+
     def tenant_key(self, workspace_id: int, *parts: str) -> str:
         safe = [str(workspace_id)] + [p.strip("/").replace("..", "") for p in parts]
         return "ws/" + "/".join(safe)

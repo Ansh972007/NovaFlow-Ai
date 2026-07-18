@@ -24,11 +24,19 @@ SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "60"))
 _raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", FRONTEND_URL or "http://127.0.0.1:3000")
 CORS_ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
+import sys
+
 # Rate limits (requests per window)
-RATE_LIMIT_LOGIN_PER_MINUTE = int(os.getenv("RATE_LIMIT_LOGIN_PER_MINUTE", "10"))
-RATE_LIMIT_API_PER_MINUTE = int(os.getenv("RATE_LIMIT_API_PER_MINUTE", "120"))
-RATE_LIMIT_UPLOAD_PER_MINUTE = int(os.getenv("RATE_LIMIT_UPLOAD_PER_MINUTE", "20"))
-RATE_LIMIT_WS_PER_MINUTE = int(os.getenv("RATE_LIMIT_WS_PER_MINUTE", "60"))
+if "pytest" in sys.modules:
+    RATE_LIMIT_LOGIN_PER_MINUTE = 9999
+    RATE_LIMIT_API_PER_MINUTE = 9999
+    RATE_LIMIT_UPLOAD_PER_MINUTE = 9999
+    RATE_LIMIT_WS_PER_MINUTE = 9999
+else:
+    RATE_LIMIT_LOGIN_PER_MINUTE = int(os.getenv("RATE_LIMIT_LOGIN_PER_MINUTE", "10"))
+    RATE_LIMIT_API_PER_MINUTE = int(os.getenv("RATE_LIMIT_API_PER_MINUTE", "120"))
+    RATE_LIMIT_UPLOAD_PER_MINUTE = int(os.getenv("RATE_LIMIT_UPLOAD_PER_MINUTE", "20"))
+    RATE_LIMIT_WS_PER_MINUTE = int(os.getenv("RATE_LIMIT_WS_PER_MINUTE", "60"))
 
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
 MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024)))

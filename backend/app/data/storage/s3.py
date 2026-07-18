@@ -110,3 +110,30 @@ class S3CompatibleStorage(ObjectStorageProvider):
             Params={"Bucket": self.bucket, "Key": key},
             ExpiresIn=expires_seconds,
         )
+
+    def list_objects(self, *, prefix: str = "", limit: int = 1000) -> list[StoredObject]:
+        client = self._client_or_raise()
+        out: list[StoredObject] = []
+        token = None
+        while len(out) < limit:
+            kwargs = {"Bucket": self.bucket, "Prefix": prefix, "MaxKeys": min(1000, limit - len(out))}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = client.list_objects_v2(**kwargs)
+            for item in resp.get("Contents") or []:
+                out.append(
+                    StoredObject(
+                        key=item["Key"],
+                        bucket=self.bucket,
+                        size=int(item.get("Size") or 0),
+                        checksum=str(item.get("ETag") or "").strip('"'),
+                        content_type="",
+                        provider=self.name,
+                    )
+                )
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+            if not token:
+                break
+        return out[:limit]

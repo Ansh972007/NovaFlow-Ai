@@ -33,6 +33,8 @@ from app.platform_intelligence.router import router as platform_intelligence_rou
 from app.conversation.router import router as conversation_router
 from app.knowledge_os.router import router as knowledge_os_router
 from app.agent_os.router import router as agent_os_router
+from app.connectivity.router import router as connectivity_router
+from app.eiap.router import router as eiap_router
 from app.platform_intelligence.tracing.middleware import TraceMiddleware
 from app.schemas import ok
 from app.security.config import (
@@ -116,6 +118,8 @@ app.include_router(platform_intelligence_router, prefix=API_PREFIX)
 app.include_router(conversation_router, prefix=API_PREFIX)
 app.include_router(knowledge_os_router, prefix=API_PREFIX)
 app.include_router(agent_os_router, prefix=API_PREFIX)
+app.include_router(connectivity_router, prefix=API_PREFIX)
+app.include_router(eiap_router, prefix=API_PREFIX)
 app.include_router(marketplace.router, prefix=API_PREFIX)
 app.include_router(api_keys.router, prefix=API_PREFIX)
 app.include_router(analytics.router, prefix=API_PREFIX)
@@ -169,6 +173,8 @@ def health():
             "conversation_platform": "enterprise-v1",
             "knowledge_os": "enterprise-v1",
             "agent_os": "enterprise-v1",
+            "connectivity_platform": "enterprise-v1",
+            "intelligence_autonomy": "enterprise-v1",
         }
     )
 

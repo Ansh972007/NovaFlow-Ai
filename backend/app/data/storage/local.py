@@ -63,3 +63,28 @@ class LocalObjectStorage(ObjectStorageProvider):
     def signed_url(self, key: str, *, expires_seconds: int = 3600, method: str = "GET") -> str:
         # Local: return file URI for operators (not for public browsers)
         return self._path(key).as_uri()
+
+    def list_objects(self, *, prefix: str = "", limit: int = 1000) -> list[StoredObject]:
+        base = self.root
+        safe_prefix = prefix.replace("\\", "/").lstrip("/")
+        out: list[StoredObject] = []
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            key = path.relative_to(base).as_posix()
+            if safe_prefix and not key.startswith(safe_prefix):
+                continue
+            raw = path.read_bytes()
+            out.append(
+                StoredObject(
+                    key=key,
+                    bucket=str(base),
+                    size=len(raw),
+                    checksum=hashlib.sha256(raw).hexdigest(),
+                    content_type="",
+                    provider=self.name,
+                )
+            )
+            if len(out) >= limit:
+                break
+        return out
