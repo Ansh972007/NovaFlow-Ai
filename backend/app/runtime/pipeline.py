@@ -169,6 +169,12 @@ class AIRuntime:
             resource_type="assistant",
             resource_id=req.assistant_id,
         )
+        try:
+            from app.platform_intelligence.integration.runtime_hook import record_ai_telemetry
+
+            record_ai_telemetry(self.ctx, metrics, operation="chat_stream")
+        except Exception:
+            pass
 
     async def chat(self, req: ChatRequest) -> ChatResult:
         """Non-streaming chat through full pipeline."""
@@ -203,6 +209,12 @@ class AIRuntime:
             resource_type="assistant",
             resource_id=req.assistant_id,
         )
+        try:
+            from app.platform_intelligence.integration.runtime_hook import record_ai_telemetry
+
+            record_ai_telemetry(self.ctx, metrics, operation="chat")
+        except Exception:
+            pass
         return ChatResult(
             content=validated.content,
             metrics=metrics,
@@ -301,6 +313,21 @@ class AIRuntime:
             resource_type="agent",
             resource_id=req.agent_id,
         )
+        try:
+            from app.platform_intelligence.events.emitter import emit_platform_event
+
+            emit_platform_event(
+                self.ctx.db,
+                "AgentFinished",
+                workspace_id=self.ctx.workspace_id,
+                organization_id=self.ctx.organization_id,
+                actor_user_id=self.ctx.user_id,
+                resource_type="agent",
+                resource_id=req.agent_id,
+                payload={"tool_calls": metrics.tool_calls},
+            )
+        except Exception:
+            pass
         return AgentResult(
             output=validated.content,
             tool_results=payload.get("tool_results") or [],

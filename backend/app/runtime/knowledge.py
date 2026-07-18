@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sqlalchemy.orm import Session
-
-from app.runtime.cache import runtime_cache_get, runtime_cache_set
 from app.runtime.context import RuntimeContext
 
 
@@ -40,17 +37,6 @@ class KnowledgeBundle:
         return len(self.hits)
 
 
-def _hits_to_context(hits: list[dict]) -> str:
-    if not hits:
-        return ""
-    parts = []
-    for i, hit in enumerate(hits, 1):
-        source = hit.get("file_name") or "document"
-        text = (hit.get("text") or "")[:1200]
-        parts.append(f"[{i}] ({source})\n{text}")
-    return "\n\n".join(parts)
-
-
 def _dict_hits(raw: list[dict]) -> list[KnowledgeHit]:
     out: list[KnowledgeHit] = []
     for h in raw:
@@ -73,38 +59,15 @@ def resolve_assistant_knowledge(
     *,
     limit: int = 5,
 ) -> KnowledgeBundle:
-    """Retrieve knowledge linked to an assistant (tenant-scoped via assistant workspace)."""
+    """Retrieve knowledge linked to an assistant via Enterprise KOS."""
     from app.database import Assistant
-    from app.services.knowledge import rag_context_for_assistant, rag_hits_for_assistant
+    from app.knowledge_os.integration import retrieve_for_runtime
 
     assistant = ctx.db.get(Assistant, assistant_id)
     if not assistant or assistant.workspace_id != ctx.workspace_id:
         return KnowledgeBundle()
 
-    cache_key = f"rag:{assistant_id}:{hash(query.strip().lower())}:{limit}"
-    cached = runtime_cache_get(ctx.workspace_id, "knowledge", cache_key)
-    if cached:
-        hits_raw = cached.get("hits") or []
-        return KnowledgeBundle(
-            context=cached.get("context") or "",
-            hits=_dict_hits(hits_raw),
-            method=cached.get("method") or "hybrid",
-            cache_hit=True,
-        )
-
-    hits_raw = rag_hits_for_assistant(ctx.db, assistant_id, query, limit)
-    context = rag_context_for_assistant(ctx.db, assistant_id, query, limit)
-    method = hits_raw[0].get("method") if hits_raw else "none"
-
-    runtime_cache_set(
-        ctx.workspace_id,
-        "knowledge",
-        cache_key,
-        {"hits": hits_raw, "context": context, "method": method},
-        ttl_seconds=120,
-        tags=[f"assistant:{assistant_id}"],
-    )
-    return KnowledgeBundle(context=context, hits=_dict_hits(hits_raw), method=method or "hybrid")
+    return retrieve_for_runtime(ctx, query, assistant_id=assistant_id, limit=limit)
 
 
 def resolve_knowledge_base(
@@ -114,35 +77,12 @@ def resolve_knowledge_base(
     *,
     limit: int = 5,
 ) -> KnowledgeBundle:
-    """Retrieve from a single knowledge base with workspace validation."""
+    """Retrieve from a single collection via Enterprise KOS."""
     from app.database import KnowledgeBase
-    from app.services.knowledge import search_chunks_semantic
+    from app.knowledge_os.integration import retrieve_for_runtime
 
     kb = ctx.db.get(KnowledgeBase, knowledge_id)
     if not kb or kb.workspace_id != ctx.workspace_id:
         return KnowledgeBundle()
 
-    cache_key = f"kb:{knowledge_id}:{hash(query.strip().lower())}:{limit}"
-    cached = runtime_cache_get(ctx.workspace_id, "knowledge", cache_key)
-    if cached:
-        hits_raw = cached.get("hits") or []
-        return KnowledgeBundle(
-            context=cached.get("context") or "",
-            hits=_dict_hits(hits_raw),
-            method=cached.get("method") or "hybrid",
-            cache_hit=True,
-        )
-
-    hits_raw = search_chunks_semantic(ctx.db, knowledge_id, query, limit)
-    context = _hits_to_context(hits_raw)
-    method = hits_raw[0].get("method") if hits_raw else "none"
-
-    runtime_cache_set(
-        ctx.workspace_id,
-        "knowledge",
-        cache_key,
-        {"hits": hits_raw, "context": context, "method": method},
-        ttl_seconds=120,
-        tags=[f"kb:{knowledge_id}"],
-    )
-    return KnowledgeBundle(context=context, hits=_dict_hits(hits_raw), method=method or "hybrid")
+    return retrieve_for_runtime(ctx, query, knowledge_id=knowledge_id, limit=limit)

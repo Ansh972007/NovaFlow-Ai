@@ -95,6 +95,7 @@ async def tick_finetune_webhooks() -> None:
 
 async def background_scheduler_loop(stop_event: asyncio.Event) -> None:
     finetune_counter = 0
+    maintenance_counter = 0
     while not stop_event.is_set():
         await tick_eval_schedules()
         try:
@@ -104,12 +105,21 @@ async def background_scheduler_loop(stop_event: asyncio.Event) -> None:
         except Exception as exc:
             logger.warning("Workflow scheduler tick failed: %s", exc)
         finetune_counter += 1
+        maintenance_counter += 1
         if finetune_counter >= 5:
             finetune_counter = 0
             try:
                 await tick_finetune_webhooks()
             except Exception as exc:
                 logger.warning("Finetune webhook tick failed: %s", exc)
+        if maintenance_counter >= 30:
+            maintenance_counter = 0
+            try:
+                from app.platform_intelligence.automation.tasks import platform_maintenance_tick
+
+                await platform_maintenance_tick()
+            except Exception as exc:
+                logger.warning("Platform maintenance tick failed: %s", exc)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=60)
         except asyncio.TimeoutError:

@@ -7,7 +7,6 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
-from app.services.knowledge import search_chunks_semantic
 from app.services.llm import stream_chat_sync
 
 BUILTIN_TOOLS: dict[str, str] = {
@@ -114,17 +113,17 @@ async def _run_tool(
         nums = re.findall(r"[\d.+\-*/()]+", user_input)
         return _safe_calc(nums[0] if nums else user_input)
     if tool_id == "kb_search" and knowledge_id:
-        hits = search_chunks_semantic(db, knowledge_id, user_input, 5)
-        if not hits:
-            return "(no knowledge matches)"
-        lines = []
-        for i, h in enumerate(hits, 1):
-            src = h.get("file_name") or "document"
-            text = (h.get("text") or "").strip()[:400]
-            method = h.get("method") or ""
-            tag = f" [{method}]" if method else ""
-            lines.append(f"[{i}] {src}{tag}: {text}")
-        return "\n".join(lines)
+        from app.knowledge_os.integration import format_hits_for_tool, retrieve_for_agent
+
+        result = retrieve_for_agent(
+            db,
+            workspace_id=workspace_id or 0,
+            query=user_input,
+            knowledge_id=knowledge_id,
+            limit=5,
+        )
+        hits = result.get("hits") or []
+        return format_hits_for_tool(hits)
     if tool_id == "kb_search" and not knowledge_id:
         return "(no knowledge base linked to this agent)"
     if tool_id == "summarize":

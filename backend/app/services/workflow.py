@@ -9,8 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.database import KnowledgeBase, UsageEvent, Workflow, WorkflowPendingRun, WorkflowRun, WorkflowVersion
 from app.services.integrations import send_notification
-from app.services.knowledge import search_chunks_semantic
-from app.services.llm import stream_chat, stream_chat_sync
 
 EmitFn = Callable[[dict], Awaitable[None]] | None
 
@@ -824,6 +822,20 @@ async def run_workflow(
 ) -> dict[str, Any]:
     start = time.perf_counter()
     try:
+        from app.platform_intelligence.events.emitter import emit_platform_event
+
+        emit_platform_event(
+            db,
+            "WorkflowStarted",
+            workspace_id=workspace_id or workflow.workspace_id,
+            actor_user_id=user_id,
+            resource_type="workflow",
+            resource_id=workflow.id,
+            payload={"input_len": len(user_input or "")},
+        )
+    except Exception:
+        pass
+    try:
         graph = json.loads(workflow.graph_json or "{}")
     except json.JSONDecodeError:
         graph = {"nodes": [], "edges": []}
@@ -872,8 +884,30 @@ async def run_workflow(
         steps_json=json.dumps(steps),
     )
     db.add(run)
-    log_usage(db, user_id, "workflow_run", workflow.id, {"duration_ms": duration_ms}, workspace_id or workflow.workspace_id)
+    log_usage(
+        db,
+        user_id,
+        "workflow_run",
+        workflow.id,
+        {"duration_ms": duration_ms, "trace_id": context.get("_trace_id", "")},
+        workspace_id or workflow.workspace_id,
+    )
     db.commit()
+
+    try:
+        from app.platform_intelligence.events.emitter import emit_platform_event
+
+        emit_platform_event(
+            db,
+            "WorkflowCompleted" if run_status == RUN_STATUS_OK else "WorkflowFailed",
+            workspace_id=workspace_id or workflow.workspace_id,
+            actor_user_id=user_id,
+            resource_type="workflow",
+            resource_id=workflow.id,
+            payload={"run_id": run.id, "duration_ms": duration_ms, "status": run_status},
+        )
+    except Exception:
+        pass
 
     webhook_url = getattr(workflow, "run_webhook_url", "") or ""
     if webhook_url.strip():
@@ -1085,6 +1119,18 @@ async def _execute_graph(
     llm_messages: tuple[str, str] | None = None
     passed_pause = not skip_until_after
 
+    from app.workflow_intelligence.execution.runtime_bridge import (
+        make_runtime_ctx,
+        workflow_agent,
+        workflow_llm_stream,
+        workflow_llm_sync,
+        workflow_retrieve,
+    )
+
+    rt_ctx = make_runtime_ctx(db, user_id=user_id, workspace_id=workspace_id)
+    trace_id = rt_ctx.trace_id
+    context["_trace_id"] = trace_id
+
     async def _emit(event: dict):
         if emit:
             await emit(event)
@@ -1096,7 +1142,7 @@ async def _execute_graph(
             continue
         ntype = node.get("type")
         data = node.get("data") or {}
-        step = {"node_id": node.get("id"), "type": ntype, "status": "running"}
+        step = {"node_id": node.get("id"), "type": ntype, "status": "running", "trace_id": trace_id}
         await _emit({"type": "step", "phase": "start", "step": {**step}})
 
         if ntype == "trigger":
@@ -1109,21 +1155,22 @@ async def _execute_graph(
             if kid:
                 kb = db.get(KnowledgeBase, kid)
                 if kb and (not workspace_id or kb.workspace_id == workspace_id):
-                    hits = search_chunks_semantic(db, kid, context["input"], limit)
-            parts = []
-            for i, hit in enumerate(hits, 1):
-                source = hit.get("file_name") or "document"
-                score = hit.get("score")
-                score_bit = f" · score {score:.3f}" if isinstance(score, (int, float)) else ""
-                text = (hit.get("text") or "").strip()[:1400]
-                parts.append(f"[{i}] Source: {source}{score_bit}\n{text}")
-            context["retrieved"] = "\n\n".join(parts)
-            if not parts:
+                    retrieved, hit_count = await workflow_retrieve(
+                        rt_ctx, int(kid), context["input"], limit=limit
+                    )
+                    context["retrieved"] = retrieved or (
+                        "(no knowledge matches — answer carefully and state that no documents were found)"
+                    )
+                    step["hits"] = hit_count
+                else:
+                    context["retrieved"] = "(no knowledge matches — answer carefully and state that no documents were found)"
+                    step["hits"] = 0
+            else:
                 context["retrieved"] = (
                     "(no knowledge matches — answer carefully and state that no documents were found)"
                 )
+                step["hits"] = 0
             step["output"] = context["retrieved"][:800] + ("…" if len(context["retrieved"]) > 800 else "")
-            step["hits"] = len(hits)
             step["status"] = "ok"
         elif ntype == "transform":
             template = data.get("template") or "{{input}}"
@@ -1358,7 +1405,9 @@ async def _execute_graph(
             elif stream_llm and emit:
                 await _emit({"type": "llm_start"})
                 reply = ""
-                async for token in stream_chat(prompt, user_msg, db=db, workspace_id=workspace_id):
+                async for token in workflow_llm_stream(
+                    rt_ctx, prompt, user_msg, retrieved=context.get("retrieved") or ""
+                ):
                     reply += token
                     await _emit({"type": "stream", "message": {"content": token}})
                 subject, cleaned = _extract_digest_subject(reply)
@@ -1373,7 +1422,9 @@ async def _execute_graph(
                 step["status"] = "ok"
                 await _emit({"type": "llm_end"})
             else:
-                reply = await stream_chat_sync(prompt, user_msg, db=db, workspace_id=workspace_id)
+                reply = await workflow_llm_sync(
+                    rt_ctx, prompt, user_msg, retrieved=context.get("retrieved") or ""
+                )
                 subject, cleaned = _extract_digest_subject(reply)
                 if subject:
                     context["subject"] = subject
@@ -1404,7 +1455,7 @@ async def _execute_graph(
                 if "{{item}}" in prompt_tpl and item not in msg:
                     msg = prompt_tpl.replace("{{item}}", item)
                 sys_msg = _apply_template(system_tpl, local)
-                reply = await stream_chat_sync(sys_msg, msg, db=db, workspace_id=workspace_id)
+                reply = await workflow_llm_sync(rt_ctx, sys_msg, msg)
                 return item, (reply or "").strip()
 
             outputs: list[str] = []
@@ -1417,14 +1468,13 @@ async def _execute_graph(
 
             merged = "\n\n".join(outputs) if outputs else context.get("input", "")
             if len(outputs) > 1 and data.get("merge", True):
-                merge_reply = await stream_chat_sync(
+                merge_reply = await workflow_llm_sync(
+                    rt_ctx,
                     (
                         "Merge these batch results into one coherent summary. "
                         "Keep a short bullet per item, then one overall takeaway. No fluff."
                     ),
                     merged[:8000],
-                    db=db,
-                    workspace_id=workspace_id,
                 )
                 if merge_reply and merge_reply.strip():
                     merged = f"{merge_reply.strip()}\n\n---\nDetails:\n{merged}"
@@ -1438,18 +1488,17 @@ async def _execute_graph(
             base_input = context.get("input") or ""
             if context.get("retrieved"):
                 base_input = f"{base_input}\n\nContext:\n{context['retrieved']}"
-            tasks = [
-                stream_chat_sync(
+            async def _branch_llm(branch_label: str, inp: str) -> str:
+                return await workflow_llm_sync(
+                    rt_ctx,
                     (
                         f"You are contributing one section of a multi-perspective analysis. "
-                        f"Focus ONLY on: {b}. Be specific and concise (5–10 lines max)."
+                        f"Focus ONLY on: {branch_label}. Be specific and concise (5–10 lines max)."
                     ),
-                    base_input,
-                    db=db,
-                    workspace_id=workspace_id,
+                    inp,
                 )
-                for b in branches
-            ]
+
+            tasks = [_branch_llm(b, base_input) for b in branches]
             results = await asyncio.gather(*tasks)
             merged = "\n\n".join(f"## {b}\n{(r or '').strip()}" for b, r in zip(branches, results))
             context["output"] = merged
@@ -1469,21 +1518,18 @@ async def _execute_graph(
             step["output"] = message[:500]
             step["status"] = "ok"
         elif ntype == "agent":
-            from app.services.agent_tools import run_agent
-
             tools = data.get("tools") or ["summarize"]
             kid = data.get("knowledge_id")
-            reply = await run_agent(
-                db,
+            reply = await workflow_agent(
+                rt_ctx,
                 context.get("input") or "",
                 tools if isinstance(tools, list) else [tools],
-                knowledge_id=kid,
-                workspace_id=workspace_id,
                 system=data.get("prompt")
                 or (
                     "You are a capable NovaFlow agent. Use tool results as evidence. "
                     "Answer with: Summary · Details · Confidence (high/med/low). Avoid inventing facts."
                 ),
+                knowledge_id=kid,
             )
             text = reply.get("output") if isinstance(reply, dict) else str(reply or "")
             context["output"] = text

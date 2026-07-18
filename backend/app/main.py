@@ -28,6 +28,12 @@ from app.routers import (
     workflow,
     workspace,
 )
+from app.workflow_intelligence.router import router as workflow_intelligence_router
+from app.platform_intelligence.router import router as platform_intelligence_router
+from app.conversation.router import router as conversation_router
+from app.knowledge_os.router import router as knowledge_os_router
+from app.agent_os.router import router as agent_os_router
+from app.platform_intelligence.tracing.middleware import TraceMiddleware
 from app.schemas import ok
 from app.security.config import (
     CORS_ALLOWED_ORIGINS,
@@ -86,7 +92,8 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="NovaFlow API", version="9.9.0", lifespan=lifespan)
 
-# Order: outermost last added runs first for request. Security headers/rate-limit first.
+# Order: outermost last added runs first for request. Trace + security first.
+app.add_middleware(TraceMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -104,6 +111,11 @@ app.include_router(agents.router, prefix=API_PREFIX)
 app.include_router(knowledge.router, prefix=API_PREFIX)
 app.include_router(llm.router, prefix=API_PREFIX)
 app.include_router(workflow.router, prefix=API_PREFIX)
+app.include_router(workflow_intelligence_router, prefix=API_PREFIX)
+app.include_router(platform_intelligence_router, prefix=API_PREFIX)
+app.include_router(conversation_router, prefix=API_PREFIX)
+app.include_router(knowledge_os_router, prefix=API_PREFIX)
+app.include_router(agent_os_router, prefix=API_PREFIX)
 app.include_router(marketplace.router, prefix=API_PREFIX)
 app.include_router(api_keys.router, prefix=API_PREFIX)
 app.include_router(analytics.router, prefix=API_PREFIX)
@@ -152,6 +164,11 @@ def health():
             "platform": "multi-tenant-v2",
             "data_platform": "enterprise-v1",
             "ai_runtime": "enterprise-v1",
+            "workflow_intelligence": "enterprise-v1",
+            "platform_intelligence": "enterprise-v1",
+            "conversation_platform": "enterprise-v1",
+            "knowledge_os": "enterprise-v1",
+            "agent_os": "enterprise-v1",
         }
     )
 

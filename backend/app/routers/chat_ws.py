@@ -208,6 +208,27 @@ async def _stream_reply(
         meta["ab_route_id"] = ab_meta.get("route_id")
     log_usage(db, user_id, event_type, resource_id, meta, workspace_id)
 
+    try:
+        from app.conversation.integration import persist_chat_turn
+
+        conv_meta = persist_chat_turn(
+            db,
+            workspace_id=workspace_id or 0,
+            user_id=user_id,
+            organization_id=None,
+            assistant_id=assistant_id or resource_id,
+            user_message=user_msg,
+            assistant_message=buffer,
+            conversation_id=(receipt_extra or {}).get("conversation_id"),
+            usage=usage_out,
+            rag_hits=rag_hits,
+            trace_id=ctx.trace_id,
+            event_type=event_type,
+        )
+        await websocket.send_json({"type": "conversation", "conversation_id": conv_meta.get("conversation_id")})
+    except Exception:
+        pass
+
 
 @router.websocket("/assistant/chat/{assistant_id}")
 async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
@@ -263,6 +284,14 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
 
             query = str(user_msg).strip()
             history = _parse_chat_history(payload)
+            conversation_id = payload.get("conversation_id") or websocket.query_params.get("conversation_id")
+            if conversation_id and not history:
+                try:
+                    from app.conversation.integration import load_history_for_runtime
+
+                    history = load_history_for_runtime(db, conversation_id, workspace_id=wid)
+                except Exception:
+                    pass
             # Prefer last user turn for retrieval; fall back to full query
             rag_query = query
             if history:
@@ -301,7 +330,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     system_prompt,
                     query,
                     wid,
-                    receipt_extra={"rag_hits": rag_hits, "role": role},
+                    receipt_extra={"rag_hits": rag_hits, "role": role, "conversation_id": conversation_id},
                     cancel_event=cancel_event,
                     history=history,
                     assistant_id=assistant_id,

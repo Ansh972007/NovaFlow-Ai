@@ -154,6 +154,105 @@ class KnowledgeChunk(Base):
     file = relationship("KnowledgeFile", back_populates="chunks")
 
 
+class KnowledgeFolder(Base):
+    """KOS folder — nested hierarchy within a collection (knowledge base)."""
+
+    __tablename__ = "knowledge_folders"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    knowledge_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    parent_folder_id = Column(String(32), ForeignKey("knowledge_folders.id"), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    name = Column(String(200), nullable=False)
+    path = Column(String(500), default="")
+    labels_json = Column(Text, default="[]")
+    meta_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KnowledgeDocumentVersion(Base):
+    """KOS document version history."""
+
+    __tablename__ = "knowledge_document_versions"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    file_id = Column(Integer, ForeignKey("knowledge_files.id"), nullable=False, index=True)
+    version_no = Column(Integer, nullable=False, default=1)
+    content_hash = Column(String(64), default="")
+    file_path = Column(String(500), default="")
+    change_summary = Column(Text, default="")
+    approval_status = Column(String(16), default="approved")
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    meta_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class KnowledgeEntity(Base):
+    """KOS knowledge graph entity."""
+
+    __tablename__ = "knowledge_entities"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    knowledge_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
+    file_id = Column(Integer, ForeignKey("knowledge_files.id"), nullable=True, index=True)
+    entity_type = Column(String(32), default="concept", index=True)
+    name = Column(String(200), nullable=False, index=True)
+    aliases_json = Column(Text, default="[]")
+    meta_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class KnowledgeRelationship(Base):
+    """KOS knowledge graph relationship."""
+
+    __tablename__ = "knowledge_relationships"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    source_entity_id = Column(String(32), ForeignKey("knowledge_entities.id"), nullable=False, index=True)
+    target_entity_id = Column(String(32), ForeignKey("knowledge_entities.id"), nullable=False, index=True)
+    relation_type = Column(String(64), default="related_to", index=True)
+    confidence = Column(Float, default=1.0)
+    source_file_id = Column(Integer, ForeignKey("knowledge_files.id"), nullable=True)
+    meta_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class KnowledgeTag(Base):
+    """KOS tag/label on collections or documents."""
+
+    __tablename__ = "knowledge_tags"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    knowledge_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
+    file_id = Column(Integer, ForeignKey("knowledge_files.id"), nullable=True, index=True)
+    label = Column(String(64), nullable=False, index=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class KnowledgeSyncJob(Base):
+    """KOS ingestion sync job (S3, Git, webhook, etc.)."""
+
+    __tablename__ = "knowledge_sync_jobs"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    knowledge_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    connector_type = Column(String(32), default="manual", index=True)
+    status = Column(String(16), default="pending", index=True)
+    config_json = Column(Text, default="{}")
+    last_sync_at = Column(DateTime, nullable=True)
+    next_sync_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, default="")
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AssistantKnowledge(Base):
     __tablename__ = "assistant_knowledge"
 
@@ -560,8 +659,108 @@ class SavedAgent(Base):
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     status = Column(Integer, default=1)  # 1 active
+    agent_type = Column(String(32), default="custom")
+    lifecycle_status = Column(String(16), default="published")
+    version_no = Column(Integer, default=1)
+    capabilities_json = Column(Text, default="[]")
+    policies_json = Column(Text, default="{}")
+    template_id = Column(String(32), default="")
+    metadata_json = Column(Text, default="{}")
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AgentRun(Base):
+    """AgentOS execution session — long-running task tracking."""
+
+    __tablename__ = "agent_runs"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    agent_id = Column(String(32), ForeignKey("saved_agents.id"), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    conversation_id = Column(String(32), nullable=True, index=True)
+    supervisor_id = Column(String(32), nullable=True, index=True)
+    mode = Column(String(32), default="single", index=True)
+    status = Column(String(16), default="running", index=True)
+    input_text = Column(Text, default="")
+    output_text = Column(Text, default="")
+    plan_json = Column(Text, default="{}")
+    reasoning_json = Column(Text, default="{}")
+    verification_json = Column(Text, default="{}")
+    metrics_json = Column(Text, default="{}")
+    trace_id = Column(String(64), default="", index=True)
+    confidence = Column(Float, default=0.0)
+    cost_usd = Column(Float, default=0.0)
+    error_message = Column(Text, default="")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+
+class AgentCheckpoint(Base):
+    """AgentOS checkpoint for pause/resume/recovery."""
+
+    __tablename__ = "agent_checkpoints"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    run_id = Column(String(32), ForeignKey("agent_runs.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    step_no = Column(Integer, default=0)
+    state_json = Column(Text, default="{}")
+    status = Column(String(16), default="saved")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class AgentPlanSession(Base):
+    """AgentOS planning session with dependency graph."""
+
+    __tablename__ = "agent_plan_sessions"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    run_id = Column(String(32), ForeignKey("agent_runs.id"), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    goal = Column(Text, default="")
+    plan_json = Column(Text, default="{}")
+    dependencies_json = Column(Text, default="[]")
+    status = Column(String(16), default="active")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class AgentVerificationReport(Base):
+    """AgentOS verification report."""
+
+    __tablename__ = "agent_verification_reports"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    run_id = Column(String(32), ForeignKey("agent_runs.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    verdict = Column(String(16), default="pending")
+    confidence = Column(Float, default=0.0)
+    sources_json = Column(Text, default="[]")
+    report_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class AgentLearningRecord(Base):
+    """AgentOS learning analytics — no model retraining."""
+
+    __tablename__ = "agent_learning_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(32), ForeignKey("agent_runs.id"), nullable=True, index=True)
+    agent_id = Column(String(32), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    success = Column(Integer, default=1)
+    retry_count = Column(Integer, default=0)
+    tool_quality = Column(Float, default=0.0)
+    knowledge_quality = Column(Float, default=0.0)
+    latency_ms = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    confidence = Column(Float, default=0.0)
+    meta_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class AIMemoryEntry(Base):
@@ -580,6 +779,259 @@ class AIMemoryEntry(Base):
     deleted_at = Column(DateTime, nullable=True)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkflowExecutionCheckpoint(Base):
+    """Checkpoint for pause/resume/replay workflow execution."""
+
+    __tablename__ = "workflow_execution_checkpoints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False, index=True)
+    run_id = Column(Integer, ForeignKey("workflow_runs.id"), nullable=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    node_id = Column(String(64), default="")
+    context_json = Column(Text, default="{}")
+    steps_json = Column(Text, default="[]")
+    status = Column(String(32), default="paused")
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkflowTestCase(Base):
+    """Saved workflow test case for regression/replay testing."""
+
+    __tablename__ = "workflow_test_cases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(32), ForeignKey("workflows.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    name = Column(String(120), default="")
+    input_text = Column(Text, default="")
+    expected_contains = Column(Text, default="")
+    mock_mode = Column(Integer, default=0)
+    deleted_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PlatformMetric(Base):
+    """Telemetry sample — HTTP, AI runtime, workflow, workers."""
+
+    __tablename__ = "platform_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    subsystem = Column(String(32), nullable=False, index=True)
+    operation = Column(String(128), default="", index=True)
+    trace_id = Column(String(32), default="", index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    latency_ms = Column(Integer, default=0)
+    status = Column(String(16), default="ok")
+    provider = Column(String(64), default="")
+    model = Column(String(120), default="")
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    cost_usd = Column(Float, nullable=True)
+    meta_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class PlatformEvent(Base):
+    """Domain event stream — filterable, correlatable, auditable."""
+
+    __tablename__ = "platform_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    trace_id = Column(String(32), default="", index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    actor_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    resource_type = Column(String(64), default="")
+    resource_id = Column(String(128), default="")
+    payload_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class PlatformPolicy(Base):
+    """Centralized policy rules — workspace/org scoped."""
+
+    __tablename__ = "platform_policies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    policy_type = Column(String(32), nullable=False, index=True)
+    scope = Column(String(32), default="workspace")
+    rule_key = Column(String(64), nullable=False)
+    rule_value = Column(Text, default="")
+    severity = Column(String(16), default="enforce")
+    enabled = Column(Integer, default=1)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PlatformBudget(Base):
+    """Workspace FinOps budget."""
+
+    __tablename__ = "platform_budgets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    monthly_limit_usd = Column(Float, default=0.0)
+    enabled = Column(Integer, default=1)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CostLedger(Base):
+    """FinOps cost ledger — LLM, embedding, storage, workflow."""
+
+    __tablename__ = "cost_ledger"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    cost_type = Column(String(32), nullable=False, index=True)
+    amount_usd = Column(Float, default=0.0)
+    trace_id = Column(String(32), default="")
+    model = Column(String(120), default="")
+    resource_type = Column(String(64), default="")
+    resource_id = Column(String(128), default="")
+    meta_json = Column(Text, default="{}")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class Conversation(Base):
+    """Enterprise conversation — permanent record for all AI interactions."""
+
+    __tablename__ = "conversations"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    title = Column(String(200), default="New conversation")
+    summary = Column(Text, default="")
+    tags_json = Column(Text, default="[]")
+    conversation_type = Column(String(32), default="assistant", index=True)
+    resource_id = Column(String(64), default="", index=True)
+    visibility = Column(String(16), default="private")
+    status = Column(String(16), default="active", index=True)
+    pinned = Column(Integer, default=0)
+    starred = Column(Integer, default=0)
+    parent_branch_id = Column(String(32), nullable=True)
+    meta_json = Column(Text, default="{}")
+    legal_hold = Column(Integer, default=0)
+    deleted_at = Column(DateTime, nullable=True)
+    archived_at = Column(DateTime, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ConversationThread(Base):
+    __tablename__ = "conversation_threads"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    conversation_id = Column(String(32), ForeignKey("conversations.id"), nullable=False, index=True)
+    parent_thread_id = Column(String(32), nullable=True, index=True)
+    title = Column(String(200), default="")
+    pinned = Column(Integer, default=0)
+    archived = Column(Integer, default=0)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    conversation_id = Column(String(32), ForeignKey("conversations.id"), nullable=False, index=True)
+    thread_id = Column(String(32), ForeignKey("conversation_threads.id"), nullable=True, index=True)
+    parent_message_id = Column(String(32), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    message_type = Column(String(16), default="user", index=True)
+    role = Column(String(16), default="user")
+    content = Column(Text, default="")
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    assistant_id = Column(String(32), default="")
+    model = Column(String(120), default="")
+    provider = Column(String(64), default="")
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    cost_usd = Column(Float, nullable=True)
+    trace_id = Column(String(32), default="", index=True)
+    visibility = Column(String(16), default="private")
+    knowledge_refs_json = Column(Text, default="[]")
+    tool_calls_json = Column(Text, default="[]")
+    citations_json = Column(Text, default="[]")
+    workflow_ref = Column(String(64), default="")
+    agent_ref = Column(String(64), default="")
+    attachment_ids_json = Column(Text, default="[]")
+    meta_json = Column(Text, default="{}")
+    version = Column(Integer, default=1)
+    deleted_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ConversationBranch(Base):
+    __tablename__ = "conversation_branches"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    conversation_id = Column(String(32), ForeignKey("conversations.id"), nullable=False, index=True)
+    parent_message_id = Column(String(32), nullable=True)
+    branch_conversation_id = Column(String(32), ForeignKey("conversations.id"), nullable=False)
+    status = Column(String(16), default="active")
+    merged_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class ConversationAttachment(Base):
+    __tablename__ = "conversation_attachments"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    conversation_id = Column(String(32), ForeignKey("conversations.id"), nullable=False, index=True)
+    message_id = Column(String(32), ForeignKey("conversation_messages.id"), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    file_name = Column(String(255), default="")
+    mime_type = Column(String(128), default="")
+    size_bytes = Column(Integer, default=0)
+    storage_key = Column(String(512), default="")
+    version = Column(Integer, default=1)
+    deleted_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class ConversationShare(Base):
+    __tablename__ = "conversation_shares"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    conversation_id = Column(String(32), ForeignKey("conversations.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    share_token = Column(String(64), unique=True, index=True)
+    permission = Column(String(16), default="read")
+    expires_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+
+
+class ConversationSnapshot(Base):
+    __tablename__ = "conversation_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String(32), ForeignKey("conversations.id"), nullable=False, index=True)
+    version_no = Column(Integer, default=1)
+    snapshot_json = Column(Text, default="{}")
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
 
 
 class Organization(Base):
@@ -1001,6 +1453,97 @@ def migrate_schema():
                 try:
                     with engine.begin() as conn:
                         conn.execute(text(ddl_tmpl.format(t=table)))
+                except Exception:
+                    pass
+
+    # KOS — extended columns on knowledge tables
+    kos_kb_cols = {
+        "classification": "ALTER TABLE knowledge_bases ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'",
+        "status": "ALTER TABLE knowledge_bases ADD COLUMN status VARCHAR(16) DEFAULT 'published'",
+        "tags_json": "ALTER TABLE knowledge_bases ADD COLUMN tags_json TEXT DEFAULT '[]'",
+        "labels_json": "ALTER TABLE knowledge_bases ADD COLUMN labels_json TEXT DEFAULT '[]'",
+        "aliases_json": "ALTER TABLE knowledge_bases ADD COLUMN aliases_json TEXT DEFAULT '[]'",
+        "retention_policy": "ALTER TABLE knowledge_bases ADD COLUMN retention_policy VARCHAR(32) DEFAULT 'standard'",
+        "review_required": "ALTER TABLE knowledge_bases ADD COLUMN review_required INTEGER DEFAULT 0",
+        "archived_at": "ALTER TABLE knowledge_bases ADD COLUMN archived_at DATETIME",
+    }
+    if "knowledge_bases" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("knowledge_bases")}
+        for col, ddl in kos_kb_cols.items():
+            if col not in cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(ddl))
+                except Exception:
+                    pass
+
+    kos_file_cols = {
+        "folder_id": "ALTER TABLE knowledge_files ADD COLUMN folder_id VARCHAR(32)",
+        "version_no": "ALTER TABLE knowledge_files ADD COLUMN version_no INTEGER DEFAULT 1",
+        "content_hash": "ALTER TABLE knowledge_files ADD COLUMN content_hash VARCHAR(64) DEFAULT ''",
+        "document_type": "ALTER TABLE knowledge_files ADD COLUMN document_type VARCHAR(32) DEFAULT ''",
+        "lifecycle_status": "ALTER TABLE knowledge_files ADD COLUMN lifecycle_status VARCHAR(16) DEFAULT 'published'",
+        "classification": "ALTER TABLE knowledge_files ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'",
+        "metadata_json": "ALTER TABLE knowledge_files ADD COLUMN metadata_json TEXT DEFAULT '{}'",
+        "expires_at": "ALTER TABLE knowledge_files ADD COLUMN expires_at DATETIME",
+        "owner_id": "ALTER TABLE knowledge_files ADD COLUMN owner_id INTEGER",
+    }
+    if "knowledge_files" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("knowledge_files")}
+        for col, ddl in kos_file_cols.items():
+            if col not in cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(ddl))
+                except Exception:
+                    pass
+
+    kos_chunk_cols = {
+        "content_hash": "ALTER TABLE knowledge_chunks ADD COLUMN content_hash VARCHAR(64) DEFAULT ''",
+        "version_no": "ALTER TABLE knowledge_chunks ADD COLUMN version_no INTEGER DEFAULT 1",
+    }
+    if "knowledge_chunks" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("knowledge_chunks")}
+        for col, ddl in kos_chunk_cols.items():
+            if col not in cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(ddl))
+                except Exception:
+                    pass
+
+    for table_name in (
+        "knowledge_folders",
+        "knowledge_document_versions",
+        "knowledge_entities",
+        "knowledge_relationships",
+        "knowledge_tags",
+        "knowledge_sync_jobs",
+        "agent_runs",
+        "agent_checkpoints",
+        "agent_plan_sessions",
+        "agent_verification_reports",
+        "agent_learning_records",
+    ):
+        if table_name not in insp.get_table_names() and table_name in Base.metadata.tables:
+            Base.metadata.tables[table_name].create(bind=engine, checkfirst=True)
+
+    agent_os_agent_cols = {
+        "agent_type": "ALTER TABLE saved_agents ADD COLUMN agent_type VARCHAR(32) DEFAULT 'custom'",
+        "lifecycle_status": "ALTER TABLE saved_agents ADD COLUMN lifecycle_status VARCHAR(16) DEFAULT 'published'",
+        "version_no": "ALTER TABLE saved_agents ADD COLUMN version_no INTEGER DEFAULT 1",
+        "capabilities_json": "ALTER TABLE saved_agents ADD COLUMN capabilities_json TEXT DEFAULT '[]'",
+        "policies_json": "ALTER TABLE saved_agents ADD COLUMN policies_json TEXT DEFAULT '{}'",
+        "template_id": "ALTER TABLE saved_agents ADD COLUMN template_id VARCHAR(32) DEFAULT ''",
+        "metadata_json": "ALTER TABLE saved_agents ADD COLUMN metadata_json TEXT DEFAULT '{}'",
+    }
+    if "saved_agents" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("saved_agents")}
+        for col, ddl in agent_os_agent_cols.items():
+            if col not in cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(ddl))
                 except Exception:
                     pass
 

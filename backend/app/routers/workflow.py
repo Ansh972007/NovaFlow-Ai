@@ -220,6 +220,17 @@ def set_workflow_status(
     w = ctx.fetch(Workflow, id)
     if not w:
         return fail(404, "Workflow not found")
+    if status == 1:
+        from app.workflow_intelligence.graph.parser import parse_graph
+        from app.workflow_intelligence.publish_gate import check_publish_ready
+
+        gate = check_publish_ready(parse_graph(w.graph_json))
+        if not gate.get("ready"):
+            return fail(
+                400,
+                "Workflow failed publish validation",
+                data={"publish_gate": gate},
+            )
     w.status = status
     w.update_time = datetime.utcnow()
     if status == 1 and not getattr(w, "webhook_token", ""):
