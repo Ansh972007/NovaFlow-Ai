@@ -6,6 +6,7 @@ import { memo, useEffect, useState } from "react";
 import { LayoutGroup, motion } from "framer-motion";
 import Logo from "./Logo";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import NotificationBell from "./NotificationBell";
 import { logout } from "@/lib/api/auth";
 import { springTab } from "@/lib/motion/workspace";
 
@@ -134,21 +135,24 @@ function AppHeader({ user, links = [] }) {
 
         <div className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-2">
           {user && (
-            <Link
-              href="/settings"
-              className={`hidden shrink-0 items-center rounded-full p-2 transition-colors sm:inline-flex ${
-                isActive(pathname, "/settings")
-                  ? "bg-neutral-900 text-white"
-                  : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-              }`}
-              title="Settings"
-              aria-label="Settings"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-              </svg>
-            </Link>
+            <>
+              <NotificationBell />
+              <Link
+                href="/settings"
+                className={`hidden shrink-0 items-center rounded-full p-2 transition-colors sm:inline-flex ${
+                  isActive(pathname, "/settings")
+                    ? "bg-neutral-900 text-white"
+                    : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+                }`}
+                title="Settings"
+                aria-label="Settings"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+                </svg>
+              </Link>
+            </>
           )}
 
           {user ? (

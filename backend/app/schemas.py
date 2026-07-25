@@ -34,6 +34,16 @@ class UserPasswordChange(BaseModel):
     new_password: str
 
 
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
+class PasswordResetConfirm(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str
+
+
 class AssistantCreate(BaseModel):
     name: str = Field(max_length=50)
     prompt: str = Field(min_length=20, max_length=4000)

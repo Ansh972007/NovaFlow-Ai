@@ -33,15 +33,21 @@ def emit_platform_event(
     """Emit a platform event — persisted + audit correlation."""
     trace_id = correlation_id or get_trace_id()
     data = payload or {}
+    event_data = dict(data)
+    event_data["_workspace_id"] = workspace_id
+    event_data["_organization_id"] = organization_id
+    event_data["_actor_user_id"] = actor_user_id
+    event_data["_resource_type"] = resource_type
+    event_data["_resource_id"] = resource_id
 
     for handler in _subscribers.get(event_type, []):
         try:
-            handler(event_type, data)
+            handler(event_type, event_data)
         except Exception:
             pass
     for handler in _subscribers.get("*", []):
         try:
-            handler(event_type, data)
+            handler(event_type, event_data)
         except Exception:
             pass
 

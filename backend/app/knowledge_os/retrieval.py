@@ -82,12 +82,63 @@ def enterprise_retrieve(
     else:
         return _empty_result(start, trace_id)
 
-    hits = _rerank_hits(hits, query)[:limit]
+    # Check if user explicitly asked for the full content of a known document
+    from app.database import KnowledgeFile
+    file_list = []
+    ids = []
+    if assistant_id:
+        ids = resolve_assistant_collection_ids(db, assistant_id)
+        if ids:
+            files = db.query(KnowledgeFile.file_name).filter(KnowledgeFile.knowledge_id.in_(ids)).limit(50).all()
+            file_list = [f[0] for f in files if f[0]]
+    elif knowledge_id:
+        files = db.query(KnowledgeFile.file_name).filter(KnowledgeFile.knowledge_id == knowledge_id).limit(50).all()
+        file_list = [f[0] for f in files if f[0]]
+
+    q_lower = query.lower()
+    full_keywords = ["full", "all", "complete", "whole", "entire", "contents of"]
+    if any(kw in q_lower for kw in full_keywords) and file_list:
+        target_file = None
+        for filename in file_list:
+            base_name = filename.rsplit(".", 1)[0].lower() if "." in filename else filename.lower()
+            if filename.lower() in q_lower or base_name in q_lower:
+                target_file = filename
+                break
+        if target_file:
+            from app.database import KnowledgeChunk
+            file_record = db.query(KnowledgeFile).filter(
+                KnowledgeFile.file_name == target_file,
+                KnowledgeFile.knowledge_id.in_(ids) if assistant_id else KnowledgeFile.knowledge_id == knowledge_id
+            ).first()
+            if file_record:
+                chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.file_id == file_record.id).order_by(KnowledgeChunk.chunk_index.asc()).limit(50).all()
+                if chunks:
+                    hits = []
+                    for c in chunks:
+                        hits.append({
+                            "text": c.text,
+                            "chunk_index": c.chunk_index,
+                            "file_id": file_record.id,
+                            "file_name": file_record.file_name,
+                            "score": 1.0,
+                            "method": "full_fetch"
+                        })
+                    method = "full_fetch"
+
+    hits = _rerank_hits(hits, query)[:limit] if method != "full_fetch" else hits
     for h in hits:
         h["knowledge_id"] = knowledge_id or h.get("knowledge_id")
         h["trace_id"] = trace_id
 
     context_parts = []
+    
+    # Provide document awareness to the assistant
+    if file_list:
+        names = ", ".join(file_list[:30])
+        if len(file_list) > 30:
+            names += f" and {len(file_list) - 30} more"
+        context_parts.append(f"System Note: The following documents are currently attached to the knowledge base for this conversation: {names}.")
+
     for i, hit in enumerate(hits, 1):
         source = hit.get("file_name") or "document"
         text = (hit.get("text") or "")[:1200]

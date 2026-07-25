@@ -472,3 +472,15 @@ def kb_upload_dir(kb_id: int) -> Path:
     d = UPLOAD_DIR / str(kb_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def process_file_records_bg(record_ids: list[int], chunk_size: int = 1000, chunk_overlap: int = 100):
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        for rid in record_ids:
+            record = db.get(KnowledgeFile, rid)
+            if record:
+                process_file_record(db, record, chunk_size, chunk_overlap)
+    finally:
+        db.close()

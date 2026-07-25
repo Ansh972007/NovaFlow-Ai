@@ -5,7 +5,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.config import EMBEDDING_MODELS
@@ -147,10 +147,12 @@ async def upload_file(
 
 
 @router.post("/knowledge/process")
-def process_files(body: ProcessFiles, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+def process_files(body: ProcessFiles, background_tasks: BackgroundTasks, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
     kb = ctx.fetch(KnowledgeBase, body.knowledge_id)
     if not kb:
         return fail(404, "Knowledge base not found")
+        
+    record_ids = []
     for item in body.file_list:
         fp = item.get("file_path")
         record = (
@@ -159,7 +161,12 @@ def process_files(body: ProcessFiles, db: Session = Depends(get_db), ctx=Depends
             .first()
         )
         if record:
-            process_file_record(db, record, body.chunk_size, body.chunk_overlap)
+            record_ids.append(record.id)
+            
+    if record_ids:
+        from app.services.knowledge import process_file_records_bg
+        background_tasks.add_task(process_file_records_bg, record_ids, body.chunk_size, body.chunk_overlap)
+        
     return ok(None)
 
 
@@ -279,7 +286,7 @@ async def knowledge_answer(
 
 
 @router.post("/knowledge/retry")
-def retry_file(body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+def retry_file(body: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
     file_id = body.get("file_id") or body.get("id")
     if not file_id:
         return fail(400, "file_id required")
@@ -289,13 +296,14 @@ def retry_file(body: dict, db: Session = Depends(get_db), ctx=Depends(require_wo
     kb = ctx.fetch(KnowledgeBase, record.knowledge_id)
     if not kb:
         return fail(404, "File not found")
-    process_file_record(
-        db,
-        record,
+        
+    from app.services.knowledge import process_file_records_bg
+    background_tasks.add_task(
+        process_file_records_bg,
+        [record.id],
         int(body.get("chunk_size") or 1000),
         int(body.get("chunk_overlap") or 100),
     )
-    db.refresh(record)
     return ok(
         {
             "id": record.id,
@@ -319,6 +327,7 @@ def _url_to_filename(url: str) -> str:
 async def ingest_url(
     knowledge_id: int,
     body: KnowledgeUrlIngest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
@@ -368,5 +377,6 @@ async def ingest_url(
     db.add(record)
     db.commit()
     db.refresh(record)
-    process_file_record(db, record, body.chunk_size, body.chunk_overlap)
+    from app.services.knowledge import process_file_records_bg
+    background_tasks.add_task(process_file_records_bg, [record.id], body.chunk_size, body.chunk_overlap)
     return ok({"id": record.id, "file_name": safe_name, "file_path": rel, "url": url})

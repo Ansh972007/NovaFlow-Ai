@@ -1,15 +1,29 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import hashlib
+import hmac
+import os
+import secrets
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.crypto import decrypt_password_plain, get_public_key_pem
-from app.database import PasswordHistory, User, get_db
+from app.database import PasswordHistory, PasswordResetCode, User, get_db
 from app.deps import get_current_user
-from app.schemas import UserCreate, UserLogin, UserPasswordChange, fail, ok
+from app.schemas import (
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    UserCreate,
+    UserLogin,
+    UserPasswordChange,
+    fail,
+    ok,
+)
 from app.security.audit import audit_log
 from app.security.middleware import client_ip
+from app.security.rate_limit import rate_limiter
 from app.security.passwords import (
     PasswordPolicyError,
     hash_password,
@@ -36,6 +50,34 @@ class RefreshBody(BaseModel):
 
 class LogoutBody(BaseModel):
     refresh_token: str = ""
+
+
+RESET_CODE_TTL_MINUTES = 15
+RESET_CODE_MAX_ATTEMPTS = 5
+
+
+def _normalise_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _reset_code_hash(code: str) -> str:
+    secret = os.getenv("PASSWORD_RESET_SECRET") or os.getenv("JWT_SECRET", "")
+    return hmac.new(secret.encode("utf-8"), code.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _password_reset_email(code: str) -> str:
+    return f"""<!DOCTYPE html>
+<html><body style="margin:0;background:#f9fafb;font-family:Arial,sans-serif;color:#111827">
+  <div style="max-width:520px;margin:40px auto;background:#fff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden">
+    <div style="padding:28px 32px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-align:center"><strong style="font-size:22px">NovaFlow AI</strong></div>
+    <div style="padding:32px"><h1 style="font-size:21px;margin-top:0">Reset your password</h1>
+      <p>Use this verification code to reset your NovaFlow AI password:</p>
+      <p style="margin:28px 0;padding:16px;text-align:center;font-size:30px;font-weight:700;letter-spacing:8px;background:#f3f4f6;border-radius:10px">{code}</p>
+      <p>This code expires in {RESET_CODE_TTL_MINUTES} minutes and can be used once.</p>
+      <p style="color:#6b7280;font-size:13px">If you did not request a password reset, you can safely ignore this email.</p>
+    </div>
+  </div>
+</body></html>"""
 
 
 def user_read(user: User, access_token: str | None = None, **extra) -> dict:
@@ -99,6 +141,9 @@ def register(body: UserCreate, request: Request, db: Session = Depends(get_db)):
     user = User(
         user_name=body.user_name.strip(),
         password=hash_password(plain),
+        # The sign-up UI uses the email address as the username. Persist it as
+        # contact email too, so password-reset emails work for new accounts.
+        email=_normalise_email(body.user_name) if "@" in body.user_name else None,
         password_changed_at=datetime.utcnow(),
         role="editor",
     )
@@ -158,6 +203,121 @@ def login(body: UserLogin, request: Request, db: Session = Depends(get_db)):
 
     audit_log(db, action="auth.login", actor_user_id=user.user_id, ip=ip, user_agent=ua)
     return ok(_issue_session(db, user, request))
+
+
+@router.post("/user/password-reset/request")
+def request_password_reset(
+    body: PasswordResetRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Create and email a one-time verification code without exposing account existence."""
+    email = _normalise_email(body.email)
+    ip = client_ip(request) or "unknown"
+    if not rate_limiter.allow("password_reset", f"{ip}:{email}", limit=3, window_seconds=15 * 60):
+        return fail(429, "Too many reset requests. Please wait before trying again.")
+
+    user = (
+        db.query(User)
+        .filter(or_(User.email == email, User.user_name == email))
+        .first()
+    )
+    # Always return the same result here to avoid confirming whether an email
+    # address has an account. SSO-only accounts cannot use local resets.
+    if not user or user.oauth_provider:
+        audit_log(
+            db,
+            action="auth.password_reset.request",
+            success=True,
+            ip=ip,
+            user_agent=request.headers.get("user-agent", ""),
+            detail={"account_found": False},
+        )
+        return ok(None, "If an account matches this email, a verification code has been sent.")
+
+    db.query(PasswordResetCode).filter(
+        PasswordResetCode.user_id == user.user_id,
+        PasswordResetCode.used_at.is_(None),
+    ).update({PasswordResetCode.used_at: datetime.utcnow()}, synchronize_session=False)
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db.add(
+        PasswordResetCode(
+            user_id=user.user_id,
+            code_hash=_reset_code_hash(code),
+            expires_at=datetime.utcnow() + timedelta(minutes=RESET_CODE_TTL_MINUTES),
+        )
+    )
+    db.commit()
+    audit_log(
+        db,
+        action="auth.password_reset.request",
+        actor_user_id=user.user_id,
+        ip=ip,
+        user_agent=request.headers.get("user-agent", ""),
+    )
+    from app.services.integrations import send_email_notification
+
+    background_tasks.add_task(
+        send_email_notification,
+        email,
+        "Your NovaFlow AI password reset code",
+        _password_reset_email(code),
+    )
+    return ok(None, "If an account matches this email, a verification code has been sent.")
+
+
+@router.post("/user/password-reset/confirm")
+def confirm_password_reset(
+    body: PasswordResetConfirm,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    email = _normalise_email(body.email)
+    code = body.code.strip()
+    if not code.isdigit():
+        return fail(400, "Enter the six-digit verification code")
+    user = db.query(User).filter(or_(User.email == email, User.user_name == email)).first()
+    if not user or user.oauth_provider:
+        return fail(400, "The verification code is invalid or has expired")
+    record = (
+        db.query(PasswordResetCode)
+        .filter(
+            PasswordResetCode.user_id == user.user_id,
+            PasswordResetCode.used_at.is_(None),
+        )
+        .order_by(PasswordResetCode.created_at.desc())
+        .first()
+    )
+    if not record or record.expires_at < datetime.utcnow() or record.attempts >= RESET_CODE_MAX_ATTEMPTS:
+        return fail(400, "The verification code is invalid or has expired")
+    if not hmac.compare_digest(record.code_hash, _reset_code_hash(code)):
+        record.attempts += 1
+        db.commit()
+        return fail(400, "The verification code is invalid or has expired")
+    try:
+        plain_password = decrypt_password_plain(body.new_password)
+        validate_password_policy(plain_password)
+    except PasswordPolicyError as exc:
+        return fail(400, str(exc))
+    except Exception:
+        return fail(400, "Invalid new password")
+
+    user.password = hash_password(plain_password.strip())
+    user.password_changed_at = datetime.utcnow()
+    user.update_time = datetime.utcnow()
+    record.used_at = datetime.utcnow()
+    db.add(PasswordHistory(user_id=user.user_id, password_hash=user.password))
+    db.commit()
+    revoke_all_user_sessions(db, user.user_id, reason="password_reset")
+    audit_log(
+        db,
+        action="auth.password_reset.confirm",
+        actor_user_id=user.user_id,
+        ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", ""),
+    )
+    return ok(None, "Password reset successfully. Please sign in.")
 
 
 @router.post("/user/refresh")

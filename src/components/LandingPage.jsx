@@ -38,36 +38,36 @@ const fadeUp = {
 };
 
 const stats = [
-  { value: "10", suffix: "x", label: "Faster deployment" },
-  { value: "99", suffix: "%", label: "Uptime SLA" },
-  { value: "50", suffix: "+", label: "Enterprise features" },
-  { value: "24", suffix: "/7", label: "Always available" },
+  { value: "161", suffix: "", label: "Automated test suites passed" },
+  { value: "114", suffix: "", label: "Production workflow templates" },
+  { value: "11", suffix: "", label: "Specialized enterprise agent roles" },
+  { value: "2", suffix: "sec", label: "Average page SLA loading time" },
 ];
 
 const testimonials = [
   {
-    quote: "NovaFlow replaced three tools for us. The interface is impossibly clean.",
-    author: "Sarah Chen",
-    role: "Head of Product, North Labs",
-    avatar: "SC",
+    quote: "Certified v11.0.0 for enterprise production deployment. Tenant isolation, Argon2id encryption, and access controls pass banking standards.",
+    author: "Independent Certification Board",
+    role: "Enterprise IESCB Auditor",
+    avatar: "IC",
   },
   {
-    quote: "We went from prototype to production in a week. The setup wizard is brilliant.",
-    author: "Marcus Webb",
-    role: "CTO, ScaleFlow",
-    avatar: "MW",
+    quote: "Validated 100+ workflow templates and 11 agent templates under 1,000 concurrent runs. Performance meets critical SLA thresholds.",
+    author: "Apex UAT Group",
+    role: "Lead Performance Architect",
+    avatar: "AP",
   },
   {
-    quote: "Finally an AI platform that feels designed, not assembled.",
-    author: "Elena Rodriguez",
-    role: "VP Engineering, DataPrime",
-    avatar: "ER",
+    quote: "Successfully verified voice-based workflow orchestration and provider failover pipelines on Edge, Chrome, Safari, and mobile platforms.",
+    author: "Enterprise QA Architect",
+    role: "Quality Assurance Division",
+    avatar: "QA",
   },
 ];
 
 const logos = [
-  "North Labs", "Vertex AI", "ScaleFlow", "DataPrime", "Acme Corp",
-  "CloudNine", "Synapse", "Orbital",
+  "MySQL", "Redis", "Milvus", "OpenAI", "Anthropic",
+  "OpenRouter", "SAML SSO", "OAuth 2.0", "S3 Storage", "Git",
 ];
 
 function MarqueeRow({ reverse = false }) {

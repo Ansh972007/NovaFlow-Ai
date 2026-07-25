@@ -27,6 +27,7 @@ from app.routers import (
     user,
     workflow,
     workspace,
+    notifications,
 )
 from app.workflow_intelligence.router import router as workflow_intelligence_router
 from app.platform_intelligence.router import router as platform_intelligence_router
@@ -130,7 +131,10 @@ app.include_router(finetune.router, prefix=API_PREFIX)
 app.include_router(model_lab.router, prefix=API_PREFIX)
 app.include_router(projects.router, prefix=API_PREFIX)
 app.include_router(integrations.router, prefix=API_PREFIX)
+app.include_router(notifications.router, prefix=API_PREFIX)
 app.include_router(chat_ws.router, prefix=API_PREFIX)
+from app.routers import voice_ws
+app.include_router(voice_ws.router, prefix=API_PREFIX)
 
 
 @app.get("/health")

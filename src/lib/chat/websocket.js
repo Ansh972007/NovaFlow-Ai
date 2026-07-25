@@ -1,12 +1,5 @@
 import { FLOW_TYPE } from "@/lib/api/apps";
-import { getApiBaseUrl, getWsQueryString } from "@/lib/api/config";
-
-function getWsUrl(path) {
-  const apiUrl = getApiBaseUrl();
-  const url = new URL(apiUrl);
-  const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${url.host}${path}${getWsQueryString()}`;
-}
+import { getWsUrl } from "@/lib/api/config";
 
 function buildInitPayload(app, chatId) {
   return {

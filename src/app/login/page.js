@@ -6,10 +6,11 @@ import AuthShowcasePanel from "@/components/AuthShowcasePanel";
 import AuthFormPanel from "@/components/AuthFormPanel";
 import LiveBackground from "@/components/LiveBackground";
 import CursorGlow from "@/components/CursorGlow";
-import { login, register, getLdapStatus } from "@/lib/api/auth";
+import { confirmPasswordReset, getLdapStatus, login, register, requestPasswordReset } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { getSamlStatus } from "@/lib/api/saml";
+import PasswordResetPanel from "@/components/PasswordResetPanel";
 
 function LoginForm() {
   const router = useRouter();
@@ -33,6 +34,7 @@ function LoginForm() {
   const [oauthProviders, setOauthProviders] = useState([]);
   const [ldapEnabled, setLdapEnabled] = useState(false);
   const [samlEnabled, setSamlEnabled] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
 
   async function probeBackend() {
     setCheckingBackend(true);
@@ -58,6 +60,22 @@ function LoginForm() {
       .then((s) => setSamlEnabled(!!s?.enabled))
       .catch(() => setSamlEnabled(false));
   }, []);
+
+  useEffect(() => {
+    const inviteToken = searchParams.get("invite_token");
+    const token = typeof window !== "undefined" ? localStorage.getItem("nf_token") : null;
+    if (inviteToken && token) {
+      import("@/lib/api/workspaces").then(({ acceptWorkspaceInvite }) => {
+        acceptWorkspaceInvite(inviteToken)
+          .then(() => {
+            router.push("/chat");
+          })
+          .catch((err) => {
+            setError(err.message || "Failed to accept invite");
+          });
+      });
+    }
+  }, [searchParams, router]);
 
   const formProgress = useMemo(() => {
     let p = 0;
@@ -92,7 +110,17 @@ function LoginForm() {
       const data = isRegister
         ? await register(name, password)
         : await login(name, password);
-      // login()/register() already persist access + refresh tokens via storeAuthTokens
+
+      const inviteToken = searchParams.get("invite_token");
+      if (inviteToken) {
+        try {
+          const { acceptWorkspaceInvite } = await import("@/lib/api/workspaces");
+          await acceptWorkspaceInvite(inviteToken);
+        } catch (inviteErr) {
+          console.error("Failed to accept invite:", inviteErr);
+        }
+      }
+
       setGreeting((g) => g + 1);
       await new Promise((resolve) => setTimeout(resolve, 1400));
       router.push(nextPath);
@@ -101,6 +129,20 @@ function LoginForm() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (resetMode) {
+    return (
+      <div className="relative min-h-screen">
+        <LiveBackground variant="light" showNetwork mouseTracking className="fixed inset-0" />
+        <CursorGlow />
+        <PasswordResetPanel
+          onRequestCode={requestPasswordReset}
+          onConfirm={confirmPasswordReset}
+          onBack={() => setResetMode(false)}
+        />
+      </div>
+    );
   }
 
   return (
@@ -133,6 +175,7 @@ function LoginForm() {
           oauthProviders={oauthProviders}
           ldapEnabled={ldapEnabled}
           samlEnabled={samlEnabled}
+          onForgotPassword={() => setResetMode(true)}
         />
       </div>
     </div>

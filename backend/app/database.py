@@ -79,6 +79,20 @@ class PasswordHistory(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class PasswordResetCode(Base):
+    """One-time, short-lived password reset verification codes."""
+
+    __tablename__ = "password_reset_codes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    attempts = Column(Integer, default=0)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class SecurityAuditLog(Base):
     __tablename__ = "security_audit_logs"
 
@@ -1062,6 +1076,36 @@ class CostLedger(Base):
     create_time = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    title = Column(String(200), default="")
+    message = Column(Text, default="")
+    category = Column(String(32), default="INFO", index=True)
+    level = Column(String(16), default="INFO", index=True)
+    is_read = Column(Integer, default=0, index=True)
+    action_url = Column(String(500), default="")
+    create_time = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class UserNotificationPreference(Base):
+    __tablename__ = "user_notification_preferences"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, unique=True, index=True)
+    enabled_categories = Column(Text, default="[]")  # JSON list
+    enabled_channels = Column(Text, default="[]")    # JSON list
+    muted_categories = Column(Text, default="[]")    # JSON list
+    do_not_disturb = Column(Integer, default=0)
+    quiet_hours_start = Column(String(5), default="22:00")
+    quiet_hours_end = Column(String(5), default="08:00")
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Conversation(Base):
     """Enterprise conversation — permanent record for all AI interactions."""
 
@@ -1515,6 +1559,7 @@ def migrate_schema():
         "auth_sessions",
         "refresh_tokens",
         "password_history",
+        "password_reset_codes",
         "security_audit_logs",
         "organizations",
         "organization_members",
@@ -1691,16 +1736,19 @@ def migrate_schema():
         "eiap_reports",
     ):
         if table_name not in insp.get_table_names() and table_name in Base.metadata.tables:
-            Base.metadata.tables[table_name].create(bind=engine, checkfirst=True)
+            try:
+                Base.metadata.tables[table_name].create(bind=engine, checkfirst=True)
+            except Exception:
+                pass
 
     agent_os_agent_cols = {
         "agent_type": "ALTER TABLE saved_agents ADD COLUMN agent_type VARCHAR(32) DEFAULT 'custom'",
         "lifecycle_status": "ALTER TABLE saved_agents ADD COLUMN lifecycle_status VARCHAR(16) DEFAULT 'published'",
         "version_no": "ALTER TABLE saved_agents ADD COLUMN version_no INTEGER DEFAULT 1",
-        "capabilities_json": "ALTER TABLE saved_agents ADD COLUMN capabilities_json TEXT DEFAULT '[]'",
-        "policies_json": "ALTER TABLE saved_agents ADD COLUMN policies_json TEXT DEFAULT '{}'",
+        "capabilities_json": "ALTER TABLE saved_agents ADD COLUMN capabilities_json TEXT",
+        "policies_json": "ALTER TABLE saved_agents ADD COLUMN policies_json TEXT",
         "template_id": "ALTER TABLE saved_agents ADD COLUMN template_id VARCHAR(32) DEFAULT ''",
-        "metadata_json": "ALTER TABLE saved_agents ADD COLUMN metadata_json TEXT DEFAULT '{}'",
+        "metadata_json": "ALTER TABLE saved_agents ADD COLUMN metadata_json TEXT",
     }
     if "saved_agents" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("saved_agents")}

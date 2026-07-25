@@ -19,7 +19,8 @@ def _send_email_sync(smtp: dict[str, Any], to_addr: str, subject: str, body: str
     user = smtp.get("user") or ""
     password = smtp.get("password") or ""
     from_addr = smtp.get("from_addr") or user or "novaflow@localhost"
-    msg = MIMEText(body[:8000], "plain", "utf-8")
+    subtype = "html" if (body.strip().startswith("<") or "<html>" in body.lower()) else "plain"
+    msg = MIMEText(body, subtype, "utf-8")
     msg["Subject"] = subject[:200]
     msg["From"] = from_addr
     msg["To"] = to_addr

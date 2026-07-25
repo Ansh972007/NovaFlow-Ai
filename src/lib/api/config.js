@@ -25,3 +25,19 @@ export function getWsQueryString() {
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
+
+/** Centralized dynamic WebSocket URL builder */
+export function getWsUrl(path) {
+  let host = "";
+  let protocol = "ws:";
+  if (typeof window !== "undefined") {
+    protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    host = window.location.port === "3000" ? `${window.location.hostname}:3001` : window.location.host;
+  } else {
+    const apiUrl = getApiBaseUrl();
+    const url = new URL(apiUrl);
+    protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    host = url.host;
+  }
+  return `${protocol}//${host}${path}${getWsQueryString()}`;
+}

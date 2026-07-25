@@ -72,6 +72,15 @@ export async function changePassword(currentPassword, newPassword) {
   return client.post("/user/password", { current_password, new_password });
 }
 
+export function requestPasswordReset(email) {
+  return client.post("/user/password-reset/request", { email });
+}
+
+export async function confirmPasswordReset(email, code, newPassword) {
+  const new_password = await encryptPassword(newPassword);
+  return client.post("/user/password-reset/confirm", { email, code, new_password });
+}
+
 export async function getLdapStatus() {
   return client.get("/auth/ldap/status");
 }

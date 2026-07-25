@@ -101,6 +101,7 @@ export default function AuthFormPanel({
   oauthProviders = [],
   ldapEnabled = false,
   samlEnabled = false,
+  onForgotPassword,
 }) {
   const [clientReady, setClientReady] = useState(false);
 
@@ -313,9 +314,9 @@ export default function AuthFormPanel({
 
                   {!isRegister && (
                     <div className="flex justify-end">
-                      <span className="cursor-pointer text-xs text-muted transition-colors hover:text-foreground">
+                      <button type="button" onClick={onForgotPassword} className="text-xs text-muted transition-colors hover:text-foreground">
                         Forgot password?
-                      </span>
+                      </button>
                     </div>
                   )}
 

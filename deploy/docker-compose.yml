@@ -54,6 +54,7 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+    user: root
     container_name: novaflow-api
     restart: unless-stopped
     ports:

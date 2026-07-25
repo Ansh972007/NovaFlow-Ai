@@ -1,13 +1,6 @@
 import client from "./client";
 import { mergeWorkflowTemplates, WORKFLOW_TEMPLATES } from "@/lib/workflow/templates";
-import { getApiBaseUrl, getWsQueryString } from "./config";
-
-function getWsUrl(path) {
-  const apiUrl = getApiBaseUrl();
-  const url = new URL(apiUrl);
-  const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${url.host}${path}${getWsQueryString()}`;
-}
+import { getWsUrl } from "./config";
 
 export const FLOW_TYPE_WORKFLOW = 10;
 
