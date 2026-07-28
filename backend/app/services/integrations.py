@@ -2,6 +2,7 @@ import asyncio
 import smtplib
 import time
 from email.mime.text import MIMEText
+from email.utils import make_msgid, formatdate
 from typing import Any
 
 import httpx
@@ -19,11 +20,27 @@ def _send_email_sync(smtp: dict[str, Any], to_addr: str, subject: str, body: str
     user = smtp.get("user") or ""
     password = smtp.get("password") or ""
     from_addr = smtp.get("from_addr") or user or "novaflow@localhost"
+    
+    # Standard friendly display name format to prevent spam filters from flagging
+    if "@" in from_addr and "<" not in from_addr:
+        from_addr = f"NovaFlow AI <{from_addr}>"
+        
     subtype = "html" if (body.strip().startswith("<") or "<html>" in body.lower()) else "plain"
     msg = MIMEText(body, subtype, "utf-8")
     msg["Subject"] = subject[:200]
     msg["From"] = from_addr
     msg["To"] = to_addr
+    
+    # Add crucial headers to maximize deliverability
+    try:
+        msg["Message-ID"] = make_msgid(domain=host)
+    except Exception:
+        import socket
+        msg["Message-ID"] = f"<{time.time()}_{socket.gethostname()}@novaflow.ai>"
+    msg["Date"] = formatdate(localtime=True)
+    msg["Auto-Submitted"] = "auto-generated"
+    msg["X-Mailer"] = "NovaFlow AI Mailer"
+    
     try:
         with smtplib.SMTP(host, port, timeout=20) as server:
             server.starttls()
@@ -53,6 +70,18 @@ async def send_email_notification(
             return await send_gmail_api_message(db, workspace_id, to_addr, subject, body)
 
     smtp = smtp_override or (resolve_smtp_config(db, workspace_id) if db else {})
+    
+    # Fallback to system-wide SMTP settings if config is not resolved or has no host
+    if not smtp or not smtp.get("host"):
+        from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
+        smtp = {
+            "host": SMTP_HOST,
+            "port": SMTP_PORT,
+            "user": SMTP_USER,
+            "password": SMTP_PASSWORD,
+            "from_addr": SMTP_FROM or SMTP_USER,
+        }
+        
     return await asyncio.to_thread(_send_email_sync, smtp, to_addr, subject, body)
 
 
