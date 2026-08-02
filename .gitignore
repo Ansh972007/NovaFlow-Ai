@@ -59,4 +59,5 @@ next-env.d.ts
 __pycache__/
 *.py[cod]
 backend/data/
+/data/
 *.db

@@ -17,7 +17,7 @@ import BackToTop from "@/components/BackToTop";
 import CursorGlow from "@/components/CursorGlow";
 import Magnetic from "@/components/Magnetic";
 import FAQ from "@/components/FAQ";
-import Pricing from "@/components/Pricing";
+import Providers from "@/components/Providers";
 import CodeShowcase from "@/components/CodeShowcase";
 import PlatformSection from "@/components/PlatformSection";
 import WorkflowShowcase from "@/components/landing/WorkflowShowcase";
@@ -316,7 +316,7 @@ export default function LandingPage() {
         <PlatformSection />
         <CodeShowcase />
         <WorkflowShowcase />
-        <Pricing />
+        <Providers />
 
         {/* Testimonials */}
         <LandingSection id="testimonials" className="px-4 py-28 sm:px-6">

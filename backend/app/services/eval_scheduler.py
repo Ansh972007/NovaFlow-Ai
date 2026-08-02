@@ -97,7 +97,10 @@ async def background_scheduler_loop(stop_event: asyncio.Event) -> None:
     finetune_counter = 0
     maintenance_counter = 0
     while not stop_event.is_set():
-        await tick_eval_schedules()
+        try:
+            await tick_eval_schedules()
+        except Exception as exc:
+            logger.warning("Eval scheduler tick failed: %s", exc)
         try:
             from app.services.workflow_scheduler import tick_workflow_schedules
 

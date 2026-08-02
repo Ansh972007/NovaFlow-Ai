@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, File, Query, UploadFile, BackgroundTasks
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import EMBEDDING_MODELS
@@ -380,3 +381,149 @@ async def ingest_url(
     from app.services.knowledge import process_file_records_bg
     background_tasks.add_task(process_file_records_bg, [record.id], body.chunk_size, body.chunk_overlap)
     return ok({"id": record.id, "file_name": safe_name, "file_path": rel, "url": url})
+
+
+class ChunkInitBody(BaseModel):
+    file_name: str
+    file_size: int
+    chunk_size: int
+    total_chunks: int
+
+
+@router.post("/knowledge/upload-chunk/init/{knowledge_id}")
+def init_chunked_upload(
+    knowledge_id: int,
+    body: ChunkInitBody,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
+        return fail(404, "Knowledge base not found")
+        
+    from app.security.files import validate_upload_metadata, FileSecurityError
+    try:
+        # Validate metadata first. We don't have the head bytes yet, so validate size/ext.
+        meta = validate_upload_metadata(
+            filename=body.file_name,
+            size=body.file_size,
+            head=b"",
+            bypass_max_size=True,
+        )
+    except FileSecurityError as exc:
+        return fail(400, str(exc))
+
+    import uuid
+    upload_id = uuid.uuid4().hex
+    temp_dir = UPLOAD_DIR / "temp" / upload_id
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    import json
+    meta_path = temp_dir / "meta.json"
+    meta_path.write_text(json.dumps({
+        "knowledge_id": knowledge_id,
+        "file_name": body.file_name,
+        "file_size": body.file_size,
+        "chunk_size": body.chunk_size,
+        "total_chunks": body.total_chunks,
+        "safe_name": meta["safe_name"],
+        "storage_name": meta["storage_name"],
+    }))
+    
+    return ok({"upload_id": upload_id, "uploaded_chunks": []})
+
+
+@router.post("/knowledge/upload-chunk/{upload_id}/{chunk_index}")
+async def upload_chunk(
+    upload_id: str,
+    chunk_index: int,
+    file: UploadFile = File(...),
+    ctx=Depends(require_workspace_editor),
+):
+    temp_dir = UPLOAD_DIR / "temp" / upload_id
+    if not temp_dir.exists():
+        return fail(404, "Upload session not found")
+        
+    chunk_path = temp_dir / f"chunk_{chunk_index}"
+    content = await file.read()
+    chunk_path.write_bytes(content)
+    
+    return ok({"chunk_index": chunk_index, "uploaded": True})
+
+
+@router.post("/knowledge/upload-chunk/complete/{upload_id}")
+def complete_chunked_upload(
+    upload_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    temp_dir = UPLOAD_DIR / "temp" / upload_id
+    if not temp_dir.exists():
+        return fail(404, "Upload session not found")
+        
+    import json
+    meta_path = temp_dir / "meta.json"
+    if not meta_path.exists():
+        return fail(400, "Upload session metadata missing")
+        
+    meta = json.loads(meta_path.read_text())
+    knowledge_id = meta["knowledge_id"]
+    total_chunks = meta["total_chunks"]
+    safe_name = meta["safe_name"]
+    storage_name = meta["storage_name"]
+    
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
+        return fail(404, "Knowledge base not found")
+        
+    # Check if all chunks exist
+    for idx in range(total_chunks):
+        if not (temp_dir / f"chunk_{idx}").exists():
+            return fail(400, f"Missing chunk index {idx}")
+            
+    # Merge chunks
+    dest_dir = kb_upload_dir(knowledge_id)
+    dest = dest_dir / storage_name
+    
+    try:
+        with open(dest, "wb") as outfile:
+            for idx in range(total_chunks):
+                chunk_file = temp_dir / f"chunk_{idx}"
+                with open(chunk_file, "rb") as infile:
+                    outfile.write(infile.read())
+    except Exception as exc:
+        if dest.exists():
+            dest.unlink()
+        return fail(500, f"Merge failed: {exc}")
+        
+    # Final header magic-byte validation using head of final file
+    from app.security.files import validate_upload_metadata, FileSecurityError
+    try:
+        with open(dest, "rb") as infile:
+            head = infile.read(16)
+        validate_upload_metadata(
+            filename=meta["file_name"],
+            size=meta["file_size"],
+            head=head,
+            bypass_max_size=True,
+        )
+    except FileSecurityError as exc:
+        if dest.exists():
+            dest.unlink()
+        return fail(400, f"Security check failed: {exc}")
+        
+    import shutil
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    rel = f"{knowledge_id}/{dest.name}"
+    record = KnowledgeFile(
+        knowledge_id=knowledge_id,
+        file_name=safe_name,
+        file_path=rel,
+        status=5,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    
+    return ok({"file_path": rel, "file_name": safe_name, "id": record.id})

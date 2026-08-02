@@ -36,9 +36,95 @@ export async function getKnowledgeFiles(knowledgeId, { page = 1, pageSize = 50 }
 }
 
 export async function uploadKnowledgeFile(knowledgeId, file, onProgress) {
-  const formData = new FormData();
-  formData.append("file", file);
-  return uploadMultipart(`/knowledge/upload/${knowledgeId}`, formData, { onProgress });
+  const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB chunks
+  const fileSize = file.size;
+  const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+
+  if (fileSize <= CHUNK_SIZE) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return uploadMultipart(`/knowledge/upload/${knowledgeId}`, formData, { onProgress });
+  }
+
+  // Step 1: Initialize chunked upload session
+  const initRes = await client.post(`/knowledge/upload-chunk/init/${knowledgeId}`, {
+    file_name: file.name,
+    file_size: fileSize,
+    chunk_size: CHUNK_SIZE,
+    total_chunks: totalChunks,
+  });
+
+  const uploadId = initRes.upload_id;
+  const uploadedChunks = initRes.uploaded_chunks || [];
+
+  const chunkProgress = new Array(totalChunks).fill(0);
+  const updateOverallProgress = () => {
+    if (!onProgress) return;
+    const totalUploaded = chunkProgress.reduce((a, b) => a + b, 0);
+    const pct = Math.min(99, Math.round((totalUploaded / fileSize) * 100));
+    onProgress({ loaded: totalUploaded, total: fileSize, percentage: pct });
+  };
+
+  // Step 2: Upload chunks in parallel with concurrency throttling
+  const CONCURRENCY = 4;
+  const queue = [];
+  for (let idx = 0; idx < totalChunks; idx++) {
+    if (uploadedChunks.includes(idx)) {
+      chunkProgress[idx] = Math.min(fileSize - idx * CHUNK_SIZE, CHUNK_SIZE);
+      continue;
+    }
+    queue.push(idx);
+  }
+
+  const uploadChunkTask = async (chunkIndex) => {
+    const start = chunkIndex * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, fileSize);
+    const chunkBlob = file.slice(start, end);
+    const chunkFile = new File([chunkBlob], `${file.name}.part_${chunkIndex}`);
+
+    const formData = new FormData();
+    formData.append("file", chunkFile);
+
+    await uploadMultipart(`/knowledge/upload-chunk/${uploadId}/${chunkIndex}`, formData, {
+      onProgress: (pe) => {
+        chunkProgress[chunkIndex] = pe.loaded || 0;
+        updateOverallProgress();
+      },
+    });
+  };
+
+  const workers = [];
+  for (let i = 0; i < CONCURRENCY; i++) {
+    workers.push(
+      (async () => {
+        while (queue.length > 0) {
+          const chunkIndex = queue.shift();
+          if (chunkIndex === undefined) break;
+          
+          let attempts = 3;
+          while (attempts > 0) {
+            try {
+              await uploadChunkTask(chunkIndex);
+              break;
+            } catch (err) {
+              attempts--;
+              if (attempts === 0) throw err;
+              await new Promise((resolve) => setTimeout(resolve, 1500));
+            }
+          }
+        }
+      })()
+    );
+  }
+
+  await Promise.all(workers);
+
+  // Step 3: Complete upload and trigger merge on backend
+  const completeRes = await client.post(`/knowledge/upload-chunk/complete/${uploadId}`);
+  if (onProgress) {
+    onProgress({ loaded: fileSize, total: fileSize, percentage: 100 });
+  }
+  return completeRes;
 }
 
 export async function processKnowledgeFiles(knowledgeId, filePaths) {

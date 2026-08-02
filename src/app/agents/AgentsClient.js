@@ -16,10 +16,10 @@ import { PROMPT_TEMPLATES } from "@/lib/prompts/templates";
 const ease = [0.16, 1, 0.3, 1];
 
 const TOOL_PRESETS = [
-  { id: "summarize", label: "Summarize", desc: "Condense long text" },
-  { id: "calculator", label: "Calculator", desc: "Math & expressions" },
-  { id: "kb_search", label: "KB search", desc: "Query linked libraries" },
-  { id: "translate_en", label: "Translate EN", desc: "Translate to English" },
+  { id: "file_peek", label: "File Peek", desc: "Read file contents" },
+  { id: "dir_list", label: "Directory List", desc: "List directory files" },
+  { id: "file_write", label: "File Write", desc: "Write/edit files safely" },
+  { id: "shell_run", label: "Shell Run", desc: "Execute terminal commands" },
 ];
 
 export default function AgentsClient() {
@@ -34,7 +34,7 @@ export default function AgentsClient() {
   const [output, setOutput] = useState("");
   const [toolResults, setToolResults] = useState([]);
   const [selectedUsed, setSelectedUsed] = useState([]);
-  const [selectedTools, setSelectedTools] = useState(["summarize"]);
+  const [selectedTools, setSelectedTools] = useState(["file_peek"]);
   const [knowledgeId, setKnowledgeId] = useState("");
   const [system, setSystem] = useState(
     "You are a careful NovaFlow agent. Use tool results as evidence. Lead with the answer, then short supporting bullets. Say what is uncertain."
@@ -80,7 +80,7 @@ export default function AgentsClient() {
     setActiveAgentId(a.id);
     setAgentName(a.name || "");
     setSystem(a.system_prompt || system);
-    setSelectedTools(Array.isArray(a.tools) && a.tools.length ? a.tools : ["summarize"]);
+    setSelectedTools(Array.isArray(a.tools) && a.tools.length ? a.tools : ["file_peek"]);
     setKnowledgeId(a.knowledge_id ? String(a.knowledge_id) : "");
     setMsg(`Loaded “${a.name}”.`);
   }
@@ -158,7 +158,7 @@ export default function AgentsClient() {
         eyebrow="Agents"
         title="Tool-augmented"
         titleHighlight="runs"
-        description="Chain built-in tools — calculator, KB search, summarize, translate — without building a workflow."
+        description="Chain built-in developer tools — file peek, directory list, file write, shell run — without building a workflow."
         badge={<span className="workspace-badge-live">{selectedTools.length} tools active</span>}
         actions={
           <Link href="/workflows" className="workspace-btn-ghost shrink-0">

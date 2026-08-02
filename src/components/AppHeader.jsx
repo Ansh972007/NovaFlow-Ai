@@ -181,15 +181,15 @@ function NavLink({ href, label, pathname, compact = false }) {
     <Link
       href={href}
       className={[
-        "relative shrink-0 rounded-full font-medium transition-colors duration-200",
-        compact ? "px-3 py-2 text-sm" : "px-2.5 py-1.5 text-[12px] sm:px-3 sm:py-2 sm:text-[13px]",
-        active ? "text-white" : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900",
+        "relative shrink-0 rounded-full font-medium transition-all duration-200",
+        compact ? "px-3.5 py-2 text-sm" : "px-3 py-2 text-[12px] sm:px-3.5 sm:py-2.5 sm:text-[13px]",
+        active ? "text-white shadow-sm" : "text-neutral-600 hover:text-neutral-950 hover:bg-neutral-50/80",
       ].join(" ")}
     >
       {active && (
         <motion.span
           layoutId="app-header-nav-pill"
-          className="absolute inset-0 rounded-full bg-neutral-900 shadow-sm"
+          className="absolute inset-0 rounded-full bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950 shadow-[0_4px_12px_rgba(0,0,0,0.08)]"
           transition={springTab}
         />
       )}
@@ -210,15 +210,15 @@ function NavDropdown({ group, activeDropdown, setActiveDropdown, pathname }) {
       <button
         type="button"
         className={[
-          "relative flex items-center gap-1 rounded-full px-3.5 py-2 text-[13px] font-medium transition-all duration-200 outline-none",
-          isOpen ? "text-neutral-900 bg-neutral-100/80" : "text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900",
+          "relative flex items-center gap-1.5 rounded-full px-4 py-2.5 text-[13px] font-medium transition-all duration-200 outline-none",
+          isOpen ? "text-neutral-950 bg-neutral-50" : "text-neutral-600 hover:bg-neutral-50/50 hover:text-neutral-950",
         ].join(" ")}
       >
         <span>{group.label}</span>
         <svg
           className={[
-            "h-3.5 w-3.5 transition-transform duration-200 text-neutral-400",
-            isOpen ? "transform rotate-180 text-neutral-700" : "",
+            "h-3.5 w-3.5 transition-transform duration-300 text-neutral-400",
+            isOpen ? "transform rotate-180 text-neutral-800" : "",
           ].join(" ")}
           fill="none"
           viewBox="0 0 24 24"
@@ -232,53 +232,63 @@ function NavDropdown({ group, activeDropdown, setActiveDropdown, pathname }) {
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className={[
-              "absolute left-1/2 z-50 mt-2 -translate-x-1/2 rounded-2xl border border-neutral-200/80 bg-white/95 p-4 shadow-xl backdrop-blur-xl",
-              group.label === "Build" ? "w-[580px]" : "w-[440px]"
+              "absolute left-1/2 z-50 mt-2.5 -translate-x-1/2 rounded-2xl border border-neutral-100 bg-white/95 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.06)] backdrop-blur-xl overflow-hidden",
+              group.label === "Build" ? "w-[590px]" : "w-[450px]"
             ].join(" ")}
           >
+            {/* Top accent colorful gradient bar */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
+            
             <div className={[
-              "grid gap-2",
+              "grid gap-2 relative z-10",
               group.label === "Build" ? "grid-cols-2" : "grid-cols-1"
             ].join(" ")}>
               {group.links.map((link) => {
                 const active = isActive(pathname, link.href);
                 return (
-                  <Link
+                  <motion.div
                     key={link.href}
-                    href={link.href}
-                    className={[
-                      "flex items-start gap-3.5 rounded-xl p-3 transition-all duration-200 border border-transparent",
-                      active
-                        ? "bg-neutral-900 text-white shadow-sm"
-                        : "hover:bg-neutral-50 hover:border-neutral-100"
-                    ].join(" ")}
+                    whileHover={{ scale: 1.015, y: -0.5 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
                   >
-                    <div className={[
-                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
-                      active ? "bg-white/10 text-white" : "bg-neutral-100 text-neutral-600"
-                    ].join(" ")}>
-                      {link.icon}
-                    </div>
-                    <div className="min-w-0">
-                      <p className={[
-                        "text-[13px] font-semibold leading-none",
-                        active ? "text-white" : "text-neutral-900"
+                    <Link
+                      href={link.href}
+                      className={[
+                        "group flex items-start gap-4 rounded-xl p-3 transition-all duration-200 border border-transparent",
+                        active
+                          ? "bg-gradient-to-br from-neutral-900 to-neutral-950 text-white shadow-md shadow-neutral-900/10"
+                          : "hover:bg-neutral-50/80 hover:border-neutral-100/50"
+                      ].join(" ")}
+                    >
+                      <div className={[
+                        "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors border",
+                        active
+                          ? "bg-white/10 text-white border-white/20"
+                          : "bg-neutral-50 text-neutral-600 border-neutral-100/40 group-hover:bg-white group-hover:text-neutral-950 group-hover:border-neutral-200/50"
                       ].join(" ")}>
-                        {link.label}
-                      </p>
-                      <p className={[
-                        "mt-1.5 text-[11px] leading-normal",
-                        active ? "text-neutral-200/85" : "text-neutral-500"
-                      ].join(" ")}>
-                        {link.desc}
-                      </p>
-                    </div>
-                  </Link>
+                        {link.icon}
+                      </div>
+                      <div className="min-w-0">
+                        <p className={[
+                          "text-[13px] font-semibold leading-none mt-1",
+                          active ? "text-white" : "text-neutral-900"
+                        ].join(" ")}>
+                          {link.label}
+                        </p>
+                        <p className={[
+                          "mt-2 text-[11px] leading-normal",
+                          active ? "text-neutral-200/80" : "text-neutral-500"
+                        ].join(" ")}>
+                          {link.desc}
+                        </p>
+                      </div>
+                    </Link>
+                  </motion.div>
                 );
               })}
             </div>
@@ -358,34 +368,42 @@ function AppHeader({ user, links = [] }) {
           {user && (
             <>
               <NotificationBell />
-              <Link
-                href="/settings"
-                className={`hidden shrink-0 items-center rounded-full p-2 transition-colors sm:inline-flex ${
-                  isActive(pathname, "/settings")
-                    ? "bg-neutral-900 text-white"
-                    : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-                }`}
-                title="Settings"
-                aria-label="Settings"
+              <motion.div
+                whileHover={{ scale: 1.05, rotate: 25 }}
+                transition={{ type: "spring", stiffness: 350, damping: 15 }}
+                className="hidden sm:block"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-                </svg>
-              </Link>
+                <Link
+                  href="/settings"
+                  className={`shrink-0 items-center rounded-full p-2.5 transition-colors inline-flex ${
+                    isActive(pathname, "/settings")
+                      ? "bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950 text-white shadow-sm"
+                      : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-950"
+                  }`}
+                  title="Settings"
+                  aria-label="Settings"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+                  </svg>
+                </Link>
+              </motion.div>
             </>
           )}
 
           {user ? (
             <>
               <WorkspaceSwitcher />
-              <button
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
                 type="button"
                 onClick={handleLogout}
-                className="hidden shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 sm:inline-flex sm:items-center"
+                className="hidden shrink-0 whitespace-nowrap rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-semibold text-neutral-600 transition-all hover:bg-neutral-50 hover:text-neutral-900 hover:border-neutral-300 sm:inline-flex sm:items-center shadow-sm"
               >
                 Sign out
-              </button>
+              </motion.button>
             </>
           ) : (
             <Link href="/login" className="btn-primary shrink-0 whitespace-nowrap !py-2 !text-sm">

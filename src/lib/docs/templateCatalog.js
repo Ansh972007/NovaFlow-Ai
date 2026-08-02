@@ -1,6 +1,7 @@
 /** Canonical template documentation — single source for /docs UI */
 
 export const DOC_CATEGORIES = [
+  { id: "onboarding", label: "Getting Started", desc: "Full onboarding & FAQs", borderAnim: "stitch", innerAnim: "matrix" },
   { id: "workflows", label: "Workflows", desc: "13 pipeline starters", borderAnim: "march", innerAnim: "grid" },
   { id: "digests", label: "Digests", desc: "Scheduled delivery", borderAnim: "shimmer", innerAnim: "nodes" },
   { id: "prompts", label: "Apps & prompts", desc: "Assistant presets", borderAnim: "pulse", innerAnim: "wave" },
@@ -108,6 +109,125 @@ const wf = (id, name, desc, tagline, nodes, configure, integrations = [], tips =
 });
 
 export const TEMPLATE_DOCS = [
+  {
+    id: "getting-started",
+    category: "onboarding",
+    name: "NovaFlow AI 101 Onboarding",
+    desc: "A brief tour of NovaFlow platforms & basic terms.",
+    tagline: "Learn how Workspaces, Apps, Workflows, and Agents interact.",
+    nodes: ["workspace", "apps", "agent", "workflow", "runs"],
+    configure: [
+      { title: "Workspace Concept", detail: "A workspace isolates users, agents, workflows, keys, and knowledge bases. Everything you build belongs to your active workspace." },
+      { title: "Apps vs Agents", detail: "Apps are user-facing chat windows or UI tools. Agents are autonomous background loops configured with tools (like search/math) to solve tasks." },
+      { title: "Workflows", detail: "Workflows are visual pipelines of nodes (Trigger → Retrieve → LLM → Notify). They automate repetitive tasks via API or cron schedules." }
+    ],
+    integrations: ["Active Account", "Workspace Access"],
+    tips: [
+      "Switch workspaces using the workspace dropdown in the top-right header.",
+      "Check /developer to test backend routes interactively."
+    ],
+    links: [{ href: "/dashboard", label: "Go to Dashboard" }]
+  },
+  {
+    id: "team-invite",
+    category: "onboarding",
+    name: "Managing Teams & SMTP Invites",
+    desc: "How to invite team members and configure SMTP settings.",
+    tagline: "Learn how workspace tenancy, roles, and SMTP email invites operate.",
+    nodes: ["admin", "settings", "smtp", "roles"],
+    configure: [
+      { title: "SMTP Configuration", detail: "SMTP details are verified for novaflow85@gmail.com with custom app passwords. Invites are fully formatted to bypass spam filters.", href: "/settings" },
+      { title: "Sending Invites", detail: "Go to Admin Settings → Teams & Roles → Invite Member. Enter their email and select a role (viewer, editor, admin).", href: "/settings" },
+      { title: "Roles Hierarchy", detail: "viewer (read-only), editor (create/delete workflows & apps), admin (full workspace control), super_admin (manages entire platform)." },
+      { title: "Accepting Invites", detail: "The recipient clicks the link in their email. If they are new, they register. Upon logging in, they automatically join the workspace." }
+    ],
+    integrations: ["Gmail SMTP Provider", "User Database"],
+    tips: [
+      "If the recipient doesn't see the email, ask them to check their spam box.",
+      "Ensure the email template contains correct absolute domain URLs for registration."
+    ],
+    links: [{ href: "/settings", label: "Admin Settings" }]
+  },
+  {
+    id: "knowledge-base",
+    category: "onboarding",
+    name: "Grounded RAG & Knowledge Bases",
+    desc: "How to upload documents and query vector storage.",
+    tagline: "Everything about text parsing, embeddings, and RAG pipelines.",
+    nodes: ["upload", "chunking", "vector", "citations"],
+    configure: [
+      { title: "File Uploading", detail: "Go to Knowledge → upload documents (PDF, DOCX, TXT, CSV, JSON). Supported by high-speed concurrent chunked upload for files up to 100GB+.", href: "/knowledge" },
+      { title: "Chunking & Vectorizing", detail: "NovaFlow splits documents into 1000-character chunks with 100-character overlap, creates embeddings, and writes to Milvus." },
+      { title: "Retrieval RAG Node", detail: "In a workflow, add a Retrieve node. Specify the Knowledge Base ID to retrieve grounded reference chunks at runtime.", href: "/workflows" },
+      { title: "Verifying Answers", detail: "Go to the Q&A Preview inside the Knowledge Base to search indexed chunks semantic-search style.", href: "/knowledge" }
+    ],
+    integrations: ["Milvus Vector Store", "Embedding Models (OpenAI/Ollama)"],
+    tips: [
+      "Large files are uploaded in parallel 8MB chunks to keep RAM usage under 8MB.",
+      "Use clean formatted PDFs to ensure highly accurate text parsing."
+    ],
+    links: [{ href: "/knowledge", label: "Explore Knowledge" }]
+  },
+  {
+    id: "model-lab",
+    category: "onboarding",
+    name: "Model Lab & Fine-tuning",
+    desc: "Train custom models and compare performance.",
+    tagline: "Import training data, estimate costs, train and test models.",
+    nodes: ["import", "estimate", "train", "eval"],
+    configure: [
+      { title: "Importing Dataset", detail: "Go to Model Lab → Datasets → Create Dataset. Import CSV or JSON Lines data formatted with user/assistant prompts.", href: "/model-lab" },
+      { title: "Cost Estimation", detail: "Before training, click 'Estimate Cost' to view calculated token expenses based on base models (e.g. gpt-4o-mini).", href: "/model-lab" },
+      { title: "Fine-tune Job", detail: "Click 'Start Training'. Monitor logs and status from the jobs table. Training is executed asynchronously.", href: "/model-lab" },
+      { title: "Evaluation Suites", detail: "Run automated evaluations comparing your fine-tuned model against baseline models using test datasets.", href: "/evaluation" }
+    ],
+    integrations: ["Model Provider API", "Evaluation Datasets"],
+    tips: [
+      "Always start with at least 50 high-quality prompt-reply pairs for training.",
+      "Use A/B model routing to split user traffic between models in production."
+    ],
+    links: [{ href: "/model-lab", label: "Open Model Lab" }]
+  },
+  {
+    id: "integrations-webhook",
+    category: "onboarding",
+    name: "Incoming Webhooks & Integrations",
+    desc: "How to trigger workflows from external services.",
+    tagline: "Connect GitHub, Jira, Slack, Discord, and Telegram webhooks.",
+    nodes: ["webhook", "trigger", "notify", "channel"],
+    configure: [
+      { title: "Webhook Trigger", detail: "Set a workflow's trigger node to webhook. Copy the unique POST webhook URL from the workflow builder.", href: "/workflows" },
+      { title: "Mapping Inputs", detail: "External services POST JSON data. Map the parameters using transform nodes (e.g. {{input.body.message}}).", href: "/workflows" },
+      { title: "Slack / Discord webhook", detail: "Paste Slack/Discord channel webhooks inside the integration settings panel.", href: "/settings" },
+      { title: "Telegram bot setup", detail: "@BotFather bot token linked to a Notify node with Telegram destination.", href: "/settings" }
+    ],
+    integrations: ["Slack Webhook", "Telegram Bot API", "Jira/GitHub credentials"],
+    tips: [
+      "Test Webhook payload format using standard curl or Postman before deploying.",
+      "Check Runs history to inspect raw webhook request and response values."
+    ],
+    links: [{ href: "/developer", label: "API Docs" }]
+  },
+  {
+    id: "faq-troubleshoot",
+    category: "onboarding",
+    name: "Troubleshooting & FAQs",
+    desc: "Quick fixes for common setup and runtime errors.",
+    tagline: "Read FAQs about email deliverability, vector stores, and model keys.",
+    nodes: ["errors", "logs", "fixes", "status"],
+    configure: [
+      { title: "Why don't I get email invites?", detail: "Verify the sender SMTP configurations in config.py. Check your junk/spam folder for messages from novaflow85@gmail.com." },
+      { title: "Why does the UI show 'Connecting' forever?", detail: "Ensure both backend API and Docker redis containers are running. Check Redis health using `docker compose ps`." },
+      { title: "How do I fix vector indexing errors?", detail: "Ensure the Milvus container is online. Verify that the documents are text-extractable (not scanned images without OCR)." },
+      { title: "Where are application logs stored?", detail: "Backend logs print to stdout inside the Docker container. Check them using `docker compose logs api`." }
+    ],
+    integrations: ["Docker Compose", "Health Endpoints"],
+    tips: [
+      "Use /health API endpoint to verify backend sub-service health states.",
+      "Ensure API key header is formatted as 'Authorization: Bearer <token>'."
+    ],
+    links: [{ href: "/developer", label: "System Diagnostics" }]
+  },
   wf(
     "rag",
     "RAG Q&A pipeline",

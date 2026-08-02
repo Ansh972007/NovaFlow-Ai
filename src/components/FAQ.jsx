@@ -20,11 +20,15 @@ const faqs = [
   },
   {
     q: "Can I use my own AI models?",
-    a: "Absolutely. Connect OpenAI, Anthropic, local models via Ollama, or any OpenAI-compatible endpoint. Switch models per assistant.",
+    a: "Absolutely. Connect OpenAI, Anthropic, Gemini, Groq, DeepSeek, or local models via Ollama. Switch models per assistant.",
   },
   {
-    q: "How do I get started?",
-    a: "Create a free account, connect your backend, and launch your first assistant in minutes. No credit card required during beta.",
+    q: "Why is NovaFlow Free Forever?",
+    a: "We believe orchestration tools should be free and open-source. By bringing your own API keys (BYOK) or running local models (Ollama, LM Studio), you pay the provider directly with zero middleware markup.",
+  },
+  {
+    q: "How do local models preserve privacy?",
+    a: "By choosing local models, all inference runs 100% on your local machine. Your code, documents, and prompts never leave your local workspace network.",
   },
 ];
 

@@ -1058,6 +1058,17 @@ class PlatformBudget(Base):
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AIOSKernelConfig(Base):
+    """NovaFlow AIOS Core Kernel Configuration."""
+
+    __tablename__ = "aios_kernel_config"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    active_provider_id = Column(Integer, nullable=True)
+    heartbeat_interval = Column(Integer, default=30)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class CostLedger(Base):
     """FinOps cost ledger — LLM, embedding, storage, workflow."""
 

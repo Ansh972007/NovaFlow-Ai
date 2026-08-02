@@ -67,7 +67,10 @@ function LoginForm() {
     if (inviteToken && token) {
       import("@/lib/api/workspaces").then(({ acceptWorkspaceInvite }) => {
         acceptWorkspaceInvite(inviteToken)
-          .then(() => {
+          .then((res) => {
+            if (res && res.workspace_id) {
+              localStorage.setItem("nf_workspace_id", String(res.workspace_id));
+            }
             router.push("/chat");
           })
           .catch((err) => {
@@ -87,7 +90,14 @@ function LoginForm() {
   }, [email, password, confirmPassword, isRegister]);
 
   function switchMode(registerMode) {
-    router.replace(registerMode ? "/login?mode=register" : "/login");
+    const inviteToken = searchParams.get("invite_token");
+    const next = searchParams.get("next");
+    const params = new URLSearchParams();
+    if (registerMode) params.set("mode", "register");
+    if (inviteToken) params.set("invite_token", inviteToken);
+    if (next) params.set("next", next);
+    const qs = params.toString();
+    router.replace(qs ? `/login?${qs}` : "/login");
     setError("");
   }
 
@@ -115,7 +125,10 @@ function LoginForm() {
       if (inviteToken) {
         try {
           const { acceptWorkspaceInvite } = await import("@/lib/api/workspaces");
-          await acceptWorkspaceInvite(inviteToken);
+          const res = await acceptWorkspaceInvite(inviteToken);
+          if (res && res.workspace_id) {
+            localStorage.setItem("nf_workspace_id", String(res.workspace_id));
+          }
         } catch (inviteErr) {
           console.error("Failed to accept invite:", inviteErr);
         }

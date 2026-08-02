@@ -89,13 +89,12 @@ def test_templates_cover_core_pipelines():
         assert nodes, tid
 
 
+
+
 def test_default_prompts_are_structured():
     assert "structured" in DEFAULT_LLM_PROMPT.lower() or "precise" in DEFAULT_LLM_PROMPT.lower()
     assert "evidence" in DEFAULT_AGENT_SYSTEM.lower() or "tool" in DEFAULT_AGENT_SYSTEM.lower()
-    assert set(BUILTIN_TOOLS) >= {"summarize", "kb_search", "calculator", "word_count"}
-
-
-def test_extract_titled_fields():
+    assert set(BUILTIN_TOOLS) >= {"kb_search", "file_peek", "file_write", "shell_run"}
     title, body = _extract_titled_fields("TITLE: Fix auth\nDESCRIPTION: Users cannot log in")
     assert title == "Fix auth"
     assert "cannot log in" in body
@@ -214,15 +213,15 @@ def test_agents_tools_and_run(client):
     tools = client.get("/api/v1/agents/tools", headers=headers)
     assert tools.status_code == 200
     tool_ids = {t["id"] for t in tools.json()["data"]}
-    assert "summarize" in tool_ids
-    assert "word_count" in tool_ids
+    assert "file_peek" in tool_ids
+    assert "shell_run" in tool_ids
 
     run = client.post(
         "/api/v1/agents/run",
         headers=headers,
         json={
-            "input": "Count words in: NovaFlow final verification pipeline.",
-            "tools": ["word_count", "calculator"],
+            "input": "Print directory structure.",
+            "tools": ["dir_list", "file_peek"],
             "system": DEFAULT_AGENT_SYSTEM,
         },
     )
@@ -234,7 +233,7 @@ def test_agents_tools_and_run(client):
     saved = client.post(
         "/api/v1/agents",
         headers=headers,
-        json={"name": "Smoke Agent", "tools": ["word_count"], "system_prompt": DEFAULT_AGENT_SYSTEM},
+        json={"name": "Smoke Agent", "tools": ["file_peek"], "system_prompt": DEFAULT_AGENT_SYSTEM},
     )
     assert saved.status_code == 200
     agent_id = saved.json()["data"]["id"]
@@ -331,13 +330,13 @@ def test_receipt_usage_and_cost():
 def test_agent_tool_select_skips_irrelevant():
     from app.services.agent_tools import _select_tools
 
-    tools = ["calculator", "kb_search", "summarize", "datetime", "web_fetch"]
-    picked = _select_tools("What is 12 + 30?", tools)
-    assert "calculator" in picked
-    assert "web_fetch" not in picked
+    tools = ["kb_search", "datetime", "web_fetch", "file_peek", "shell_run"]
+    picked = _select_tools("Fetch https://example.com and read it", tools)
+    assert "web_fetch" in picked
+    assert "datetime" not in picked
 
-    picked2 = _select_tools("Fetch https://example.com and summarize", tools)
-    assert "web_fetch" in picked2
+    picked2 = _select_tools("Search the docs for policy details", tools)
+    assert "kb_search" in picked2
 
 
 def test_llm_history_normalize():

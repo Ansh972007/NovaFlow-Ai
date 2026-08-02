@@ -19,7 +19,7 @@ import { PROMPT_TEMPLATES } from "@/lib/prompts/templates";
 
 const ease = [0.16, 1, 0.3, 1];
 
-const DEFAULT_PROMPT = PROMPT_TEMPLATES.find((t) => t.id === "docs")?.prompt
+const DEFAULT_PROMPT = PROMPT_TEMPLATES.find((t) => t.id === "github_pr")?.prompt
   || "You are a helpful NovaFlow AI assistant. Answer clearly, be concise, and ask follow-up questions when the user's request is ambiguous.";
 
 export default function AppsClient() {

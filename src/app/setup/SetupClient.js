@@ -143,14 +143,14 @@ export default function SetupClient() {
               transition={{ ease }}
               className="workspace-panel mt-8 flex flex-1 flex-col rounded-[1.75rem] p-8"
             >
-              <h1 className="font-serif text-3xl tracking-tight">Welcome to NovaFlow</h1>
+              <h1 className="font-serif text-3xl tracking-tight">Connect Your AI Provider</h1>
               <p className="mt-3 text-muted">
-                Hi {user.user_name}! Let&apos;s connect your workspace in a few quick steps.
+                Hi {user.user_name}! Select how you want to route your AI capabilities:
               </p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
-                <li>✓ Verify API connection</li>
-                <li>✓ Create your first assistant</li>
-                <li>✓ Optional knowledge base</li>
+                <li>☁️ Cloud Providers (OpenAI, DeepSeek, Anthropic, Gemini)</li>
+                <li>💻 Local Models (Ollama, LM Studio, vLLM)</li>
+                <li>🏢 Enterprise Endpoints (Azure OpenAI, Vertex AI, AWS Bedrock)</li>
               </ul>
               <div className="mt-auto flex gap-3 pt-8">
                 <button type="button" onClick={skipToDashboard} className="text-sm text-muted hover:text-foreground">

@@ -36,6 +36,7 @@ from app.knowledge_os.router import router as knowledge_os_router
 from app.agent_os.router import router as agent_os_router
 from app.connectivity.router import router as connectivity_router
 from app.eiap.router import router as eiap_router
+from app.composer.kernel import router as aios_kernel_router
 from app.platform_intelligence.tracing.middleware import TraceMiddleware
 from app.schemas import ok
 from app.security.config import (
@@ -43,7 +44,7 @@ from app.security.config import (
     assert_production_bootstrap_safe,
     require_secure_jwt_secret,
 )
-from app.security.middleware import SecurityHeadersMiddleware
+from app.security.middleware import SecurityHeadersMiddleware, GlobalErrorHandlerMiddleware
 from app.services.demo_seed import seed_demo_data
 from app.services.llm_providers import ensure_default_provider
 from app.services.tenancy import ensure_personal_workspace
@@ -98,6 +99,7 @@ app = FastAPI(title="NovaFlow API", version="9.9.0", lifespan=lifespan)
 # Order: outermost last added runs first for request. Trace + security first.
 app.add_middleware(TraceMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(GlobalErrorHandlerMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED_ORIGINS or ["http://127.0.0.1:3000"],
@@ -121,6 +123,7 @@ app.include_router(knowledge_os_router, prefix=API_PREFIX)
 app.include_router(agent_os_router, prefix=API_PREFIX)
 app.include_router(connectivity_router, prefix=API_PREFIX)
 app.include_router(eiap_router, prefix=API_PREFIX)
+app.include_router(aios_kernel_router, prefix=API_PREFIX)
 app.include_router(marketplace.router, prefix=API_PREFIX)
 app.include_router(api_keys.router, prefix=API_PREFIX)
 app.include_router(analytics.router, prefix=API_PREFIX)

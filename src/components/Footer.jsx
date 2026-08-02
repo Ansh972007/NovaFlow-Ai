@@ -8,21 +8,21 @@ const ease = [0.16, 1, 0.3, 1];
 
 const linkGroups = [
   {
-    title: "Product",
+    title: "Platform",
     links: [
       { href: "#features", label: "Features" },
-      { href: "#pricing", label: "Pricing" },
+      { href: "#pricing", label: "AI Providers" },
       { href: "/chat", label: "Chat" },
       { href: "/dashboard", label: "Dashboard" },
     ],
   },
   {
-    title: "Company",
+    title: "Resources",
     links: [
+      { href: "/docs", label: "Documentation" },
       { href: "#faq", label: "FAQ" },
-      { href: "/docs", label: "Docs" },
-      { href: "/login", label: "Sign in" },
-      { href: "/login?mode=register", label: "Register" },
+      { href: "https://github.com/Ansh972007/NovaFlow-Ai", label: "GitHub" },
+      { href: "#", label: "Roadmap" },
     ],
   },
 ];

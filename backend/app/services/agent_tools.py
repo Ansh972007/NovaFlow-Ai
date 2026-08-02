@@ -5,20 +5,21 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.services.llm import stream_chat_sync
 
 BUILTIN_TOOLS: dict[str, str] = {
-    "calculator": "Evaluate math expressions safely",
     "kb_search": "Search linked knowledge bases",
-    "summarize": "Summarize text in 3 bullet points",
-    "translate_en": "Translate input to English",
     "datetime": "Current date/time in UTC",
     "web_fetch": "Fetch a URL and return text excerpt",
     "regex_extract": "Extract text with a regex pattern",
     "json_parse": "Parse JSON and return formatted keys",
-    "word_count": "Count words and characters in text",
+    "file_peek": "Peek at a text file's contents safely (specify path)",
+    "dir_list": "List directory files and folders structure (specify path)",
+    "file_write": "Write or update a file's contents safely (specify path and content)",
+    "shell_run": "Execute a command in the workspace terminal and return output (specify command)",
 }
 
 DEFAULT_AGENT_SYSTEM = (
@@ -29,15 +30,15 @@ DEFAULT_AGENT_SYSTEM = (
 
 # Heuristic routing — which tools to prefer for a given user ask
 _TOOL_HINTS: dict[str, list[str]] = {
-    "calculator": [r"\d+\s*[\+\-\*/]\s*\d+", r"\bcalc", r"\bmath\b", r"sqrt\(", r"\bpercent"],
     "kb_search": [r"\bpolicy\b", r"\bdocument", r"\bknowledge", r"\baccording to\b", r"\bfrom (the )?docs?\b", r"\bwarranty\b"],
-    "summarize": [r"\bsummar", r"\btldr\b", r"\bkey points?\b", r"\bbrief(ly)?\b"],
-    "translate_en": [r"\btranslat", r"\bto english\b", r"\benglis[hz]\b"],
     "datetime": [r"\b(date|time|utc|today|now)\b", r"\bwhat day\b"],
     "web_fetch": [r"https?://", r"\bfetch\b", r"\bscrape\b"],
     "regex_extract": [r"\bregex\b", r"\bpattern:", r"\bextract\b"],
     "json_parse": [r"\{[\s\S]*\}", r"\bjson\b"],
-    "word_count": [r"\bword count\b", r"\bhow many words\b", r"\bchar(acter)?s?\b"],
+    "file_peek": [r"\b(peek|read|cat|view)\s+file\b", r"\.py\b", r"\.js\b", r"\.json\b", r"\.md\b", r"\.txt\b", r"\bcontent of\b", r"\bopen\s+"],
+    "dir_list": [r"\b(list|ls|dir|peek)\s+(directory|folder|files)\b", r"\blist\b", r"\bstructure of\b", r"\bfiles in\b", r"\bls\s+"],
+    "file_write": [r"\b(write|create|save|update|edit|modify)\s+file\b", r"\bwrite to\b", r"\bsave code\b", r"\bupdate code\b"],
+    "shell_run": [r"\b(run|execute|shell|cmd|terminal|test)\s+command\b", r"\brun\s+(pytest|tests|npm|build|script|python)\b", r"\bsh\b", r"\bbash\b", r"\bls\s+-", r"\bpytest\b"],
 }
 
 
@@ -71,15 +72,13 @@ def _select_tools(user_input: str, tool_ids: list[str], max_tools: int = 3) -> l
         # Soft priors so common tools still get a chance when nothing matches
         if tid == "kb_search":
             score += 0.15
-        if tid == "summarize" and len(text) > 600:
-            score += 0.4
         if score > 0:
             scored.append((score, tid))
     scored.sort(key=lambda x: -x[0])
     if scored:
         return [t for _, t in scored[:max_tools]]
     # Fallback: run at most two tools (kb first if linked-capable, else first two)
-    preferred = [t for t in ("kb_search", "summarize", "datetime") if t in tool_ids]
+    preferred = [t for t in ("kb_search", "datetime") if t in tool_ids]
     if preferred:
         return preferred[:max_tools]
     return tool_ids[:max_tools]
@@ -109,9 +108,6 @@ async def _run_tool(
     knowledge_id: int | None = None,
     workspace_id: int | None = None,
 ) -> str:
-    if tool_id == "calculator":
-        nums = re.findall(r"[\d.+\-*/()]+", user_input)
-        return _safe_calc(nums[0] if nums else user_input)
     if tool_id == "kb_search" and knowledge_id:
         from app.knowledge_os.integration import format_hits_for_tool, retrieve_for_agent
 
@@ -126,23 +122,6 @@ async def _run_tool(
         return format_hits_for_tool(hits)
     if tool_id == "kb_search" and not knowledge_id:
         return "(no knowledge base linked to this agent)"
-    if tool_id == "summarize":
-        return await stream_chat_sync(
-            (
-                "Summarize the text in exactly 3 crisp bullet points. "
-                "Each bullet ≤ 20 words. No intro/outro."
-            ),
-            user_input[:6000],
-            db=db,
-            workspace_id=workspace_id,
-        )
-    if tool_id == "translate_en":
-        return await stream_chat_sync(
-            "Translate to clear natural English. Output the translation only — no commentary.",
-            user_input[:6000],
-            db=db,
-            workspace_id=workspace_id,
-        )
     if tool_id == "datetime":
         return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     if tool_id == "web_fetch":
@@ -191,12 +170,129 @@ async def _run_tool(
             return f"Array with {len(data)} items" if isinstance(data, list) else str(data)
         except json.JSONDecodeError as exc:
             return f"JSON error: {exc}"
-    if tool_id == "word_count":
-        words = len(re.findall(r"\b\w+\b", user_input))
-        chars = len(user_input)
-        lines = len(user_input.splitlines())
-        return f"words={words}, chars={chars}, lines={lines}"
+    if tool_id == "file_peek":
+        path_match = re.search(r"(?:file|path|read|peek|cat|view|open)\s+([a-zA-Z0-9_\-\./\\]+)", user_input, re.I)
+        if not path_match:
+            dots = re.findall(r"\b[a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_]+\b", user_input)
+            path_str = dots[0] if dots else ""
+        else:
+            path_str = path_match.group(1)
+        if not path_str:
+            return "Error: Could not identify file path to peek in the input."
+        try:
+            target = _safe_resolve_path(path_str)
+            if not target.exists():
+                return f"Error: File not found at '{path_str}'"
+            if not target.is_file():
+                return f"Error: '{path_str}' is not a file (it may be a directory, use dir_list instead)"
+            content = target.read_text(encoding="utf-8", errors="ignore")
+            if len(content) > 5000:
+                return f"[File Excerpt of {path_str} - showing first 5000 chars]:\n\n{content[:5000]}\n\n[... truncated ...]"
+            return f"[Content of {path_str}]:\n\n{content}"
+        except Exception as exc:
+            return f"Error: {exc}"
+    if tool_id == "dir_list":
+        path_match = re.search(r"(?:dir|directory|folder|list|ls|show)\s+([a-zA-Z0-9_\-\./\\]+)", user_input, re.I)
+        path_str = path_match.group(1) if path_match else "."
+        try:
+            target = _safe_resolve_path(path_str)
+            if not target.exists():
+                return f"Error: Directory not found at '{path_str}'"
+            if not target.is_dir():
+                return f"Error: '{path_str}' is not a directory (use file_peek instead)"
+            items = list(target.iterdir())
+            if not items:
+                return f"Directory '{path_str}' is empty."
+            lines = []
+            for item in sorted(items, key=lambda x: (not x.is_dir(), x.name))[:60]:
+                type_indicator = "[DIR]" if item.is_dir() else "[FILE]"
+                lines.append(f"{type_indicator} {item.name}")
+            result_str = "\n".join(lines)
+            if len(items) > 60:
+                result_str += f"\n... and {len(items) - 60} more items."
+            return f"[Directory contents of {path_str}]:\n\n{result_str}"
+        except Exception as exc:
+            return f"Error: {exc}"
+    if tool_id == "file_write":
+        path_match = re.search(r"(?:file|path|to|write|save|edit|update)\s+([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_]+)", user_input, re.I)
+        if not path_match:
+            dots = re.findall(r"\b[a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_]+\b", user_input)
+            path_str = dots[0] if dots else ""
+        else:
+            path_str = path_match.group(1)
+        if not path_str:
+            return "Error: Could not identify target file path to write in the input."
+        code_block_match = re.search(r"```[a-zA-Z0-9]*\n([\s\S]+?)\n```", user_input)
+        if code_block_match:
+            content_str = code_block_match.group(1)
+        else:
+            content_match = re.search(r"(?:content|code|text)[:\s]+([\s\S]+)", user_input, re.I)
+            content_str = content_match.group(1).strip() if content_match else user_input
+        try:
+            target = _safe_resolve_path(path_str)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content_str, encoding="utf-8")
+            return f"Successfully wrote {len(content_str)} characters of code/text to file '{path_str}'."
+        except Exception as exc:
+            return f"Error writing file: {exc}"
+    if tool_id == "shell_run":
+        cmd_match = re.search(r"(?:run|execute|command|shell|terminal|run command)[:\s]+`?([^`\n]+)`?", user_input, re.I)
+        if cmd_match:
+            cmd_str = cmd_match.group(1).strip()
+        else:
+            backticks = re.findall(r"`([^`]+)`", user_input)
+            cmd_str = backticks[0].strip() if backticks else user_input.strip()
+        blocked_commands = {"rm -rf /", "docker-compose down", "docker compose down", "format", "reboot", "shutdown"}
+        cmd_lower = cmd_str.lower()
+        for block in blocked_commands:
+            if block in cmd_lower:
+                return f"Error: Command '{cmd_str}' is blocked by security policy."
+        try:
+            import asyncio
+            process = await asyncio.create_subprocess_shell(
+                cmd_str,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd="."
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30.0)
+                stdout_str = stdout.decode("utf-8", errors="ignore")
+                stderr_str = stderr.decode("utf-8", errors="ignore")
+                exit_code = process.returncode
+                output = f"[Shell Output of command '{cmd_str}' - Exit Code {exit_code}]:\n"
+                if stdout_str:
+                    output += f"\nStdout:\n{stdout_str[:3000]}"
+                if stderr_str:
+                    output += f"\nStderr:\n{stderr_str[:1000]}"
+                if not stdout_str and not stderr_str:
+                    output += "\n(No stdout or stderr returned)"
+                return output
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+                return "Error: Command execution timed out after 30 seconds."
+        except Exception as exc:
+            return f"Error executing command: {exc}"
     return f"Unknown tool: {tool_id}"
+
+
+def _safe_resolve_path(target_path: str) -> Path:
+    base_dir = Path(".").resolve()
+    target = target_path.strip().replace("\\", "/")
+    while target.startswith((".", "/")):
+        target = target.lstrip("./")
+    resolved = (base_dir / target).resolve()
+    if not str(resolved).startswith(str(base_dir)):
+        raise PermissionError("Access restricted: path is outside the project workspace.")
+    sensitive_patterns = {"data/keys", ".env", "novaflow.db", "test.db", "keys/", ".git"}
+    resolved_str = str(resolved).replace("\\", "/").lower()
+    for pattern in sensitive_patterns:
+        if pattern in resolved_str:
+            raise PermissionError("Access restricted: sensitive file or directory.")
+    return resolved
 
 
 def _format_tool_block(tool_results: list[dict[str, Any]]) -> str:
@@ -211,14 +307,14 @@ def _format_tool_block(tool_results: list[dict[str, Any]]) -> str:
 # Prefer gathering evidence before synthesis tools
 _TOOL_ORDER = {
     "datetime": 0,
-    "calculator": 1,
-    "kb_search": 2,
-    "web_fetch": 3,
-    "json_parse": 4,
-    "regex_extract": 5,
-    "word_count": 6,
-    "summarize": 8,
-    "translate_en": 9,
+    "kb_search": 1,
+    "web_fetch": 2,
+    "json_parse": 3,
+    "regex_extract": 4,
+    "file_peek": 5,
+    "dir_list": 6,
+    "file_write": 7,
+    "shell_run": 8,
 }
 
 

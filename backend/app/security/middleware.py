@@ -93,3 +93,29 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if origin and origin in CORS_ALLOWED_ORIGINS:
             response.headers.setdefault("Vary", "Origin")
         return response
+
+
+import logging
+import traceback
+import uuid
+
+logger = logging.getLogger("novaflow.errors")
+
+class GlobalErrorHandlerMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            ref_id = uuid.uuid4().hex[:8].upper()
+            logger.error(
+                f"[Ref: {ref_id}] Unhandled Exception: {str(exc)}\n"
+                f"{traceback.format_exc()}"
+            )
+            return JSONResponse(
+                {
+                    "status_code": 500,
+                    "status_message": f"An internal server error occurred. Reference ID: {ref_id}",
+                    "data": None,
+                },
+                status_code=500,
+            )

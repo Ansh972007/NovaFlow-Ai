@@ -19,6 +19,7 @@ const ease = [0.16, 1, 0.3, 1];
 const spring = { type: "spring", stiffness: 420, damping: 34 };
 
 const CATEGORY_STATS = {
+  onboarding: 6,
   workflows: 13,
   digests: 5,
   prompts: 5,
@@ -1150,8 +1151,8 @@ const QUICK_START = [
 ];
 
 export default function DocsClient() {
-  const [category, setCategory] = useState("workflows");
-  const [selectedId, setSelectedId] = useState("rag");
+  const [category, setCategory] = useState("onboarding");
+  const [selectedId, setSelectedId] = useState("getting-started");
 
   const templates = useMemo(() => getTemplatesByCategory(category), [category]);
   const activeCategory = DOC_CATEGORIES.find((c) => c.id === category);

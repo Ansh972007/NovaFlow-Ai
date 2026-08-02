@@ -9,7 +9,7 @@ import { useNavbarScroll } from "./ScrollProgress";
 const links = [
   { href: "#features", label: "Features" },
   { href: "#bento", label: "Platform" },
-  { href: "#pricing", label: "Pricing" },
+  { href: "#pricing", label: "AI Providers" },
   { href: "#testimonials", label: "Stories" },
 ];
 
