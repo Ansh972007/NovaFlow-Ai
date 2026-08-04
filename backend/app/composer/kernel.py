@@ -1,5 +1,4 @@
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -179,3 +178,48 @@ def run_project_failover_healing(
     from app.composer.healing import execute_with_healing
     report = execute_with_healing(failing_primary, fallback_local)
     return ok(report)
+
+
+@router.get("/aios/dashboard/summary")
+def get_dashboard_metrics(
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.WORKSPACE_READ)),
+):
+    """Aggregate total running metrics, latency budgets, and costs for the workspace dashboard."""
+    from app.composer.integration import get_workspace_solution_summary
+    metrics = get_workspace_solution_summary(db, ctx.workspace_id)
+    return ok(metrics)
+
+
+@router.get("/aios/project/{project_id}/docs")
+def get_project_documentation(
+    project_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.WORKSPACE_READ)),
+):
+    """Auto-generate operational documentation guides for deployed Solution Graphs."""
+    project = db.query(ProjectGraph).filter(
+        ProjectGraph.id == project_id,
+        ProjectGraph.workspace_id == ctx.workspace_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    import json
+    from app.composer.doc_generator import generate_solution_documentation
+    
+    graph_payload = json.loads(project.solution_payload)
+    docs_markdown = generate_solution_documentation(project_id, graph_payload)
+    return ok({"markdown": docs_markdown})
+
+
+@router.post("/aios/project/migrate-legacy")
+def migrate_legacy_project(
+    body: dict = Body(...),
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.WORKSPACE_READ)),
+):
+    """Migrate legacy nodes workflow configurations into the goal-driven Solution Graph format."""
+    from app.composer.migration_wrapper import migrate_legacy_workflow_to_solution
+    migrated_graph = migrate_legacy_workflow_to_solution(body)
+    return ok(migrated_graph)
