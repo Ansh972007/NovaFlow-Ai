@@ -1069,6 +1069,101 @@ class AIOSKernelConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class CapabilityDNA(Base):
+    """Stores the capability schema metadata definitions."""
+
+    __tablename__ = "aios_capability_dna"
+
+    id = Column(String(36), primary_key=True)
+    category = Column(String(64), nullable=False)
+    inputs_json = Column(Text, default="{}")
+    outputs_json = Column(Text, default="{}")
+    latency_budget_ms = Column(Integer, default=500)
+    reliability_score = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UniversalCapability(Base):
+    """Stores active capability registrations across workspace environments."""
+
+    __tablename__ = "aios_universal_capabilities"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    dna_id = Column(String(36), ForeignKey("aios_capability_dna.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    status = Column(String(16), default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UniversalAsset(Base):
+    """Catalog index for all workflows, prompts, agent templates."""
+
+    __tablename__ = "aios_universal_assets"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    asset_type = Column(String(32), nullable=False, index=True) # workflow|prompt|agent_template
+    name = Column(String(120), nullable=False)
+    config_json = Column(Text, default="{}")
+    version = Column(String(32), default="1.0.0")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkflowFragment(Base):
+    """Reusable sub-graphs of workflow node DAGs."""
+
+    __tablename__ = "aios_workflow_fragments"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    graph_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProjectGraph(Base):
+    """Root mapping object associating operational goals to solution plans."""
+
+    __tablename__ = "aios_project_graphs"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    business_goal = Column(Text, nullable=False)
+    solution_payload = Column(Text, default="{}")
+    status = Column(String(32), default="draft")
+    version_tag = Column(String(32), default="1.0.0")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SolutionGraph(Base):
+    """Renders the compiled connection mappings of workflows, databases, and agents."""
+
+    __tablename__ = "aios_solution_graphs"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    project_id = Column(String(36), ForeignKey("aios_project_graphs.id"), nullable=False, index=True)
+    graph_payload = Column(Text, default="{}")
+    version_tag = Column(String(32), default="1.0.0")
+    status = Column(String(32), default="compiled")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HierarchicalMemory(Base):
+    """Context database partition supporting workspace, solution, and agent scoping."""
+
+    __tablename__ = "aios_hierarchical_memories"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    scope = Column(String(32), default="workspace", index=True) # workspace|solution|agent|user
+    scope_ref = Column(String(128), default="", index=True)
+    content = Column(Text, default="")
+    ttl_seconds = Column(Integer, default=2592000) # 30 days
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class CostLedger(Base):
     """FinOps cost ledger — LLM, embedding, storage, workflow."""
 
@@ -1743,6 +1838,14 @@ def migrate_schema():
         "connector_webhooks",
         "connector_events",
         "mcp_registrations",
+        "aios_kernel_config",
+        "aios_capability_dna",
+        "aios_universal_capabilities",
+        "aios_universal_assets",
+        "aios_workflow_fragments",
+        "aios_project_graphs",
+        "aios_solution_graphs",
+        "aios_hierarchical_memories",
         "eiap_recommendations",
         "eiap_reports",
     ):
