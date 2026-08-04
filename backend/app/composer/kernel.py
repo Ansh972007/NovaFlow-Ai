@@ -128,3 +128,54 @@ def run_project_sandbox_trial(
     graph_payload = json.loads(project.solution_payload)
     report = run_sandbox_trial(graph_payload, inject_error_node=inject_error_node)
     return ok(report)
+
+
+@router.post("/aios/project/{project_id}/deploy")
+def run_project_deploy(
+    project_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.WORKSPACE_READ)),
+):
+    """Deploys the compiled solution graph, updating its status to active operational state."""
+    project = db.query(ProjectGraph).filter(
+        ProjectGraph.id == project_id,
+        ProjectGraph.workspace_id == ctx.workspace_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    solution = db.query(SolutionGraph).filter(
+        SolutionGraph.project_id == project.id
+    ).first()
+    if not solution:
+        raise HTTPException(status_code=404, detail="Solution graph not found")
+
+    from app.composer.deployment import deploy_solution_graph
+    from app.composer.governance import log_soc2_audit_event
+
+    report = deploy_solution_graph(db, ctx.workspace_id, solution.id)
+    log_soc2_audit_event(
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.user_id,
+        event_type="SOLUTION_DEPLOYED",
+        details=f"Deployed Solution Graph {solution.id}."
+    )
+    return ok(report)
+
+
+@router.post("/aios/project/{project_id}/heal")
+def run_project_failover_healing(
+    project_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.WORKSPACE_READ)),
+):
+    """Simulates primary routing timeout failure and tests self-healing fallback path."""
+    def failing_primary():
+        raise TimeoutError("LLM API request gateway timed out.")
+
+    def fallback_local():
+        return "Healed response served from fallback local model."
+
+    from app.composer.healing import execute_with_healing
+    report = execute_with_healing(failing_primary, fallback_local)
+    return ok(report)
