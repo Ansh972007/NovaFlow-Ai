@@ -105,3 +105,26 @@ def get_project_status(
             "missing_credentials": missing_creds,
         }
     )
+
+
+@router.post("/aios/project/{project_id}/sandbox-trial")
+def run_project_sandbox_trial(
+    project_id: str,
+    inject_error_node: str = "",
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.WORKSPACE_READ)),
+):
+    """Executes a simulated trial run of the solution graph in the sandboxed twin environment."""
+    project = db.query(ProjectGraph).filter(
+        ProjectGraph.id == project_id,
+        ProjectGraph.workspace_id == ctx.workspace_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    import json
+    from app.sandbox.twin import run_sandbox_trial
+    
+    graph_payload = json.loads(project.solution_payload)
+    report = run_sandbox_trial(graph_payload, inject_error_node=inject_error_node)
+    return ok(report)
