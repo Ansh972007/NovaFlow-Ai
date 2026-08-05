@@ -19,6 +19,8 @@ def _send_email_sync(smtp: dict[str, Any], to_addr: str, subject: str, body: str
     port = int(smtp.get("port") or 587)
     user = smtp.get("user") or ""
     password = smtp.get("password") or ""
+    # Gmail app passwords are often pasted with spaces
+    password = "".join(str(password).split())
     from_addr = smtp.get("from_addr") or user or "novaflow@localhost"
     
     from email.utils import formataddr, make_msgid, formatdate
@@ -56,8 +58,9 @@ async def send_email_notification(
     db: Session | None = None,
     workspace_id: int | None = None,
     smtp_override: dict | None = None,
+    credential_id: str | None = None,
 ) -> dict:
-    if db and workspace_id and not smtp_override:
+    if db and workspace_id and not smtp_override and not credential_id:
         from app.database import WorkspaceIntegration
         from app.services.gmail_jira import send_gmail_api_message
 
@@ -65,19 +68,26 @@ async def send_email_notification(
         if row and (row.gmail_auth_mode or "").lower() == "oauth" and row.gmail_oauth_refresh_token_enc:
             return await send_gmail_api_message(db, workspace_id, to_addr, subject, body)
 
-    smtp = smtp_override or (resolve_smtp_config(db, workspace_id) if db else {})
+    smtp = smtp_override or (
+        resolve_smtp_config(db, workspace_id, credential_id=credential_id) if db else {}
+    )
     
-    # Fallback to system-wide SMTP settings if config is not resolved or has no host
-    if not smtp or not smtp.get("host"):
-        from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
-        smtp = {
-            "host": SMTP_HOST,
-            "port": SMTP_PORT,
-            "user": SMTP_USER,
-            "password": SMTP_PASSWORD,
-            "from_addr": SMTP_FROM or SMTP_USER,
-        }
-        
+    # Fallback to platform SMTP (password reset / invites / missing workspace mail)
+    if not smtp or not smtp.get("host") or not smtp.get("password"):
+        from app.services.platform_mail import platform_smtp_config
+
+        platform = platform_smtp_config()
+        if not smtp:
+            smtp = platform
+        else:
+            smtp = {
+                "host": smtp.get("host") or platform.get("host"),
+                "port": smtp.get("port") or platform.get("port"),
+                "user": smtp.get("user") or platform.get("user"),
+                "password": smtp.get("password") or platform.get("password"),
+                "from_addr": smtp.get("from_addr") or platform.get("from_addr"),
+            }
+
     return await asyncio.to_thread(_send_email_sync, smtp, to_addr, subject, body)
 
 
@@ -88,10 +98,15 @@ async def send_telegram_message(
     *,
     db: Session | None = None,
     workspace_id: int | None = None,
+    credential_id: str | None = None,
 ) -> dict:
-    token = resolve_telegram_token(db, workspace_id, bot_token or "") if db else (bot_token or TELEGRAM_BOT_TOKEN or "").strip()
+    token = (
+        resolve_telegram_token(db, workspace_id, bot_token or "", credential_id=credential_id)
+        if db
+        else (bot_token or TELEGRAM_BOT_TOKEN or "").strip()
+    )
     if not token or not chat_id:
-        return {"ok": False, "detail": "Telegram bot token or chat_id missing — add in Settings → Integrations"}
+        return {"ok": False, "detail": "Telegram bot token or chat_id missing — add in Credentials"}
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -181,10 +196,13 @@ async def send_notification(
     bot_token: str = "",
     db: Session | None = None,
     workspace_id: int | None = None,
+    credential_id: str | None = None,
 ) -> dict:
     ch = (channel or "telegram").strip().lower()
     if ch == "email":
-        return await send_email_notification(to_addr, subject, body, db=db, workspace_id=workspace_id)
+        return await send_email_notification(
+            to_addr, subject, body, db=db, workspace_id=workspace_id, credential_id=credential_id
+        )
     if ch == "webhook":
         return await send_webhook_notification(to_addr, subject, body)
     if ch == "slack":
@@ -209,6 +227,7 @@ async def send_notification(
         bot_token or None,
         db=db,
         workspace_id=workspace_id,
+        credential_id=credential_id,
     )
 
 

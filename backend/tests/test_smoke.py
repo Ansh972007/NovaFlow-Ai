@@ -17,11 +17,13 @@ from fastapi.testclient import TestClient
 _TEST_DIR = Path(tempfile.mkdtemp(prefix="novaflow-test-"))
 os.environ["DATA_DIR"] = str(_TEST_DIR)
 os.environ["DATABASE_URL"] = f"sqlite:///{(_TEST_DIR / 'test.db').as_posix()}"
-os.environ["JWT_SECRET"] = "novaflow-test-secret"
+os.environ["JWT_SECRET"] = "novaflow-test-secret-not-for-production-use-32b"
 os.environ["NOVAFLOW_DEMO_SEED"] = "0"
 os.environ["MILVUS_URI"] = ""
 os.environ["NOVAFLOW_ADMIN_USER"] = "admin"
-os.environ["NOVAFLOW_ADMIN_PASSWORD"] = "admin123"
+from tests.conftest import TEST_ADMIN_PASSWORD  # noqa: E402
+
+os.environ["NOVAFLOW_ADMIN_PASSWORD"] = TEST_ADMIN_PASSWORD
 
 from app.crypto import get_rsa_keys, md5_hash  # noqa: E402
 from app.main import app  # noqa: E402
@@ -54,7 +56,7 @@ def _auth_headers(client: TestClient) -> dict:
     assert pk.status_code == 200
     login = client.post(
         "/api/v1/user/login",
-        json={"user_name": "admin", "password": _encrypt("admin123")},
+        json={"user_name": "admin", "password": _encrypt(TEST_ADMIN_PASSWORD)},
     )
     assert login.status_code == 200, login.text
     body = login.json()
@@ -384,3 +386,63 @@ def test_eval_fuzzy_score():
     assert not _score("hello world", "completely unrelated topic here", "fuzzy")
     assert _score("abc-123", r"abc-\d+", "regex")
     assert _score("Hello", "hello", "exact")
+
+
+# --- Pre-deploy security lock ---
+
+
+def test_public_health_is_minimal(client):
+    res = client.get("/health")
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data.get("status") == "ok"
+    assert "db_metrics" not in data
+    assert "database" not in data
+
+
+def test_health_detail_requires_auth(client):
+    res = client.get("/health/detail")
+    assert res.status_code in (401, 403)
+
+
+def test_must_change_password_blocks_api(client):
+    from app.database import SessionLocal, User
+
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.user_name == "admin").first()
+        assert admin
+        admin.must_change_password = 1
+        db.commit()
+    finally:
+        db.close()
+
+    headers = _auth_headers(client)
+    blocked = client.get("/api/v1/workspaces", headers=headers)
+    assert blocked.status_code == 403
+    info = client.get("/api/v1/user/info", headers=headers)
+    assert info.status_code == 200
+    assert info.json()["data"].get("must_change_password") is True
+
+
+def test_bootstrap_password_rejects_weak():
+    from app.security.config import assert_first_admin_password, is_strong_bootstrap_password
+
+    assert not is_strong_bootstrap_password("admin123")
+    assert is_strong_bootstrap_password("NfTest!Admin9xPass!!")
+    try:
+        assert_first_admin_password("admin123")
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError:
+        pass
+
+
+def test_upload_id_rejects_traversal():
+    from app.security.files import FileSecurityError, safe_upload_id
+
+    try:
+        safe_upload_id("../etc/passwd")
+        raise AssertionError("expected FileSecurityError")
+    except FileSecurityError:
+        pass
+    assert safe_upload_id("a" * 32) == "a" * 32

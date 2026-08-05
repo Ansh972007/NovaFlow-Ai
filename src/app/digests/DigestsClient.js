@@ -1279,7 +1279,10 @@ export default function DigestsClient() {
                           <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
                             <p className="text-xs font-semibold text-neutral-800">Channel: {selected.badge}</p>
                             <p className="mt-1 text-[11px] text-neutral-500">
-                              Connectors in Settings → Integrations. Override destination below if needed.
+                              Connectors in Credentials vault. Override destination below if needed.
+                              <Link href="/credentials" className="ml-1 underline">
+                                Manage credentials
+                              </Link>
                             </p>
                           </div>
                           <label className="block">

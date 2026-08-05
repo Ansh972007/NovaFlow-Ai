@@ -20,6 +20,8 @@ from app.security.config import JWT_ALGORITHM, JWT_ISSUER
 from app.security.passwords import hash_password, verify_password  # noqa: F401
 from app.security.tokens import decode_access_token, issue_access_token
 
+import os
+
 RSA_KEY_DIR = DATA_DIR / "keys"
 _keys: Optional[Tuple[rsa.PublicKey, rsa.PrivateKey]] = None
 
@@ -72,7 +74,10 @@ def decrypt_password(encrypted_b64: str) -> str:
 
 
 def _fernet() -> Fernet:
-    key = base64.urlsafe_b64encode(hashlib.sha256(JWT_SECRET.encode()).digest())
+    """Prefer NOVAFLOW_VAULT_KEY; fall back to JWT-derived key for compatibility."""
+    vault = (os.getenv("NOVAFLOW_VAULT_KEY") or "").strip()
+    material = vault if vault else (JWT_SECRET or "")
+    key = base64.urlsafe_b64encode(hashlib.sha256(material.encode()).digest())
     return Fernet(key)
 
 

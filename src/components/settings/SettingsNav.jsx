@@ -43,8 +43,6 @@ const ICONS = {
 export const SETTINGS_TABS = [
   { id: "overview", label: "Overview", icon: "overview" },
   { id: "security", label: "Security", icon: "security" },
-  { id: "models", label: "AI Providers", icon: "models", adminOnly: true },
-  { id: "integrations", label: "Integrations", icon: "integrations", adminOnly: true },
   { id: "team", label: "Team", icon: "team", adminOnly: true },
 ];
 

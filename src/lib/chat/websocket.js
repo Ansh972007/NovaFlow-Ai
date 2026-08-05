@@ -18,7 +18,7 @@ function buildInitPayload(app, chatId) {
   };
 }
 
-function buildSendPayload(app, chatId, message, history = []) {
+function buildSendPayload(app, chatId, message, history = [], options = {}) {
   const prior = (history || [])
     .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
     .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) }))
@@ -30,6 +30,8 @@ function buildSendPayload(app, chatId, message, history = []) {
       chatHistory: prior,
       flow_id: app.id,
       chat_id: chatId,
+      conversation_id: options.conversationId || "",
+      attachment_ids: options.attachmentIds || [],
       name: app.name,
       description: app.description || app.desc || "",
       inputs: {
@@ -43,6 +45,8 @@ function buildSendPayload(app, chatId, message, history = []) {
     chat_id: chatId,
     flow_id: app.id,
     chatHistory: prior,
+    conversation_id: options.conversationId || "",
+    attachment_ids: options.attachmentIds || [],
     data: {
       dialog_input: {
         data: { user_input: message },
@@ -142,6 +146,14 @@ export class AssistantChatSocket {
   }
 
   handleMessage(data) {
+    if (data.type === "conversation") {
+      this.handlers.onConversation?.(data.conversation_id);
+      return;
+    }
+    if (String(data.type || "").startsWith("aios_")) {
+      this.handlers.onAiosEvent?.(data);
+      return;
+    }
     if (data.category === "error" || data.type === "error") {
       this.handlers.onError?.(parseError(data));
       this.handlers.onDone?.();
@@ -183,11 +195,11 @@ export class AssistantChatSocket {
     }
   }
 
-  sendMessage(text, history = []) {
+  sendMessage(text, history = [], options = {}) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected");
     }
-    this.ws.send(JSON.stringify(buildSendPayload(this.app, this.chatId, text, history)));
+    this.ws.send(JSON.stringify(buildSendPayload(this.app, this.chatId, text, history, options)));
   }
 
   stop() {

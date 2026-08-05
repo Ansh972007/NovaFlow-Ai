@@ -52,10 +52,10 @@ function buildPulseCards(workspacePulse) {
       extra: `Jira ${workspacePulse.integrations?.jira_ready ? "on" : "off"} · GitHub ${workspacePulse.integrations?.github_ready ? "on" : "off"}`,
     },
     {
-      href: "/digests",
-      label: "Digests",
+      href: "/credentials",
+      label: "Credentials",
       value: String(workspacePulse.schedules),
-      hint: `${workspacePulse.schedulesEnabled} enabled schedules`,
+      hint: `${workspacePulse.schedulesEnabled} digest schedules · vault for keys`,
     },
     {
       href: "/projects",
@@ -212,7 +212,7 @@ export default function DashboardPage() {
                 Open Chat
                 <span className="transition-transform group-hover:translate-x-1">→</span>
               </Link>
-              <Link href="/apps" className="btn-secondary">
+              <Link href="/projects?tab=assistants" className="btn-secondary">
                 Manage apps
               </Link>
             </>

@@ -25,5 +25,9 @@
 - [ ] Logout invalidates refresh (reuse fails)
 - [ ] `web_fetch` to 169.254.169.254 blocked
 - [ ] Login rate limit returns 429 after burst
-- [ ] `/health` reports `"security": "enterprise-v1"`
+- [ ] Public `/health` returns only status/version (no DB SQL/hosts)
+- [ ] `/health/detail` requires admin auth
+- [ ] First login forces password change when `must_change_password`
+- [ ] Public registration disabled in production unless `ALLOW_PUBLIC_REGISTER=1`
+- [ ] No `admin123` / real SMTP defaults in repo (`rg admin123` / real mailbox)
 - [ ] Non-root container user confirmed (`novaflow`)

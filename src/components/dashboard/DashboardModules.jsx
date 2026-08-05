@@ -31,22 +31,6 @@ export const DASHBOARD_MODULES = [
     ),
   },
   {
-    href: "/apps",
-    label: "Apps",
-    desc: "Create, publish, and manage assistants",
-    category: "converse",
-    featured: true,
-    accent: "from-neutral-800 to-neutral-500",
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <rect x="14" y="14" width="7" height="7" rx="1.5" />
-      </svg>
-    ),
-  },
-  {
     href: "/knowledge",
     label: "Knowledge",
     desc: "Upload docs and power RAG answers",
@@ -75,8 +59,9 @@ export const DASHBOARD_MODULES = [
   {
     href: "/projects",
     label: "Projects",
-    desc: "Telegram, email & workflow project hub",
+    desc: "Hubs, workflows, and chat assistants",
     category: "build",
+    featured: true,
     accent: "from-sky-800 to-sky-500",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
@@ -114,30 +99,15 @@ export const DASHBOARD_MODULES = [
     ),
   },
   {
-    href: "/digests",
-    label: "Digests",
-    desc: "Schedules, cron digests & run-now ops",
+    href: "/credentials",
+    label: "Credentials",
+    desc: "API keys, Gmail, Telegram & secrets vault",
     category: "automate",
     accent: "from-cyan-800 to-cyan-500",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7v5l3 2" />
-      </svg>
-    ),
-  },
-  {
-    href: "/agents",
-    label: "Agents",
-    desc: "Run tool-augmented agents standalone",
-    category: "automate",
-    accent: "from-violet-800 to-violet-500",
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-        <rect x="4" y="8" width="16" height="12" rx="2" />
-        <path d="M9 8V6a3 3 0 0 1 6 0v2" />
-        <circle cx="9" cy="13" r="1" fill="currentColor" />
-        <circle cx="15" cy="13" r="1" fill="currentColor" />
+        <circle cx="8" cy="12" r="3" />
+        <path d="M11 12h9M17 12v3M20 12v2" />
       </svg>
     ),
   },

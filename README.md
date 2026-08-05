@@ -33,7 +33,7 @@ Or use the helper script (waits until web + API are ready):
 |---------|-----|
 | Web UI | **http://localhost:3000** |
 | API | **http://localhost:3001** |
-| Login | **admin** / **admin123** |
+| Login | Set `NOVAFLOW_ADMIN_PASSWORD` (≥16 chars) before first boot |
 
 Stop: `docker compose down`
 
@@ -56,7 +56,7 @@ cd novaflow-ai
 .\deploy\start-backend.ps1
 ```
 
-API: **http://localhost:3001** · default login **admin** / **admin123**
+API: **http://localhost:3001** · set `NOVAFLOW_ADMIN_PASSWORD` before first boot
 
 ### 2. Frontend (local)
 

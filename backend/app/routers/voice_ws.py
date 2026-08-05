@@ -63,6 +63,9 @@ async def voice_stream_ws(websocket: WebSocket):
                 if not transcript.strip():
                     continue
 
+                from app.voice.service import polish_transcript
+
+                transcript = polish_transcript(transcript) or transcript
                 await websocket.send_json({"type": "transcript", "text": transcript})
 
                 # 2. Classify intent
@@ -96,6 +99,23 @@ async def voice_stream_ws(websocket: WebSocket):
                             "type": "execution_status",
                             "status": "triggered",
                             "message": f"Workflow {intent.target} execution started",
+                        }
+                    )
+                elif intent.action == "suggest":
+                    await websocket.send_json(
+                        {
+                            "type": "execution_status",
+                            "status": "command",
+                            "message": intent.params.get("phrase") or intent.target,
+                        }
+                    )
+                elif intent.action == "navigate":
+                    await websocket.send_json(
+                        {
+                            "type": "execution_status",
+                            "status": "navigate",
+                            "message": f"Navigate to {intent.target}",
+                            "target": intent.target,
                         }
                     )
             elif "text" in message:

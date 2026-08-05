@@ -1,15 +1,10 @@
-import dynamic from "next/dynamic";
-import WorkspacePageLoading from "@/components/WorkspacePageLoading";
-
-const DigestsClient = dynamic(() => import("./DigestsClient"), {
-  loading: () => <WorkspacePageLoading message="Loading digests…" />,
-});
+import { redirect } from "next/navigation";
 
 export const metadata = {
-  title: "Digests & Schedules — NovaFlow AI",
-  description: "Workspace cron schedules and digest workflows",
+  title: "Credentials — NovaFlow AI",
+  description: "Digests moved to Workflows; secrets live in Credentials",
 };
 
-export default function DigestsPage() {
-  return <DigestsClient />;
+export default function DigestsRedirectPage() {
+  redirect("/credentials");
 }

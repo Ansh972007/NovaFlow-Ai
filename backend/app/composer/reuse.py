@@ -4,17 +4,26 @@ from app.database import UniversalAsset, WorkflowFragment
 from app.services.workflow import TEMPLATES
 
 def find_reusable_template(goal: str) -> dict | None:
-    """Scan the built-in system templates to see if the goal matches a pre-designed pattern."""
-    goal_lower = goal.lower()
+    """Scan built-in templates for an intentional match (not bare substring of tid)."""
+    goal_lower = (goal or "").lower()
     for tid, tpl in TEMPLATES.items():
-        # Check title, description, or keys
-        if tid in goal_lower or tpl.get("name", "").lower() in goal_lower:
+        name = (tpl.get("name") or "").lower()
+        # Require whole-word / phrase match on template name or explicit "use template X"
+        if name and name in goal_lower:
             return {
                 "id": tid,
                 "name": tpl.get("name"),
                 "desc": tpl.get("desc"),
                 "graph": tpl.get("graph"),
-                "type": "system_template"
+                "type": "system_template",
+            }
+        if f"template {tid}" in goal_lower or f"use {tid}" in goal_lower:
+            return {
+                "id": tid,
+                "name": tpl.get("name"),
+                "desc": tpl.get("desc"),
+                "graph": tpl.get("graph"),
+                "type": "system_template",
             }
     return None
 

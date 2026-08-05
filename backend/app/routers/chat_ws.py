@@ -1,11 +1,13 @@
 import asyncio
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
+from app.config import UPLOAD_DIR
 from app.crypto import decode_token
-from app.database import Assistant, SessionLocal, User, Workflow
+from app.database import Assistant, ConversationAttachment, SessionLocal, User, Workflow
 from app.deps import effective_role
 from app.services.tenancy import ensure_personal_workspace, get_membership
 from app.services.knowledge import rag_hits_for_assistant
@@ -110,6 +112,41 @@ def _parse_chat_history(payload: dict) -> list[dict]:
     return out
 
 
+def _parse_attachment_ids(payload: dict) -> list[str]:
+    raw = payload.get("attachment_ids") or payload.get("attachmentIds") or []
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if str(x or "").strip()][:20]
+
+
+def _attachment_texts(db: Session, *, workspace_id: int, attachment_ids: list[str]) -> list[str]:
+    if not attachment_ids:
+        return []
+    rows = (
+        db.query(ConversationAttachment)
+        .filter(
+            ConversationAttachment.workspace_id == workspace_id,
+            ConversationAttachment.id.in_(attachment_ids),
+            ConversationAttachment.deleted_at.is_(None),
+        )
+        .all()
+    )
+    texts: list[str] = []
+    for row in rows:
+        if not row.storage_key:
+            continue
+        p = UPLOAD_DIR / Path(row.storage_key)
+        sidecar = p.with_suffix(p.suffix + ".txt")
+        if sidecar.exists():
+            try:
+                txt = sidecar.read_text(encoding="utf-8", errors="ignore").strip()
+                if txt:
+                    texts.append(f"[Attachment: {row.file_name}]\n{txt[:8000]}")
+            except Exception:
+                pass
+    return texts[:6]
+
+
 async def _stream_reply(
     websocket: WebSocket,
     db: Session,
@@ -125,6 +162,7 @@ async def _stream_reply(
     *,
     assistant_id: str = "",
     rag_query: str | None = None,
+    attachment_ids: list[str] | None = None,
 ):
     from app.runtime.context import RuntimeContext
     from app.runtime.pipeline import AIRuntime, ChatRequest
@@ -195,6 +233,17 @@ async def _stream_reply(
         usage=usage_out,
         stopped=stopped,
     )
+    try:
+        from app.composer.chat_powerhouse import accumulate_receipt
+
+        accumulate_receipt(
+            db,
+            conversation_id=(receipt_extra or {}).get("conversation_id"),
+            usage=usage_out,
+            model=str(receipt.get("model") or ""),
+        )
+    except Exception:
+        pass
     await websocket.send_json({"type": "end", "message": {"content": buffer}, "receipt": receipt})
     await websocket.send_json({"type": "close"})
     meta = {"chars": len(buffer), "stopped": stopped, "trace_id": ctx.trace_id}
@@ -224,6 +273,7 @@ async def _stream_reply(
             rag_hits=rag_hits,
             trace_id=ctx.trace_id,
             event_type=event_type,
+            attachment_ids=attachment_ids or [],
         )
         await websocket.send_json({"type": "conversation", "conversation_id": conv_meta.get("conversation_id")})
     except Exception:
@@ -284,6 +334,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
 
             query = str(user_msg).strip()
             history = _parse_chat_history(payload)
+            attachment_ids = _parse_attachment_ids(payload)
             conversation_id = payload.get("conversation_id") or websocket.query_params.get("conversation_id")
             if conversation_id and not history:
                 try:
@@ -301,6 +352,59 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     rag_query = f"{' '.join(prev_users[-1:])} {query}".strip()
             rag_hits = rag_hits_for_assistant(db, assistant_id, rag_query)
             system_prompt = assistant.prompt
+            attachment_context = _attachment_texts(db, workspace_id=wid, attachment_ids=attachment_ids)
+            if attachment_context:
+                query = query + "\n\nAttached context:\n" + "\n\n".join(attachment_context)
+
+            try:
+                from app.composer.chat_bridge import process_chat_turn
+
+                bridge = await process_chat_turn(
+                    db,
+                    workspace_id=wid,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    user_message=str(user_msg).strip(),
+                    workspace_role=role,
+                )
+            except Exception:
+                bridge = {"events": [], "blocked_normal_reply": False}
+
+            for ev in (bridge.get("ui_events") or bridge.get("events") or []):
+                # Send only UI card(s) — typically one primary event
+                await websocket.send_json(ev)
+                # Stop after first card for blocked AIOS (one reply unit)
+                if bridge.get("blocked_normal_reply"):
+                    break
+            if bridge.get("blocked_normal_reply"):
+                summary = (bridge.get("summary") or "").strip()
+                if not summary:
+                    summary = "Done — use the buttons on the card."
+                await websocket.send_json(
+                    {"type": "end", "message": {"content": summary}, "receipt": {"event_type": "aios"}}
+                )
+                try:
+                    from app.conversation.integration import persist_chat_turn
+
+                    conv_meta = persist_chat_turn(
+                        db,
+                        workspace_id=wid,
+                        user_id=user_id,
+                        organization_id=None,
+                        assistant_id=assistant_id,
+                        user_message=(bridge.get("redacted_message") or str(user_msg)).strip(),
+                        assistant_message=summary,
+                        conversation_id=conversation_id,
+                        attachment_ids=attachment_ids,
+                        event_type="chat",
+                    )
+                    await websocket.send_json(
+                        {"type": "conversation", "conversation_id": conv_meta.get("conversation_id")}
+                    )
+                except Exception:
+                    pass
+                await websocket.send_json({"type": "close"})
+                continue
 
             cancel_event = asyncio.Event()
 
@@ -335,6 +439,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     history=history,
                     assistant_id=assistant_id,
                     rag_query=rag_query,
+                    attachment_ids=attachment_ids,
                 )
             finally:
                 cancel_event.set()

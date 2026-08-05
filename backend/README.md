@@ -9,7 +9,7 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --port 3001
 ```
 
-Default user: **admin** / **admin123**
+First admin: set **NOVAFLOW_ADMIN_USER** / **NOVAFLOW_ADMIN_PASSWORD** (required on empty DB)
 
 ## Docker (MySQL + Redis + Milvus)
 

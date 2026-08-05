@@ -15,7 +15,7 @@ const highlights = [
 
 const steps = [
   { n: "01", title: "Connect", desc: "Link docs, APIs & tools" },
-  { n: "02", title: "Configure", desc: "Build agents & workflows" },
+  { n: "02", title: "Configure", desc: "Design automated workflows" },
   { n: "03", title: "Deploy", desc: "Ship to your team instantly" },
 ];
 

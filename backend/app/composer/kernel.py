@@ -60,7 +60,7 @@ def create_project_goal(
 ):
     """Submit a business goal to compose a new project and solution graph blueprint."""
     if not body.goal.strip():
-        return fail("Goal cannot be empty.")
+        return fail(400, "Goal cannot be empty.")
     
     result = compile_solution_blueprint(db, ctx.workspace_id, body.goal)
     return ok(result)
@@ -152,7 +152,7 @@ def run_project_deploy(
     from app.composer.deployment import deploy_solution_graph
     from app.composer.governance import log_soc2_audit_event
 
-    report = deploy_solution_graph(db, ctx.workspace_id, solution.id)
+    report = deploy_solution_graph(db, ctx.workspace_id, solution.id, user_id=ctx.user.user_id)
     log_soc2_audit_event(
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.user_id,

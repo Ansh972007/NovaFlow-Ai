@@ -64,6 +64,23 @@ def get_current_user(
     user = db.get(User, int(payload["sub"]))
     if not user or user.delete:
         raise HTTPException(status_code=401, detail="User not found")
+
+    # Bootstrap / weak-password gate: only password change + session basics
+    if int(getattr(user, "must_change_password", 0) or 0) == 1:
+        path = (request.url.path or "").rstrip("/")
+        allowed_suffixes = (
+            "/user/password",
+            "/user/info",
+            "/user/logout",
+            "/user/logout_all",
+            "/user/public_key",
+        )
+        if not any(path.endswith(s) for s in allowed_suffixes):
+            raise HTTPException(
+                status_code=403,
+                detail="Password change required before continuing",
+                headers={"X-Must-Change-Password": "1"},
+            )
     return user
 
 

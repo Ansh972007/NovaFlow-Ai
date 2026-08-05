@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env & secrets — never commit real credentials
 .env
+.env.*
+!.env.example
+!.env*.example
 .env.local
 .env.development.local
 .env.test.local
@@ -39,6 +42,13 @@ yarn-error.log*
 .env.*.local
 deploy/.env.production
 !.env.example
+
+# DB dumps / backups
+*.sql
+*.dump
+*.sqlite3
+*.bak
+*.db-journal
 
 # private / internal APIs (do not publish)
 private/
@@ -61,3 +71,51 @@ __pycache__/
 backend/data/
 /data/
 *.db
+
+# =============================================================================
+# Dev / runtime generated (Cursor + disk hygiene) — do not track
+# =============================================================================
+
+# Python virtualenvs
+.venv/
+venv/
+env/
+backend/.venv/
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.turbo/
+.cache/
+*.cache
+
+# Logs & temp
+logs/
+tmp/
+temp/
+*.log
+
+# Runtime uploads / artifacts
+uploads/
+storage/
+artifacts/
+screenshots/
+test-results/
+playwright-report/
+
+# Local docker / DB volume mounts (if present on host)
+docker-data/
+mysql-data/
+redis-data/
+milvus-data/
+volumes/
+
+# Backend local data already partially covered; keep explicit
+backend/.venv/
+backend/**/__pycache__/
+
+# OS / IDE
+.idea/
+.vscode/
+Thumbs.db

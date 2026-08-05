@@ -122,7 +122,7 @@ export default function AssistantDetailClient({ assistantId }) {
     if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
     try {
       await deleteAssistant(assistantId);
-      router.push("/apps");
+      router.push("/projects?tab=assistants");
     } catch (err) {
       setError(err.message);
     }
@@ -141,7 +141,7 @@ export default function AssistantDetailClient({ assistantId }) {
         <AppHeader user={user} />
 
         <main className="workspace-page-main mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-12">
-          <WorkspaceBackLink href="/apps">All assistants</WorkspaceBackLink>
+          <WorkspaceBackLink href="/projects?tab=assistants">All assistants</WorkspaceBackLink>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}

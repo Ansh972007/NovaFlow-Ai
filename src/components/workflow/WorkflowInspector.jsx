@@ -1,13 +1,56 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { NODE_META } from "./WorkflowCanvas";
 import WorkflowTelegramPanel from "./WorkflowTelegramPanel";
 import WorkflowSlackPanel from "./WorkflowSlackPanel";
 import { getWorkflowRun } from "@/lib/api/workflows";
+import { listCredentials } from "@/lib/api/credentials";
 
 const ease = [0.16, 1, 0.3, 1];
+
+function NotifyCredentialSelect({ selected, onUpdateNode, readOnly }) {
+  const [opts, setOpts] = useState([]);
+  useEffect(() => {
+    listCredentials()
+      .then((rows) => setOpts(Array.isArray(rows) ? rows : []))
+      .catch(() => setOpts([]));
+  }, []);
+  const channel = selected.data?.channel || "telegram";
+  const filtered = opts.filter((e) => {
+    if (channel === "telegram") return e.category === "telegram";
+    if (channel === "email") return e.category === "email";
+    if (channel === "slack") return e.category === "slack";
+    if (channel === "discord") return e.category === "discord";
+    return true;
+  });
+  return (
+    <label className="mt-4 block">
+      <span className="text-xs font-semibold text-neutral-600">Credential (vault)</span>
+      <select
+        value={selected.data?.credential_id || ""}
+        onChange={(e) => onUpdateNode(selected.id, { data: { credential_id: e.target.value } })}
+        disabled={readOnly}
+        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+      >
+        <option value="">Default for this channel</option>
+        {filtered.map((e) => (
+          <option key={e.id} value={e.id}>
+            {e.label} ({e.kind}){e.is_default ? " · default" : ""}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1 text-[11px] text-neutral-400">
+        Manage named accounts in{" "}
+        <a href="/credentials" className="underline">
+          Credentials
+        </a>
+        .
+      </p>
+    </label>
+  );
+}
 
 export default function WorkflowInspector({
   tab,
@@ -502,6 +545,7 @@ export default function WorkflowInspector({
                           className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
                         />
                       </label>
+                      <NotifyCredentialSelect selected={selected} onUpdateNode={onUpdateNode} readOnly={readOnly} />
                       {selected.data?.channel === "telegram" && (
                         <label className="mt-4 block">
                           <span className="text-xs font-semibold text-neutral-600">Bot token (optional)</span>
@@ -510,7 +554,7 @@ export default function WorkflowInspector({
                             onChange={(e) => onUpdateNode(selected.id, { data: { bot_token: e.target.value } })}
                             disabled={readOnly}
                             className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                            placeholder="Uses workspace bot token from Settings if empty"
+                            placeholder="Uses Credentials vault default if empty"
                           />
                         </label>
                       )}
@@ -586,7 +630,7 @@ export default function WorkflowInspector({
                         />
                       </label>
                       <p className="mt-3 text-[11px] text-neutral-500">
-                        Uses Jira credentials from Settings → Integrations.
+                        Uses Jira credentials from Credentials vault.
                       </p>
                     </>
                   )}

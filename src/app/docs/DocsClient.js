@@ -1146,7 +1146,7 @@ const QUICK_START = [
   { n: "01", text: "Start API", code: ".\\deploy\\start-backend.ps1" },
   { n: "02", text: "Configure env", code: "cp .env.example .env.local" },
   { n: "03", text: "Run frontend", code: "npm run dev" },
-  { n: "04", text: "Login", link: "/login", label: "admin / admin123 (local)" },
+  { n: "04", text: "Login", link: "/login", label: "Set NOVAFLOW_ADMIN_PASSWORD first" },
   { n: "05", text: "Verify", code: "npm run verify" },
 ];
 

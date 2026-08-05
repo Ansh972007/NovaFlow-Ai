@@ -43,11 +43,41 @@ export default function ChatPageClient() {
 
   const chatKey = `${selectedApp?.id || "none"}-${sessionId || "none"}`;
 
-  const { messages, streaming, error, sendMessage, stop, regenerate, setError } = useAssistantChat({
+  const { messages, streaming, error, sendMessage, stop, regenerate, setError, ensureConversation } =
+    useAssistantChat({
     app: selectedApp,
     sessionId,
     initialMessages,
-  });
+    });
+
+  const composerPending = useMemo(
+    () =>
+      messages.some((m) => {
+        const t = m?.event?.type || "";
+        if (!t.startsWith("aios_")) return false;
+        if (t === "aios_deploy" && m?.event?.data?.workflow_id) return false;
+        if (t === "aios_cancelled") return false;
+        return true;
+      }) &&
+      !messages.some((m) => m?.event?.type === "aios_deploy" && m?.event?.data?.workflow_id),
+    [messages],
+  );
+
+  const handleVoiceCommand = useCallback(
+    (cmd) => {
+      if (!cmd?.action) return false;
+      if (cmd.action === "navigate" && cmd.path) {
+        router.push(cmd.path);
+        return true;
+      }
+      if (cmd.action === "suggest" && cmd.phrase) {
+        sendMessage(cmd.phrase);
+        return true;
+      }
+      return false;
+    },
+    [router, sendMessage],
+  );
 
   const loadApps = useCallback(async () => {
     setLoadingApps(true);
@@ -175,7 +205,11 @@ export default function ChatPageClient() {
     startNewChat();
   };
 
-  const headerTitle = useMemo(() => selectedApp?.name || "Chat", [selectedApp]);
+  const headerTitle = useMemo(() => selectedApp?.name || "Build", [selectedApp]);
+  const hasAiosSession = useMemo(
+    () => messages.some((m) => m?.event?.type?.startsWith?.("aios_")),
+    [messages]
+  );
 
   function exportTranscript() {
     if (!messages?.length) return;
@@ -184,7 +218,7 @@ export default function ChatPageClient() {
     const blob = new Blob([md], { type: "text/markdown" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `novaflow-chat-${sessionId || "session"}.md`;
+    a.download = `novaflow-build-${sessionId || "session"}.md`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -237,9 +271,14 @@ export default function ChatPageClient() {
                     <h1 className="truncate text-sm font-semibold tracking-tight text-neutral-900 sm:text-base">
                       {headerTitle}
                     </h1>
+                    {hasAiosSession && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200/80 bg-indigo-50/90 px-2.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                        AIOS
+                      </span>
+                    )}
                     {ragCount > 0 && (
                       <Link
-                        href={selectedApp ? `/apps/${selectedApp.id}` : "/apps"}
+                        href={selectedApp ? `/projects/assistants/${selectedApp.id}` : "/projects?tab=assistants"}
                         className="workspace-badge-live shrink-0"
                         title="Knowledge bases linked for RAG"
                       >
@@ -254,7 +293,7 @@ export default function ChatPageClient() {
                     )}
                   </div>
                   <p className="mt-0.5 truncate text-xs text-neutral-500">
-                    {messages.length ? `${messages.length} messages` : "Start a new conversation"}
+                    {messages.length ? `${messages.length} messages` : "Start a new build session"}
                   </p>
                 </div>
               </div>
@@ -266,7 +305,7 @@ export default function ChatPageClient() {
                   disabled={loadingApps || !apps.length}
                   className="hidden rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-neutral-50 disabled:opacity-40 sm:inline-flex"
                 >
-                  + New chat
+                  + New build
                 </button>
                 {messages.length > 0 && (
                   <button
@@ -279,7 +318,7 @@ export default function ChatPageClient() {
                 )}
                 {selectedApp && (
                   <Link
-                    href={`/apps/${selectedApp.id}`}
+                    href={`/projects/assistants/${selectedApp.id}`}
                     className="rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-600 shadow-sm transition-colors hover:bg-neutral-50 hover:text-neutral-900"
                   >
                     Configure
@@ -297,13 +336,13 @@ export default function ChatPageClient() {
                       NF
                     </div>
                   </div>
-                  <p className="text-xl font-semibold tracking-tight text-neutral-900">No assistant connected</p>
+                  <p className="text-xl font-semibold tracking-tight text-neutral-900">No composer interface connected</p>
                   <p className="mt-2 text-sm leading-relaxed text-neutral-500">
-                    Publish an assistant in Apps, then return here to chat.
+                    Publish an assistant in Projects, then return here to build.
                   </p>
                   <div className="mt-6 flex flex-wrap justify-center gap-2">
-                    <Link href="/apps" className="btn-primary !py-2.5 !text-sm">
-                      Go to Apps
+                    <Link href="/projects?tab=assistants" className="btn-primary !py-2.5 !text-sm">
+                      Go to Projects
                     </Link>
                     <button
                       type="button"
@@ -332,6 +371,9 @@ export default function ChatPageClient() {
                   onStop={stop}
                   disabled={!selectedApp || streaming}
                   streaming={streaming}
+                  ensureConversation={ensureConversation}
+                  composerPending={composerPending}
+                  onVoiceCommand={handleVoiceCommand}
                 />
               </div>
             )}

@@ -40,7 +40,7 @@ const fadeUp = {
 const stats = [
   { value: "161", suffix: "", label: "Automated test suites passed" },
   { value: "114", suffix: "", label: "Production workflow templates" },
-  { value: "11", suffix: "", label: "Specialized enterprise agent roles" },
+  { value: "11", suffix: "", label: "First-class AI integrations" },
   { value: "2", suffix: "sec", label: "Average page SLA loading time" },
 ];
 
@@ -52,7 +52,7 @@ const testimonials = [
     avatar: "IC",
   },
   {
-    quote: "Validated 100+ workflow templates and 11 agent templates under 1,000 concurrent runs. Performance meets critical SLA thresholds.",
+    quote: "Validated 100+ workflow templates and 11 solution templates under 1,000 concurrent runs. Performance meets critical SLA thresholds.",
     author: "Apex UAT Group",
     role: "Lead Performance Architect",
     avatar: "AP",

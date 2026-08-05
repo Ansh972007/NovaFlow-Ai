@@ -508,10 +508,10 @@ export default function MarketplaceClient() {
                 transition={{ delay: 0.4, ease }}
                 className="rounded-2xl border border-dashed border-black/10 bg-white/40 p-5 text-sm text-neutral-500"
               >
-                <p className="font-semibold text-neutral-800">Need agents too?</p>
-                <p className="mt-1">Combine marketplace workflows with tool-augmented agents.</p>
-                <Link href="/agents" className="mt-3 inline-block text-xs font-semibold hover:underline">
-                  Open agents →
+                <p className="font-semibold text-neutral-800">Need custom workflows?</p>
+                <p className="mt-1">Combine marketplace presets with custom automated pipelines.</p>
+                <Link href="/workflows" className="mt-3 inline-block text-xs font-semibold hover:underline">
+                  Open workflows →
                 </Link>
               </motion.div>
             </aside>

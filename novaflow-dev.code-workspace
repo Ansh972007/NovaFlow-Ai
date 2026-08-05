@@ -1,0 +1,33 @@
+{
+  "folders": [
+    { "path": "src", "name": "frontend" },
+    { "path": "backend/app", "name": "backend" },
+    { "path": "docs", "name": "docs" },
+    { "path": ".", "name": "repo-root" }
+  ],
+  "settings": {
+    "files.watcherExclude": {
+      "**/.next/**": true,
+      "**/node_modules/**": true,
+      "**/.venv/**": true,
+      "**/venv/**": true,
+      "**/__pycache__/**": true,
+      "**/coverage/**": true,
+      "**/.git/objects/**": true
+    },
+    "search.exclude": {
+      "**/.next": true,
+      "**/node_modules": true,
+      "**/.venv": true,
+      "**/venv": true,
+      "**/__pycache__": true,
+      "**/coverage": true,
+      "**/*.glb": true
+    },
+    "files.exclude": {
+      "**/.next": true,
+      "**/node_modules": true,
+      "**/.venv": true
+    }
+  }
+}

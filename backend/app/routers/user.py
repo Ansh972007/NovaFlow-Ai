@@ -87,6 +87,7 @@ def user_read(user: User, access_token: str | None = None, **extra) -> dict:
         "email": user.email,
         "delete": user.delete,
         "role": user.role or ("admin" if user.user_id == 1 else "editor"),
+        "must_change_password": bool(getattr(user, "must_change_password", 0)),
         "access_token": access_token,
         "create_time": user.create_time.isoformat() if user.create_time else None,
         "update_time": user.update_time.isoformat() if user.update_time else None,
@@ -127,6 +128,11 @@ def ldap_auth_status():
 
 @router.post("/user/regist")
 def register(body: UserCreate, request: Request, db: Session = Depends(get_db)):
+    from app.config import ALLOW_PUBLIC_REGISTER
+    from app.security.config import IS_PRODUCTION
+
+    if IS_PRODUCTION and not ALLOW_PUBLIC_REGISTER:
+        return fail(403, "Public registration is disabled. Ask an admin for an invite.")
     if db.query(User).filter(User.user_name == body.user_name).first():
         return fail(500, "Username already exists")
     try:
@@ -145,6 +151,7 @@ def register(body: UserCreate, request: Request, db: Session = Depends(get_db)):
         # contact email too, so password-reset emails work for new accounts.
         email=_normalise_email(body.user_name) if "@" in body.user_name else None,
         password_changed_at=datetime.utcnow(),
+        must_change_password=0,
         role="editor",
     )
     db.add(user)
@@ -199,6 +206,15 @@ def login(body: UserLogin, request: Request, db: Session = Depends(get_db)):
         user.password = hash_password(plain_pwd)
         user.password_changed_at = user.password_changed_at or datetime.utcnow()
         db.add(PasswordHistory(user_id=user.user_id, password_hash=user.password))
+        db.commit()
+
+    # Force password change for known-weak / bootstrap passwords
+    from app.security.config import WEAK_ADMIN_PASSWORDS
+
+    if plain_pwd.strip().lower() in WEAK_ADMIN_PASSWORDS or (
+        getattr(user, "must_change_password", 0) and not user.password_changed_at
+    ):
+        user.must_change_password = 1
         db.commit()
 
     audit_log(db, action="auth.login", actor_user_id=user.user_id, ip=ip, user_agent=ua)
@@ -256,10 +272,10 @@ def request_password_reset(
         ip=ip,
         user_agent=request.headers.get("user-agent", ""),
     )
-    from app.services.integrations import send_email_notification
+    from app.services.platform_mail import send_platform_email_sync
 
     background_tasks.add_task(
-        send_email_notification,
+        send_platform_email_sync,
         email,
         "Your NovaFlow AI password reset code",
         _password_reset_email(code),
@@ -428,9 +444,10 @@ def change_password(
 
     user.password = hash_password(plain_new.strip())
     user.password_changed_at = datetime.utcnow()
+    user.must_change_password = 0
     user.update_time = datetime.utcnow()
     db.add(PasswordHistory(user_id=user.user_id, password_hash=user.password))
     db.commit()
     revoke_all_user_sessions(db, user.user_id, reason="password_change")
     audit_log(db, action="auth.password_change", actor_user_id=user.user_id, ip=client_ip(request))
-    return ok(None)
+    return ok({"must_change_password": False})

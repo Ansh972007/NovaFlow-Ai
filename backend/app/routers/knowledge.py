@@ -414,8 +414,10 @@ def init_chunked_upload(
         return fail(400, str(exc))
 
     import uuid
-    upload_id = uuid.uuid4().hex
-    temp_dir = UPLOAD_DIR / "temp" / upload_id
+    from app.security.files import safe_subdir, safe_upload_id
+
+    upload_id = safe_upload_id(uuid.uuid4().hex)
+    temp_dir = safe_subdir(UPLOAD_DIR, "temp", upload_id)
     temp_dir.mkdir(parents=True, exist_ok=True)
     
     import json
@@ -440,14 +442,20 @@ async def upload_chunk(
     file: UploadFile = File(...),
     ctx=Depends(require_workspace_editor),
 ):
-    temp_dir = UPLOAD_DIR / "temp" / upload_id
+    from app.security.files import FileSecurityError, safe_subdir, safe_upload_id
+
+    try:
+        uid = safe_upload_id(upload_id)
+        temp_dir = safe_subdir(UPLOAD_DIR, "temp", uid)
+    except FileSecurityError as exc:
+        return fail(400, str(exc))
     if not temp_dir.exists():
         return fail(404, "Upload session not found")
-        
-    chunk_path = temp_dir / f"chunk_{chunk_index}"
+
+    chunk_path = temp_dir / f"chunk_{int(chunk_index)}"
     content = await file.read()
     chunk_path.write_bytes(content)
-    
+
     return ok({"chunk_index": chunk_index, "uploaded": True})
 
 
@@ -457,10 +465,16 @@ def complete_chunked_upload(
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
-    temp_dir = UPLOAD_DIR / "temp" / upload_id
+    from app.security.files import FileSecurityError, safe_subdir, safe_upload_id
+
+    try:
+        uid = safe_upload_id(upload_id)
+        temp_dir = safe_subdir(UPLOAD_DIR, "temp", uid)
+    except FileSecurityError as exc:
+        return fail(400, str(exc))
     if not temp_dir.exists():
         return fail(404, "Upload session not found")
-        
+
     import json
     meta_path = temp_dir / "meta.json"
     if not meta_path.exists():

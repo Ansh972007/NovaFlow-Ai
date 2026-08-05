@@ -58,13 +58,22 @@ services:
     restart: unless-stopped
     environment:
       NOVAFLOW_PORT: "3001"
-      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-novaflow}:${MYSQL_PASSWORD:-novaflow}@mysql:3306/${MYSQL_DATABASE:-novaflow}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:?Set MYSQL_USER}:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-novaflow}
       REDIS_URL: redis://redis:6379/0
+      NOVAFLOW_ENV: production
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in deploy/.env.production}
       DATA_DIR: /app/data
       NOVAFLOW_ADMIN_USER: ${NOVAFLOW_ADMIN_USER:-admin}
       NOVAFLOW_ADMIN_PASSWORD: ${NOVAFLOW_ADMIN_PASSWORD:?Set NOVAFLOW_ADMIN_PASSWORD}
-      NOVAFLOW_DEMO_SEED: ${NOVAFLOW_DEMO_SEED:-0}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-novaflow85@gmail.com}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-whli jwom rrlu spph}
+      SMTP_FROM: ${SMTP_FROM:-novaflow85@gmail.com}
+
+      NOVAFLOW_VAULT_KEY: ${NOVAFLOW_VAULT_KEY:-}
+      NOVAFLOW_DEMO_SEED: "0"
+      ALLOW_PUBLIC_REGISTER: ${ALLOW_PUBLIC_REGISTER:-0}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}

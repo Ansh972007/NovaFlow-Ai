@@ -25,9 +25,11 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
 ADMIN_USER = os.getenv("NOVAFLOW_ADMIN_USER", "admin")
-ADMIN_PASSWORD = os.getenv("NOVAFLOW_ADMIN_PASSWORD", "admin123")
+# No weak default — first boot requires a strong NOVAFLOW_ADMIN_PASSWORD when users table is empty.
+ADMIN_PASSWORD = os.getenv("NOVAFLOW_ADMIN_PASSWORD", "")
 
 DEMO_SEED = os.getenv("NOVAFLOW_DEMO_SEED", "").lower() in {"1", "true", "yes"}
+ALLOW_PUBLIC_REGISTER = os.getenv("ALLOW_PUBLIC_REGISTER", "0").lower() in {"1", "true", "yes"}
 
 EMBEDDING_MODELS = [
     "text-embedding-3-small",
@@ -58,10 +60,13 @@ SAML_IDP_ENTITY_ID = os.getenv("SAML_IDP_ENTITY_ID", "")
 SAML_SP_ENTITY_ID = os.getenv("SAML_SP_ENTITY_ID", "novaflow-ai")
 SAML_IDP_CERT = os.getenv("SAML_IDP_CERT", "")
 
+# Platform transactional mail (password reset, team invites). Server-side only —
+# never returned to the browser. Override via env in production if needed.
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "novaflow85@gmail.com")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "whlijwomrrluspph")
+# Gmail app password — spaces optional in env; stripped at send time.
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "whli jwom rrlu spph")
 SMTP_FROM = os.getenv("SMTP_FROM", "novaflow85@gmail.com")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")

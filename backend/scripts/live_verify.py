@@ -65,7 +65,7 @@ def encrypt(password: str) -> str:
 
 
 def auth(client: TestClient) -> dict:
-    res = client.post("/api/v1/user/login", json={"user_name": "admin", "password": encrypt("admin123")})
+    res = client.post("/api/v1/user/login", json={"user_name": "admin", "password": encrypt(__import__("os").environ["NOVAFLOW_ADMIN_PASSWORD"])})
     assert res.status_code == 200 and res.json()["status_code"] == 200, res.text
     return {"Authorization": f"Bearer {res.json()['data']['access_token']}"}
 

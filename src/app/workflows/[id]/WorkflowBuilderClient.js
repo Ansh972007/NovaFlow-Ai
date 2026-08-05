@@ -43,7 +43,7 @@ const ADD_NODE_DEFAULTS = {
   transform: { template: "{{input}}" },
   condition: { keyword: "", then_text: "{{input}}", else_text: "" },
   http: { url: "", method: "GET", body: "" },
-  notify: { channel: "telegram", to: "{{chat_id}}", subject: "NovaFlow", message: "{{output}}" },
+  notify: { channel: "telegram", to: "{{chat_id}}", subject: "NovaFlow", message: "{{output}}", credential_id: "" },
   jira: {
     action: "create",
     project_key: "NF",

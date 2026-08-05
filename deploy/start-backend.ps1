@@ -43,7 +43,7 @@ while ((Get-Date) -lt $deadline) {
   if (Test-NovaApi) {
     Write-Host ""
     Write-Host "NovaFlow API is online at http://localhost:3001" -ForegroundColor Green
-    Write-Host "Default login: admin / admin123" -ForegroundColor Gray
+    Write-Host "Default login: set NOVAFLOW_ADMIN_PASSWORD" -ForegroundColor Gray
     Write-Host "Frontend:  cd novaflow-ai && npm run dev" -ForegroundColor Gray
     exit 0
   }

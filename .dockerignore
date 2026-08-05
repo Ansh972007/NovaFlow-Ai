@@ -5,5 +5,14 @@ node_modules
 backend
 deploy
 docs
+scripts
 .env.local
 .env*.local
+**/*.sst
+.venv
+coverage
+.pytest_cache
+__pycache__
+.turbo
+*.log
+npm-debug.log*

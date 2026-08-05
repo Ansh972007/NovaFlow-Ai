@@ -282,7 +282,7 @@ export default function SetupClient() {
               </p>
               <div className="mt-8 flex flex-col gap-3">
                 <Link
-                  href={createdAppId ? `/apps/${createdAppId}` : "/apps"}
+                  href={createdAppId ? `/projects/assistants/${createdAppId}` : "/projects?tab=assistants"}
                   className="btn-secondary"
                 >
                   Configure assistant

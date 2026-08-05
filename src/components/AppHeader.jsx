@@ -26,8 +26,8 @@ const NAV_GROUPS = [
       },
       {
         href: "/chat",
-        label: "Chat",
-        desc: "Interactive canvas to talk with models and run queries.",
+        label: "Build",
+        desc: "Autonomous conversational composer. Submit goals and deploy solutions.",
         icon: (
           <svg className="h-5 w-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.083.205.13.431.13.669v.331c0 1.554-1.258 2.846-2.82 2.923-1.63.08-3.232.08-4.86 0-1.562-.077-2.82-1.369-2.82-2.923v-.331c0-.238.047-.464.13-.669a5.13 5.13 0 0 1 9.4 0ZM10.5 18.9h-3a3 3 0 0 1-3-3v-7.5a3 3 0 0 1 3-3h9a3 3 0 0 1 3 3v2.25m-9 8.25h3c.162 0 .32-.015.474-.043a5.127 5.127 0 0 1-1.074-3.157v-.331" />
@@ -60,16 +60,6 @@ const NAV_GROUPS = [
         )
       },
       {
-        href: "/agents",
-        label: "Agents",
-        desc: "Create and program autonomous AI agents.",
-        icon: (
-          <svg className="h-5 w-5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25" />
-          </svg>
-        )
-      },
-      {
         href: "/model-lab",
         label: "Model Lab",
         desc: "Tune models and design system prompts.",
@@ -83,20 +73,10 @@ const NAV_GROUPS = [
       {
         href: "/projects",
         label: "Projects",
-        desc: "Organize files, templates, and evaluations.",
+        desc: "Hubs, workflows, and chat assistants in one place.",
         icon: (
           <svg className="h-5 w-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-19.5 0A2.25 2.25 0 0 0 4.5 15h15a2.25 2.25 0 0 0 2.25-2.25m-19.5 0v.25A2.25 2.25 0 0 0 4.5 17.5h15a2.25 2.25 0 0 0 2.25-2.25v-.25m-19.5 0V9A2.25 2.25 0 0 1 4.5 6.75h5.06a2.25 2.25 0 0 1 1.683.76l1.246 1.494a2.25 2.25 0 0 0 1.683.76h5.328A2.25 2.25 0 0 1 21.75 12v.75m-19.5 0h19.5" />
-          </svg>
-        )
-      },
-      {
-        href: "/apps",
-        label: "Apps",
-        desc: "Configure client interfaces and portals.",
-        icon: (
-          <svg className="h-5 w-5 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3 3m12 6V4.5M15 9h4.5M15 9l6-6m-6 12v4.5M15 15h4.5M15 15l6 6m-6-6v4.5M9 15H4.5M9 15l-6 6" />
           </svg>
         )
       },
@@ -111,19 +91,19 @@ const NAV_GROUPS = [
         )
       },
       {
-        href: "/digests",
-        label: "Digests",
-        desc: "View scheduled report summaries and briefs.",
+        href: "/credentials",
+        label: "Credentials",
+        desc: "API keys, models, Gmail, Telegram, and other secrets.",
         icon: (
           <svg className="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5A3.375 3.375 0 0 0 10.125 2.25H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
           </svg>
         )
       },
       {
         href: "/marketplace",
         label: "Marketplace",
-        desc: "Import community workflows, agents, and prompts.",
+        desc: "Import community workflows and prompt templates.",
         icon: (
           <svg className="h-5 w-5 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349M3.75 21V9.349m0 0a3.001 3.001 0 0 0 3.75-.615 3.001 3.001 0 0 0 5.485.06 3.001 3.001 0 0 0 5.485-.06 3.001 3.001 0 0 0 3.75.615m-18.5 0V4.875C1.25 4.116 1.866 3.5 2.625 3.5h18.75c.759 0 1.375.616 1.375 1.375V9.35" />

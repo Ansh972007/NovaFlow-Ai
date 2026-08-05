@@ -53,15 +53,12 @@ const PRESET_GROUPS = [
     ],
   },
   {
-    id: "agents",
-    label: "Agents & Eval",
-    tagline: "Tools, runs, suites",
+    id: "eval",
+    label: "Evaluation",
+    tagline: "Test suites",
     borderAnim: "pulse",
     innerAnim: "wave",
     presets: [
-      { label: "Saved agents", method: "GET", path: "/agents" },
-      { label: "Agent tools", method: "GET", path: "/agents/tools" },
-      { label: "Run agent", method: "POST", path: "/agents/run", body: '{\n  "input": "Summarize: NovaFlow ships Discord, Linear, Runs, and Slack Events.",\n  "tools": ["summarize", "word_count"]\n}' },
       { label: "Eval suites", method: "GET", path: "/eval/suites" },
     ],
   },

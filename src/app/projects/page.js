@@ -1,4 +1,5 @@
 import dynamic from "next/dynamic";
+import { Suspense } from "react";
 import WorkspacePageLoading from "@/components/WorkspacePageLoading";
 
 const ProjectsClient = dynamic(() => import("./ProjectsClient"), {
@@ -7,9 +8,13 @@ const ProjectsClient = dynamic(() => import("./ProjectsClient"), {
 
 export const metadata = {
   title: "Projects — NovaFlow AI",
-  description: "Map integrations and workflows to dev projects",
+  description: "Projects, integrations, workflows, and chat assistants",
 };
 
 export default function ProjectsPage() {
-  return <ProjectsClient />;
+  return (
+    <Suspense fallback={<WorkspacePageLoading message="Loading projects…" />}>
+      <ProjectsClient />
+    </Suspense>
+  );
 }

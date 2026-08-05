@@ -1,15 +1,17 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR, DEMO_SEED
 from app.crypto import hash_password
 from app.database import SessionLocal, User, init_db
+from app.deps import get_current_user
 from app.routers import (
     analytics,
     api_keys,
+    credentials,
     assistant,
     auth_oauth,
     auth_saml,
@@ -41,6 +43,8 @@ from app.platform_intelligence.tracing.middleware import TraceMiddleware
 from app.schemas import ok
 from app.security.config import (
     CORS_ALLOWED_ORIGINS,
+    IS_PRODUCTION,
+    assert_first_admin_password,
     assert_production_bootstrap_safe,
     require_secure_jwt_secret,
 )
@@ -63,17 +67,27 @@ async def lifespan(_app: FastAPI):
     db = SessionLocal()
     try:
         if db.query(User).count() == 0:
+            assert_first_admin_password(ADMIN_PASSWORD)
             admin = User(
                 user_name=ADMIN_USER,
                 password=hash_password(ADMIN_PASSWORD),
                 role="super_admin",
+                must_change_password=1,
+                password_changed_at=None,
             )
             db.add(admin)
             db.commit()
             db.refresh(admin)
             ensure_personal_workspace(db, admin)
-            print(f"[NovaFlow] Default admin created: {ADMIN_USER}")
+            print(
+                f"[NovaFlow] First admin created: {ADMIN_USER} "
+                "(must change password on next login)"
+            )
         if DEMO_SEED:
+            if IS_PRODUCTION:
+                raise RuntimeError(
+                    "FATAL: NOVAFLOW_DEMO_SEED cannot be enabled in production."
+                )
             seed_demo_data(db)
         load_settings(db)
         ensure_default_provider(db)
@@ -134,6 +148,7 @@ app.include_router(finetune.router, prefix=API_PREFIX)
 app.include_router(model_lab.router, prefix=API_PREFIX)
 app.include_router(projects.router, prefix=API_PREFIX)
 app.include_router(integrations.router, prefix=API_PREFIX)
+app.include_router(credentials.router, prefix=API_PREFIX)
 app.include_router(notifications.router, prefix=API_PREFIX)
 app.include_router(chat_ws.router, prefix=API_PREFIX)
 from app.routers import voice_ws
@@ -142,11 +157,37 @@ app.include_router(voice_ws.router, prefix=API_PREFIX)
 
 @app.get("/health")
 def health():
+    """Public liveness — no hosts, SQL, or internal metrics."""
+    return ok(
+        {
+            "service": "novaflow-api",
+            "status": "ok",
+            "version": "9.9.0",
+        }
+    )
+
+
+@app.get("/health/detail")
+def health_detail(user: User = Depends(get_current_user)):
+    """Authenticated diagnostics for operators (admin / super_admin)."""
+    from fastapi import HTTPException
+
+    from app.deps import effective_role
+
+    role = effective_role(user)
+    if role not in ("admin", "super_admin") and user.user_id != 1:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     from app.data import get_cache, get_engine_info, get_object_storage, get_vector_store
     from app.data.observability import get_db_metrics
 
     try:
         data_info = get_engine_info()
+        # Never expose credentials in health — strip password from URL if present
+        if isinstance(data_info, dict) and data_info.get("url"):
+            url = str(data_info["url"])
+            if "@" in url:
+                data_info = {**data_info, "url": url.split("@", 1)[-1]}
     except Exception:
         data_info = {"dialect": "unknown"}
     try:
@@ -161,6 +202,16 @@ def health():
         cache = get_cache().name
     except Exception:
         cache = "memory"
+    metrics = get_db_metrics()
+    # Drop slow SQL statement text from public-facing diagnostics payload
+    if isinstance(metrics, dict) and metrics.get("slow_queries"):
+        metrics = {
+            **metrics,
+            "slow_queries": [
+                {k: v for k, v in (q or {}).items() if k != "statement"}
+                for q in metrics["slow_queries"]
+            ],
+        }
     return ok(
         {
             "service": "novaflow-api",
@@ -170,18 +221,7 @@ def health():
             "storage_backend": storage,
             "cache_backend": cache,
             "database": data_info,
-            "db_metrics": get_db_metrics(),
-            "security": "enterprise-v1",
-            "platform": "multi-tenant-v2",
-            "data_platform": "enterprise-v1",
-            "ai_runtime": "enterprise-v1",
-            "workflow_intelligence": "enterprise-v1",
-            "platform_intelligence": "enterprise-v1",
-            "conversation_platform": "enterprise-v1",
-            "knowledge_os": "enterprise-v1",
-            "agent_os": "enterprise-v1",
-            "connectivity_platform": "enterprise-v1",
-            "intelligence_autonomy": "enterprise-v1",
+            "db_metrics": metrics,
         }
     )
 

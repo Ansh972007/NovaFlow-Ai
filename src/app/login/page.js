@@ -136,7 +136,11 @@ function LoginForm() {
 
       setGreeting((g) => g + 1);
       await new Promise((resolve) => setTimeout(resolve, 1400));
-      router.push(nextPath);
+      if (data?.must_change_password) {
+        router.push("/settings?tab=security&must_change=1");
+      } else {
+        router.push(nextPath);
+      }
     } catch (err) {
       setError(err.message || "Authentication failed");
     } finally {

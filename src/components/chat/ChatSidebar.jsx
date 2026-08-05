@@ -54,7 +54,7 @@ export default function ChatSidebar({
 
       <div className="px-3 pb-2">
         <p className="px-2 pb-2 text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
-          Assistants
+          Interfaces
         </p>
         {loading ? (
           <div className="space-y-2 px-1">
@@ -64,8 +64,8 @@ export default function ChatSidebar({
           </div>
         ) : apps.length === 0 ? (
           <p className="px-2 py-3 text-xs leading-relaxed text-neutral-500">
-            No assistants online yet.{" "}
-            <Link href="/apps" className="font-medium text-neutral-800 underline-offset-2 hover:underline">
+            No interfaces online yet.{" "}
+            <Link href="/projects?tab=assistants" className="font-medium text-neutral-800 underline-offset-2 hover:underline">
               Create one
             </Link>
           </p>

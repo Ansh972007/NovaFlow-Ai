@@ -22,6 +22,7 @@ def persist_chat_turn(
     conversation_id: str | None = None,
     usage: dict | None = None,
     rag_hits: list | None = None,
+    attachment_ids: list[str] | None = None,
     trace_id: str = "",
     event_type: str = "assistant",
 ) -> dict[str, Any]:
@@ -43,6 +44,7 @@ def persist_chat_turn(
         created_by=user_id,
         assistant_id=assistant_id,
         trace_id=trace_id,
+        attachment_ids=attachment_ids or [],
     )
     usage = usage or {}
     model = usage.get("model") or usage.get("ab_model") or ""
@@ -69,6 +71,7 @@ def persist_chat_turn(
         trace_id=trace_id,
         knowledge_refs=rag_hits or [],
         citations=citations,
+        attachment_ids=attachment_ids or [],
         meta={"event_type": event_type, "usage": usage},
     )
 

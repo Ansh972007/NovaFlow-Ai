@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.conversation.ai_features import generate_title, suggest_tags
 from app.conversation.collaboration import create_share_link, resolve_share
 from app.conversation.export import export_conversation
 from app.conversation.integration import load_history_for_runtime
+from app.conversation.attachments import (
+    ConversationChunkInitBody,
+    complete_chunked_attachment,
+    init_chunked_attachment,
+    list_attachments,
+    save_chunk,
+    upload_single_attachment,
+)
 from app.conversation.memory import summarize_conversation
 from app.conversation.retention import set_legal_hold, soft_delete_conversation
 from app.conversation.search import search_conversations
@@ -98,6 +106,7 @@ def api_create_message(conversation_id: str, body: dict, db: Session = Depends(g
         thread_id=body.get("thread_id"),
         parent_message_id=body.get("parent_message_id"),
         assistant_id=body.get("assistant_id") or c.resource_id,
+        attachment_ids=body.get("attachment_ids") or [],
         meta=body.get("meta"),
     )
     ctx.audit("conversation.message.create", resource_type="conversation", resource_id=conversation_id)
@@ -258,3 +267,67 @@ def api_shared(token: str, db: Session = Depends(get_db)):
 def api_history(conversation_id: str, db: Session = Depends(get_db), ctx=Depends(require_permission(Permission.ASSISTANT_READ))):
     history = load_history_for_runtime(db, conversation_id, workspace_id=ctx.workspace_id)
     return ok({"history": history})
+
+
+@router.get("/conversations/{conversation_id}/attachments")
+def api_list_attachments(conversation_id: str, db: Session = Depends(get_db), ctx=Depends(require_permission(Permission.ASSISTANT_READ))):
+    return list_attachments(db, conversation_id=conversation_id, workspace_id=ctx.workspace_id)
+
+
+@router.post("/conversations/{conversation_id}/attachments")
+async def api_upload_attachment(
+    conversation_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    content = await file.read()
+    return upload_single_attachment(
+        db=db,
+        workspace_id=ctx.workspace_id,
+        conversation_id=conversation_id,
+        filename=file.filename or "upload.bin",
+        content=content,
+        content_type=file.content_type,
+    )
+
+
+@router.post("/conversations/{conversation_id}/attachments/chunk-init")
+def api_init_chunked_attachment(
+    conversation_id: str,
+    body: ConversationChunkInitBody,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    return init_chunked_attachment(
+        db=db,
+        workspace_id=ctx.workspace_id,
+        conversation_id=conversation_id,
+        body=body,
+    )
+
+
+@router.post("/conversations/{conversation_id}/attachments/chunk/{upload_id}/{chunk_index}")
+async def api_upload_attachment_chunk(
+    conversation_id: str,
+    upload_id: str,
+    chunk_index: int,
+    file: UploadFile = File(...),
+    ctx=Depends(require_workspace_editor),
+):
+    # conversation_id is part of route for consistency; actual check happens on complete.
+    _ = conversation_id
+    _ = ctx.workspace_id
+    content = await file.read()
+    return save_chunk(upload_id=upload_id, chunk_index=chunk_index, content=content)
+
+
+@router.post("/conversations/{conversation_id}/attachments/chunk-complete/{upload_id}")
+def api_complete_chunked_attachment(
+    conversation_id: str,
+    upload_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    _ = conversation_id
+    return complete_chunked_attachment(db=db, workspace_id=ctx.workspace_id, upload_id=upload_id)

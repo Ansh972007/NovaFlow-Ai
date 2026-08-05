@@ -52,7 +52,7 @@ if ((Test-NovaApi) -and (Test-NovaWeb)) {
   Write-Host "NovaFlow is already running:" -ForegroundColor Green
   Write-Host "  Web:  http://localhost:3000" -ForegroundColor Gray
   Write-Host "  API:  http://localhost:3001" -ForegroundColor Gray
-  Write-Host "  Login: admin / admin123" -ForegroundColor Gray
+  Write-Host "  Login: set NOVAFLOW_ADMIN_PASSWORD" -ForegroundColor Gray
   exit 0
 }
 
@@ -86,7 +86,7 @@ while ((Get-Date) -lt $deadline) {
     Write-Host "NovaFlow is online:" -ForegroundColor Green
     Write-Host "  Web:  http://127.0.0.1:3000  (use 127.0.0.1 on Windows; localhost may fail)" -ForegroundColor Gray
     Write-Host "  API:  http://127.0.0.1:3001" -ForegroundColor Gray
-    Write-Host "  Login: admin / admin123" -ForegroundColor Gray
+    Write-Host "  Login: set NOVAFLOW_ADMIN_PASSWORD" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Stop:  docker compose down" -ForegroundColor DarkGray
     Write-Host "Logs:  docker compose logs -f web api" -ForegroundColor DarkGray

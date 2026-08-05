@@ -1,10 +1,10 @@
-import AppsClient from "./AppsClient";
+import { redirect } from "next/navigation";
 
 export const metadata = {
-  title: "Apps — NovaFlow AI",
-  description: "Manage and publish AI assistants",
+  title: "Projects — NovaFlow AI",
+  description: "Assistants moved into Projects",
 };
 
-export default function AppsPage() {
-  return <AppsClient />;
+export default function AppsRedirectPage() {
+  redirect("/projects?tab=assistants");
 }

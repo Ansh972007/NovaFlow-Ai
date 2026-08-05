@@ -3,8 +3,8 @@ import ChatPageClient from "./ChatPageClient";
 import WorkspacePageLoading from "@/components/WorkspacePageLoading";
 
 export const metadata = {
-  title: "Chat — NovaFlow AI",
-  description: "Chat with your AI assistants",
+  title: "Build — NovaFlow AI",
+  description: "Conversational workspace composer",
 };
 
 export default function ChatPage() {

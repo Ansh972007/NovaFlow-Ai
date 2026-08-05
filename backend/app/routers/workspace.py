@@ -146,7 +146,7 @@ def invite_member(
             invite, raw_token = create_invite(
                 db, workspace=ws, email=email, role=role, invited_by=ctx.user
             )
-            from app.services.integrations import send_email_notification
+            from app.services.platform_mail import send_platform_email_sync
             from app.config import FRONTEND_URL
             invite_url = f"{FRONTEND_URL}/login?invite_token={raw_token}"
             
@@ -299,13 +299,12 @@ def invite_member(
   </div>
 </body>
 </html>"""
+            # Platform SMTP only — do not pass request-scoped DB into BackgroundTasks
             background_tasks.add_task(
-                send_email_notification,
-                to_addr=email,
-                subject=f"Invitation to join workspace {ws.name}",
-                body=email_body,
-                db=db,
-                workspace_id=workspace_id,
+                send_platform_email_sync,
+                email,
+                f"Invitation to join workspace {ws.name}",
+                email_body,
             )
         except ValueError as exc:
             return fail(400, str(exc))

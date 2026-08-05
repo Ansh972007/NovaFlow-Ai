@@ -16,11 +16,10 @@ from app.database import WorkspaceIntegration
 
 
 def _mask_secret(value: str) -> str:
+    """Opaque mask — never reveal password characters to API clients."""
     if not value:
         return ""
-    if len(value) <= 4:
-        return "••••"
-    return "••••" + value[-4:]
+    return "••••••••"
 
 
 def get_or_create(db: Session, workspace_id: int) -> WorkspaceIntegration:
@@ -33,10 +32,31 @@ def get_or_create(db: Session, workspace_id: int) -> WorkspaceIntegration:
     return row
 
 
-def resolve_telegram_token(db: Session, workspace_id: int | None, override: str = "") -> str:
+def resolve_telegram_token(
+    db: Session,
+    workspace_id: int | None,
+    override: str = "",
+    *,
+    credential_id: str | None = None,
+) -> str:
     if override:
         return override.strip()
     if workspace_id:
+        try:
+            from app.services import credential_vault as vault
+
+            fields = vault.resolve_fields(
+                db,
+                workspace_id,
+                category="telegram",
+                kind="telegram_bot",
+                credential_id=credential_id,
+            )
+            token = (fields.get("bot_token") or "").strip()
+            if token:
+                return token
+        except Exception:
+            pass
         row = db.get(WorkspaceIntegration, workspace_id)
         if row and row.telegram_bot_token_enc:
             token = decrypt_secret(row.telegram_bot_token_enc)
@@ -45,7 +65,12 @@ def resolve_telegram_token(db: Session, workspace_id: int | None, override: str 
     return (TELEGRAM_BOT_TOKEN or "").strip()
 
 
-def resolve_smtp_config(db: Session, workspace_id: int | None) -> dict[str, Any]:
+def resolve_smtp_config(
+    db: Session,
+    workspace_id: int | None,
+    *,
+    credential_id: str | None = None,
+) -> dict[str, Any]:
     host = SMTP_HOST
     port = SMTP_PORT
     user = SMTP_USER
@@ -53,6 +78,43 @@ def resolve_smtp_config(db: Session, workspace_id: int | None) -> dict[str, Any]
     from_addr = SMTP_FROM
 
     if workspace_id:
+        try:
+            from app.services import credential_vault as vault
+
+            fields = vault.resolve_fields(
+                db,
+                workspace_id,
+                category="email",
+                kind=None,
+                credential_id=credential_id,
+            )
+            if fields:
+                if fields.get("smtp_host"):
+                    host = fields["smtp_host"]
+                if fields.get("smtp_port"):
+                    try:
+                        port = int(fields["smtp_port"])
+                    except (TypeError, ValueError):
+                        pass
+                if fields.get("smtp_user"):
+                    user = fields["smtp_user"]
+                if fields.get("smtp_password"):
+                    password = fields["smtp_password"]
+                if fields.get("smtp_from"):
+                    from_addr = fields["smtp_from"]
+                cfg = {
+                    "host": (host or "").strip(),
+                    "port": port or 587,
+                    "user": (user or "").strip(),
+                    "password": password or "",
+                    "from_addr": (from_addr or user or "novaflow@localhost").strip(),
+                    "credential_id": credential_id,
+                }
+                # Incomplete vault entry → keep falling through to platform SMTP
+                if cfg["host"] and cfg["password"]:
+                    return cfg
+        except Exception:
+            pass
         row = db.get(WorkspaceIntegration, workspace_id)
         if row:
             if row.smtp_host:
@@ -66,6 +128,17 @@ def resolve_smtp_config(db: Session, workspace_id: int | None) -> dict[str, Any]
             if row.smtp_from:
                 from_addr = row.smtp_from
 
+    # Ensure platform defaults fill any gaps
+    if not host or not password:
+        from app.services.platform_mail import platform_smtp_config
+
+        plat = platform_smtp_config()
+        host = host or plat.get("host") or ""
+        port = port or plat.get("port") or 587
+        user = user or plat.get("user") or ""
+        password = password or plat.get("password") or ""
+        from_addr = from_addr or plat.get("from_addr") or ""
+
     return {
         "host": (host or "").strip(),
         "port": port or 587,
@@ -76,11 +149,15 @@ def resolve_smtp_config(db: Session, workspace_id: int | None) -> dict[str, Any]
 
 
 def email_ready(db: Session, workspace_id: int) -> bool:
+    from app.services.platform_mail import platform_mail_ready
+
     row = db.get(WorkspaceIntegration, workspace_id)
     if row and (row.gmail_auth_mode or "smtp") == "oauth" and row.gmail_oauth_refresh_token_enc:
         return True
     smtp = resolve_smtp_config(db, workspace_id)
-    return bool(smtp.get("host") and (smtp.get("user") or smtp.get("from_addr")))
+    if bool(smtp.get("host") and smtp.get("password") and (smtp.get("user") or smtp.get("from_addr"))):
+        return True
+    return platform_mail_ready()
 
 
 def resolve_slack_webhook(db: Session, workspace_id: int | None, override: str = "") -> str:
@@ -164,7 +241,13 @@ def integrations_dict(db: Session, workspace_id: int) -> dict:
             "smtp_port": row.smtp_port or smtp.get("port") or 587,
             "smtp_user": row.smtp_user or smtp.get("user") or "",
             "smtp_from": row.smtp_from or smtp.get("from_addr") or "",
-            "smtp_password_masked": _mask_secret(password) if password else ("" if not SMTP_PASSWORD else "env"),
+            "smtp_password_masked": (
+                _mask_secret(password)
+                if password
+                else ("••••configured" if SMTP_PASSWORD else "")
+            ),
+            # Never expose whether env password equals a known value — boolean only
+            "smtp_password_configured": bool(password or SMTP_PASSWORD),
             "source": "oauth"
             if oauth_connected and auth_mode == "oauth"
             else ("workspace" if row.smtp_host or row.smtp_user else ("env" if SMTP_HOST else "none")),

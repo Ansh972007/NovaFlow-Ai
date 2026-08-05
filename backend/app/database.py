@@ -34,6 +34,7 @@ class User(Base):
     mfa_enabled = Column(Integer, default=0)
     mfa_secret_enc = Column(Text, default="")
     password_changed_at = Column(DateTime, nullable=True)
+    must_change_password = Column(Integer, default=0)  # 1 = force password change before API use
     delete = Column(Integer, default=0)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -659,6 +660,27 @@ class WorkspaceIntegration(Base):
     telegram_webhook_url = Column(String(500), default="")
     telegram_webhook_registered_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+
+class CredentialVaultEntry(Base):
+    """Named multi-slot credentials vault (multiple Gmails, LLMs, bots, etc.)."""
+
+    __tablename__ = "credential_vault"
+
+    id = Column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    category = Column(String(32), nullable=False, index=True)  # llm, email, telegram, ...
+    kind = Column(String(64), nullable=False, default="custom", index=True)  # openai, gmail_smtp, ...
+    label = Column(String(120), nullable=False, default="default")
+    fields_enc = Column(Text, default="")  # Fernet JSON blob of secret+nonsecret fields
+    public_meta_json = Column(Text, default="{}")  # non-secret display fields (masked hints)
+    is_default = Column(Integer, default=0, index=True)
+    status = Column(String(24), default="unverified")  # unverified|ok|error
+    last_verified_at = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class SavedAgent(Base):
@@ -1312,6 +1334,11 @@ class ConversationAttachment(Base):
     mime_type = Column(String(128), default="")
     size_bytes = Column(Integer, default=0)
     storage_key = Column(String(512), default="")
+    extracted_text = Column(Text, default="")
+    extract_status = Column(String(16), default="pending")  # pending|ready|failed|skipped
+    knowledge_id = Column(Integer, nullable=True)
+    knowledge_file_id = Column(Integer, nullable=True)
+    meta_json = Column(Text, default="{}")
     version = Column(Integer, default=1)
     deleted_at = Column(DateTime, nullable=True)
     create_time = Column(DateTime, default=datetime.utcnow)
@@ -1714,6 +1741,7 @@ def migrate_schema():
             ("mfa_enabled", "ALTER TABLE users ADD COLUMN mfa_enabled INTEGER DEFAULT 0"),
             ("mfa_secret_enc", "ALTER TABLE users ADD COLUMN mfa_secret_enc TEXT"),
             ("password_changed_at", "ALTER TABLE users ADD COLUMN password_changed_at DATETIME"),
+            ("must_change_password", "ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"),
         ]:
             if col not in cols:
                 with engine.begin() as conn:
@@ -1848,6 +1876,7 @@ def migrate_schema():
         "aios_hierarchical_memories",
         "eiap_recommendations",
         "eiap_reports",
+        "credential_vault",
     ):
         if table_name not in insp.get_table_names() and table_name in Base.metadata.tables:
             try:
@@ -1867,6 +1896,23 @@ def migrate_schema():
     if "saved_agents" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("saved_agents")}
         for col, ddl in agent_os_agent_cols.items():
+            if col not in cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(ddl))
+                except Exception:
+                    pass
+
+    attachment_cols = {
+        "extracted_text": "ALTER TABLE conversation_attachments ADD COLUMN extracted_text TEXT",
+        "extract_status": "ALTER TABLE conversation_attachments ADD COLUMN extract_status VARCHAR(16) DEFAULT 'pending'",
+        "knowledge_id": "ALTER TABLE conversation_attachments ADD COLUMN knowledge_id INTEGER",
+        "knowledge_file_id": "ALTER TABLE conversation_attachments ADD COLUMN knowledge_file_id INTEGER",
+        "meta_json": "ALTER TABLE conversation_attachments ADD COLUMN meta_json TEXT",
+    }
+    if "conversation_attachments" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("conversation_attachments")}
+        for col, ddl in attachment_cols.items():
             if col not in cols:
                 try:
                     with engine.begin() as conn:

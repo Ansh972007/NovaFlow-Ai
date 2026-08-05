@@ -1258,6 +1258,7 @@ async def _execute_graph(
             body_text = _apply_template(data.get("message") or "{{output}}", context)
             body_text = _format_notify_body(channel, subject, body_text)
             bot_token = (data.get("bot_token") or "").strip()
+            credential_id = (data.get("credential_id") or "").strip() or None
             prior_output = context.get("output") or body_text
             result = await send_notification(
                 channel,
@@ -1267,6 +1268,7 @@ async def _execute_graph(
                 bot_token=bot_token,
                 db=db,
                 workspace_id=workspace_id,
+                credential_id=credential_id,
             )
             detail = result.get("detail") or ("sent" if result.get("ok") else "failed")
             if result.get("ok"):

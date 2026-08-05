@@ -114,11 +114,11 @@ export const TEMPLATE_DOCS = [
     category: "onboarding",
     name: "NovaFlow AI 101 Onboarding",
     desc: "A brief tour of NovaFlow platforms & basic terms.",
-    tagline: "Learn how Workspaces, Apps, Workflows, and Agents interact.",
-    nodes: ["workspace", "apps", "agent", "workflow", "runs"],
+    tagline: "Learn how Workspaces, Apps, and Workflows interact.",
+    nodes: ["workspace", "apps", "workflow", "runs"],
     configure: [
-      { title: "Workspace Concept", detail: "A workspace isolates users, agents, workflows, keys, and knowledge bases. Everything you build belongs to your active workspace." },
-      { title: "Apps vs Agents", detail: "Apps are user-facing chat windows or UI tools. Agents are autonomous background loops configured with tools (like search/math) to solve tasks." },
+      { title: "Workspace Concept", detail: "A workspace isolates users, workflows, keys, and knowledge bases. Everything you build belongs to your active workspace." },
+      { title: "Apps vs Solutions", detail: "Apps are user-facing portals. The AI Operating System automatically composes background solutions configured with capabilities to solve tasks." },
       { title: "Workflows", detail: "Workflows are visual pipelines of nodes (Trigger → Retrieve → LLM → Notify). They automate repetitive tasks via API or cron schedules." }
     ],
     integrations: ["Active Account", "Workspace Access"],
@@ -136,7 +136,7 @@ export const TEMPLATE_DOCS = [
     tagline: "Learn how workspace tenancy, roles, and SMTP email invites operate.",
     nodes: ["admin", "settings", "smtp", "roles"],
     configure: [
-      { title: "SMTP Configuration", detail: "SMTP details are verified for novaflow85@gmail.com with custom app passwords. Invites are fully formatted to bypass spam filters.", href: "/settings" },
+      { title: "SMTP Configuration", detail: "SMTP details are verified for your-smtp@example.com with custom app passwords. Invites are fully formatted to bypass spam filters.", href: "/settings" },
       { title: "Sending Invites", detail: "Go to Admin Settings → Teams & Roles → Invite Member. Enter their email and select a role (viewer, editor, admin).", href: "/settings" },
       { title: "Roles Hierarchy", detail: "viewer (read-only), editor (create/delete workflows & apps), admin (full workspace control), super_admin (manages entire platform)." },
       { title: "Accepting Invites", detail: "The recipient clicks the link in their email. If they are new, they register. Upon logging in, they automatically join the workspace." }
@@ -216,7 +216,7 @@ export const TEMPLATE_DOCS = [
     tagline: "Read FAQs about email deliverability, vector stores, and model keys.",
     nodes: ["errors", "logs", "fixes", "status"],
     configure: [
-      { title: "Why don't I get email invites?", detail: "Verify the sender SMTP configurations in config.py. Check your junk/spam folder for messages from novaflow85@gmail.com." },
+      { title: "Why don't I get email invites?", detail: "Verify the sender SMTP configurations in config.py. Check your junk/spam folder for messages from your-smtp@example.com." },
       { title: "Why does the UI show 'Connecting' forever?", detail: "Ensure both backend API and Docker redis containers are running. Check Redis health using `docker compose ps`." },
       { title: "How do I fix vector indexing errors?", detail: "Ensure the Milvus container is online. Verify that the documents are text-extractable (not scanned images without OCR)." },
       { title: "Where are application logs stored?", detail: "Backend logs print to stdout inside the Docker container. Check them using `docker compose logs api`." }
@@ -257,7 +257,7 @@ export const TEMPLATE_DOCS = [
       { title: "Automate intake", detail: "Trigger via API webhook or Zapier using POST /workflow/run.", href: "/developer" },
     ],
     ["LLM provider"],
-    ["Pipe output to Slack alert template for team visibility.", "Save as saved agent prompt in /agents for chat testing."]
+    ["Pipe output to Slack alert template for team visibility.", "Test solution execution paths directly in /chat."]
   ),
   wf(
     "research",
@@ -294,13 +294,13 @@ export const TEMPLATE_DOCS = [
     "Agent uses tools, then human approves before final output.",
     ["trigger", "agent", "human", "output"],
     [
-      { title: "Select tools", detail: "Default: summarize + kb_search. Add calculator, translate_en in builder.", href: "/agents" },
+      { title: "Select tools", detail: "Default: summarize + kb_search. Add calculator, translate_en in builder.", href: "/chat" },
       { title: "Agent prompt", detail: "Instructs Summary · Details · Confidence format.", href: "/workflows" },
       { title: "Human gate", detail: "Run pauses at human node — approve in Runs or pending runs API.", href: "/runs" },
       { title: "Knowledge for kb_search", detail: "Set knowledge_id on agent node or link workspace KB.", href: "/knowledge" },
     ],
     ["LLM provider", "Optional knowledge base"],
-    ["Test tools first in /agents before publishing workflow.", "require_approval=true blocks until explicit approve."]
+    ["Test capabilities first in Chat before publishing workflow.", "require_approval=true blocks until explicit approve."]
   ),
   wf(
     "batch",
@@ -510,16 +510,15 @@ export const TEMPLATE_DOCS = [
     category: "prompts",
     name: "Support triage",
     desc: "Customer reply + internal notes",
-    tagline: "Used in Apps setup wizard and Agents.",
+    tagline: "Used in Apps setup wizard and Build.",
     nodes: ["system prompt", "optional tools", "chat / assistant"],
     configure: [
-      { title: "Apps → Create", detail: "Pick Support triage preset during assistant setup.", href: "/apps" },
+      { title: "Projects → Assistants", detail: "Pick Support triage preset during assistant setup.", href: "/projects?tab=assistants" },
       { title: "Link knowledge", detail: "Attach KB for policy-aware answers.", href: "/knowledge" },
-      { title: "Agents", detail: "Same prompt usable in /agents with summarize + kb_search tools.", href: "/agents" },
     ],
     integrations: ["LLM provider", "Optional KB"],
     tips: ["Empathetic tone baked into preset.", "Cite document names when relevant."],
-    links: [{ href: "/apps", label: "Apps" }, { href: "/agents", label: "Agents" }],
+    links: [{ href: "/projects?tab=assistants", label: "Projects" }],
   },
   {
     id: "prompt_docs",
@@ -529,7 +528,7 @@ export const TEMPLATE_DOCS = [
     tagline: "Direct answer + [n] citations structure.",
     nodes: ["assistant", "RAG retrieval", "chat"],
     configure: [
-      { title: "Create app with docs preset", detail: "Setup wizard or Apps → New.", href: "/apps" },
+      { title: "Create app with docs preset", detail: "Setup wizard or Projects → Assistants.", href: "/projects?tab=assistants" },
       { title: "Upload documents", detail: "Knowledge base must be linked to assistant.", href: "/knowledge" },
       { title: "Chat", detail: "Uses rag_context_for_assistant at runtime with BM25+semantic RRF.", href: "/chat" },
     ],
@@ -545,12 +544,12 @@ export const TEMPLATE_DOCS = [
     tagline: "Executive summary format for leadership.",
     nodes: ["assistant", "chat"],
     configure: [
-      { title: "Select in Apps", detail: "Ops analyst preset.", href: "/apps" },
+      { title: "Select in Projects", detail: "Ops analyst preset.", href: "/projects?tab=assistants" },
       { title: "Feed context", detail: "Paste metrics, incident text, or link KB.", href: "/knowledge" },
     ],
     integrations: ["LLM provider"],
     tips: ["Pair with research workflow template for scheduled briefs."],
-    links: [{ href: "/apps", label: "Apps" }],
+    links: [{ href: "/projects?tab=assistants", label: "Projects" }],
   },
   {
     id: "prompt_writer",
@@ -560,28 +559,12 @@ export const TEMPLATE_DOCS = [
     tagline: "Tone-matching drafts with tighter alternatives.",
     nodes: ["assistant", "chat"],
     configure: [
-      { title: "Apps preset", detail: "Writing helper during create.", href: "/apps" },
+      { title: "Projects assistant preset", detail: "Writing helper during create.", href: "/projects?tab=assistants" },
       { title: "No KB required", detail: "Works on user-provided text alone.", href: "/chat" },
     ],
     integrations: ["LLM provider"],
     tips: ["Use enrich workflow for bulk email polish."],
-    links: [{ href: "/apps", label: "Apps" }],
-  },
-  {
-    id: "prompt_agent",
-    category: "prompts",
-    name: "Toolful agent",
-    desc: "Summary · Details · Confidence",
-    tagline: "Evidence-based agent answers with tool receipts.",
-    nodes: ["agent", "tools", "chat"],
-    configure: [
-      { title: "Agents page", detail: "Load Toolful agent system prompt.", href: "/agents" },
-      { title: "Select tools", detail: "summarize, kb_search, calculator, translate_en — up to 5.", href: "/agents" },
-      { title: "Smart tool pick", detail: "Runtime selects tools based on query when enabled.", href: "/agents" },
-    ],
-    integrations: ["LLM provider", "Optional KB for kb_search"],
-    tips: ["Never invent facts unsupported by tools.", "View tool_results in agent run output."],
-    links: [{ href: "/agents", label: "Agents" }],
+    links: [{ href: "/projects?tab=assistants", label: "Projects" }],
   },
 ];
 

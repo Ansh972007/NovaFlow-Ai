@@ -305,6 +305,17 @@ def resolve_api_key(row: LlmProvider | None) -> str:
 
 
 def get_active_config(db: Session | None = None) -> dict[str, str]:
+    # Prefer vault default LLM when available
+    if db is not None:
+        try:
+            from app.services import credential_vault as vault
+
+            # workspace-scoped configs are preferred via providers; vault syncs into LlmProvider
+            fields = None
+            # Without workspace_id here, fall through to provider row
+        except Exception:
+            fields = None
+
     row = None
     if db is not None:
         row = get_active_provider_row(db)

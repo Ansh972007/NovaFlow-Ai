@@ -30,7 +30,7 @@ python -m pytest -q
 
 ## Manual UI pass (after `npm run dev` + backend)
 
-1. Login `admin` / `admin123`
+1. Login with `NOVAFLOW_ADMIN_USER` / `NOVAFLOW_ADMIN_PASSWORD`, then change password if prompted
 2. Chat → send a message
 3. Knowledge → create KB (upload optional)
 4. Workflows → create from Support template → Run

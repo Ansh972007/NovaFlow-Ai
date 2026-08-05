@@ -39,6 +39,10 @@ else:
     RATE_LIMIT_WS_PER_MINUTE = int(os.getenv("RATE_LIMIT_WS_PER_MINUTE", "300"))
 
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+# Chat chunked uploads — up to 2 GiB per file (async extract/index for large files).
+MAX_CHAT_UPLOAD_BYTES = int(os.getenv("MAX_CHAT_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
+# Sync text extract on upload complete only below this size; larger files extract in background.
+SYNC_EXTRACT_MAX_BYTES = int(os.getenv("SYNC_EXTRACT_MAX_BYTES", str(32 * 1024 * 1024)))
 MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024)))
 
 # SSRF
@@ -54,16 +58,31 @@ INSECURE_JWT_DEFAULTS = {
     "novaflow-dev-secret-change-in-prod",
     "novaflow-local-dev-secret",
     "novaflow-local-dev-secret-change-before-prod",
+    "novaflow-dev-jwt-change-me-in-production",
+    "novaflow-test-secret",
     "secret",
+    "changeme",
+    "change-me",
+    "change_me",
+}
+
+WEAK_ADMIN_PASSWORDS = {
+    "",
+    "admin",
+    "admin123",
+    "password",
+    "password123",
+    "novaflow",
+    "demo123",
     "changeme",
 }
 
 
 def require_secure_jwt_secret() -> None:
     secret = (JWT_SECRET or "").strip()
-    if IS_PRODUCTION and secret in INSECURE_JWT_DEFAULTS:
+    if IS_PRODUCTION and (secret in INSECURE_JWT_DEFAULTS or len(secret) < 32):
         raise RuntimeError(
-            "FATAL: JWT_SECRET is missing or uses an insecure default. "
+            "FATAL: JWT_SECRET is missing, too short, or uses an insecure default. "
             "Set a strong JWT_SECRET (≥32 random bytes) before running in production."
         )
     if not IS_PRODUCTION and secret in INSECURE_JWT_DEFAULTS:
@@ -73,11 +92,29 @@ def require_secure_jwt_secret() -> None:
         )
 
 
+def is_strong_bootstrap_password(admin_password: str) -> bool:
+    pwd = (admin_password or "").strip()
+    if not pwd or pwd.lower() in WEAK_ADMIN_PASSWORDS:
+        return False
+    if len(pwd) < 16:
+        return False
+    return True
+
+
 def assert_production_bootstrap_safe(admin_password: str) -> None:
     if not IS_PRODUCTION:
         return
-    if not admin_password or admin_password in {"admin123", "password", "admin"}:
+    if not is_strong_bootstrap_password(admin_password):
         raise RuntimeError(
             "FATAL: NOVAFLOW_ADMIN_PASSWORD must be set to a strong value in production "
-            "(not admin123)."
+            "(≥16 characters, not a known default like admin123)."
+        )
+
+
+def assert_first_admin_password(admin_password: str) -> None:
+    """Required whenever the users table is empty (any environment)."""
+    if not is_strong_bootstrap_password(admin_password):
+        raise RuntimeError(
+            "FATAL: NOVAFLOW_ADMIN_PASSWORD must be set (≥16 characters, not a known "
+            "default) before creating the first admin user."
         )

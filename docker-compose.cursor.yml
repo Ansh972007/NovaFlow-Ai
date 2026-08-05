@@ -1,0 +1,129 @@
+# NovaFlow Cursor-safe stack (standalone) for 16 GB RAM
+# Start: .\scripts\cursor-stack-up.ps1
+# Web http://localhost:3000  API http://localhost:3001  set NOVAFLOW_ADMIN_PASSWORD
+#
+# No Milvus. No image rebuild. Hard memory caps.
+
+name: novaflow
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: novaflow-mysql
+    restart: unless-stopped
+    ports:
+      - "3307:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=256M
+      - --performance-schema=OFF
+      - --table-open-cache=200
+      - --max-connections=50
+    environment:
+      MYSQL_ROOT_PASSWORD: novaflow
+      MYSQL_DATABASE: novaflow
+      MYSQL_USER: novaflow
+      MYSQL_PASSWORD: novaflow
+      TZ: UTC
+    volumes:
+      - novaflow_mysql:/var/lib/mysql
+    mem_limit: 640m
+    cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pnovaflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: novaflow-redis
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    command: ["redis-server", "--maxmemory", "48mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    mem_limit: 64m
+    cpus: "0.25"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    image: novaflow-api:latest
+    pull_policy: never
+    user: root
+    container_name: novaflow-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NOVAFLOW_PORT: "3001"
+      NOVAFLOW_ENV: development
+      DATABASE_URL: mysql+pymysql://novaflow:novaflow@mysql:3306/novaflow
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-novaflow-local-dev-secret-change-before-prod}
+      ACCESS_TOKEN_MINUTES: "15"
+      REFRESH_TOKEN_DAYS: "14"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000}
+      DATA_DIR: /app/data
+      NOVAFLOW_DEMO_SEED: "0"
+      NOVAFLOW_ADMIN_USER: admin
+      NOVAFLOW_ADMIN_PASSWORD: ${NOVAFLOW_ADMIN_PASSWORD:?Set NOVAFLOW_ADMIN_PASSWORD}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-novaflow85@gmail.com}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-whli jwom rrlu spph}
+      SMTP_FROM: ${SMTP_FROM:-novaflow85@gmail.com}
+
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      MILVUS_URI: ""
+      SSRF_ALLOW_PRIVATE: "0"
+    volumes:
+      - novaflow_data:/app/data
+    mem_limit: 768m
+    cpus: "1.0"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    image: novaflow-web:local
+    pull_policy: never
+    container_name: novaflow-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:3001}
+      API_INTERNAL_URL: http://api:3001
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    mem_limit: 384m
+    cpus: "0.75"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  novaflow_mysql:
+  novaflow_data:

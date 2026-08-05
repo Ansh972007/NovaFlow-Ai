@@ -27,7 +27,7 @@ docker compose up -d --build
 | Redis | 6381 |
 | Milvus | internal only (no host port) |
 
-Default admin: **admin** / **admin123**
+First admin: set **NOVAFLOW_ADMIN_PASSWORD** in env (required; no weak default)
 
 Stop: `docker compose down`
 

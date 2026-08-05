@@ -16,7 +16,8 @@ os.environ["JWT_SECRET"] = "novaflow-test-secret"
 os.environ["NOVAFLOW_DEMO_SEED"] = "0"
 os.environ["MILVUS_URI"] = ""
 os.environ["NOVAFLOW_ADMIN_USER"] = "admin"
-os.environ["NOVAFLOW_ADMIN_PASSWORD"] = "admin123"
+from tests.conftest import TEST_ADMIN_PASSWORD
+os.environ["NOVAFLOW_ADMIN_PASSWORD"] = TEST_ADMIN_PASSWORD
 
 import pytest
 from fastapi.testclient import TestClient

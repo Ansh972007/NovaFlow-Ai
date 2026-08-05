@@ -163,6 +163,7 @@ def append_message(
     citations: list | None = None,
     workflow_ref: str = "",
     agent_ref: str = "",
+    attachment_ids: list[str] | None = None,
     meta: dict | None = None,
 ) -> ConversationMessage:
     if not thread_id:
@@ -198,6 +199,7 @@ def append_message(
         citations_json=json.dumps(citations or []),
         workflow_ref=workflow_ref,
         agent_ref=agent_ref,
+        attachment_ids_json=json.dumps(attachment_ids or []),
         meta_json=json.dumps(meta or {}),
     )
     db.add(msg)

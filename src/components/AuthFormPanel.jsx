@@ -221,8 +221,8 @@ export default function AuthFormPanel({
             <p className="font-medium">NovaFlow API is offline</p>
             <p className="mt-1 text-xs text-amber-800/90">
               Run <code className="rounded bg-amber-100 px-1">.\deploy\start-backend.ps1</code> from the{" "}
-              <code className="rounded bg-amber-100 px-1">novaflow-ai</code> folder (NovaFlow stack — not Bisheng).
-              Default login: <strong>admin</strong> / <strong>admin123</strong>.
+              <code className="rounded bg-amber-100 px-1">novaflow-ai</code> folder. Set{" "}
+              <code className="rounded bg-amber-100 px-1">NOVAFLOW_ADMIN_PASSWORD</code> before first boot.
             </p>
             <button
               type="button"
@@ -323,8 +323,9 @@ export default function AuthFormPanel({
                     />
                     {!isRegister && (
                       <p className="-mt-4 text-xs text-muted">
-                        Default workspace login: <strong className="text-foreground">admin</strong> /{" "}
-                        <strong className="text-foreground">admin123</strong>
+                        Use the username and password from your{" "}
+                        <strong className="text-foreground">NOVAFLOW_ADMIN_PASSWORD</strong> env
+                        (or an account your admin created).
                       </p>
                     )}
 

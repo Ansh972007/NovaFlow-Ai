@@ -20,7 +20,7 @@ const steps = [
   {
     n: "02",
     title: "Build",
-    desc: "Drag nodes in the visual studio — RAG, agents, notify, loops, and human review.",
+    desc: "Drag nodes in the visual studio — RAG retrieval, conditional paths, loops, notifications, and human approval gates.",
     icon: "◆",
     color: "from-violet-500/20 to-violet-500/5",
     ring: "border-violet-400/40",

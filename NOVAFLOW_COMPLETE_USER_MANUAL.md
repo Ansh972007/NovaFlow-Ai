@@ -83,9 +83,8 @@ The platform navigation is built around a persistent left-sidebar layout in a un
    * *Purpose*: Access different organization workspaces.
    * *Usage*: Click to list personal, team, or sandbox workspaces. Requires membership in the selected tenant space.
 2. **Tab Navigators**:
-   * **Chat** (`/chat`): Direct interface with general assistant models.
+   * **Build** (`/chat`): Direct interface to submit goals, plan projects, run sandbox simulations, and deploy AIOS solutions.
    * **Apps** (`/apps`): Create and configure custom front-end assistants.
-   * **Agents** (`/agents`): Load, create, and test tool-augmented agents.
    * **Workflows** (`/workflows`): Studio canvas to build, publish, and inspect automated workflows.
    * **Knowledge** (`/knowledge`): Upload files, link databases, and query collections.
    * **Model Lab** (`/model-lab`): Route models, run benchmarks, and monitor fine-tuning.
@@ -95,8 +94,8 @@ The platform navigation is built around a persistent left-sidebar layout in a un
 
 ## 4. Page-by-Page Documentation
 
-### 4.1 Chat Page (`/chat`)
-* **Purpose**: Primary chat interface for conversational interaction with RAG-enhanced assistants.
+### 4.1 Build Page (`/chat`)
+* **Purpose**: Primary chat interface for goal-driven Solution Graph composition, sandbox simulations, and deployment operations.
 * **Sidebar Panel**: Lists active threads, allowing users to rename, branch, or delete conversations.
 * **Main Chat Pane**:
   * Displays message history bubble cards.
@@ -105,17 +104,6 @@ The platform navigation is built around a persistent left-sidebar layout in a un
 * **States**:
   * *Loading*: Symmetrical pulse rings indicating the LLM is generating token streams.
   * *Error*: An inline red alert card displaying the failure reason alongside a "Support Reference ID" mask.
-
-### 4.2 Workspace Agents Page (`/agents`)
-* **Purpose**: Sandbox page for designing, configuring, testing, and saving autonomous developer agents.
-* **Page Layout**:
-  * **Configure Run Panel (Left Column)**:
-    * *Agent Name Input*: Set agent name (e.g., "GitHub PR Reviewer"). Save button registers it in the DB.
-    * *Tools Checklist*: Check boxes to toggle agent permissions for tools (e.g., `file_peek`, `shell_run`).
-    * *System Prompt Area*: Multi-line text field describing the agent's role instructions. Includes preset pill buttons at the top to load default system structures.
-  * **Response Pane (Right Column)**:
-    * *Tool Trace List*: Renders a step-by-step collapse panel showing the tool name, arguments, and return value output generated during agent loops.
-    * *Final Output*: Renders the final synthesized markdown response.
 
 ---
 
@@ -147,8 +135,8 @@ The Workflow Builder (`/workflows/[id]`) is the drag-and-drop studio where devel
 
 ---
 
-## 6. AgentOS: Autonomous Specialist Registry
-AgentOS is the core engine running our seeded developer agents. It allows LLMs to interact directly with the project workspace using sandboxed system tools.
+## 6. AgentOS: Internal Specialist Registry
+AgentOS is the internal execution engine running our background developer agents. It allows compiled Solution Graphs to interact directly with the project workspace using sandboxed system tools.
 
 ### 6.1 Unified Tool Registry
 Agents can be equipped with the following 9 professional developer-grade tools:

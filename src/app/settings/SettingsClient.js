@@ -328,8 +328,16 @@ export default function SettingsClient() {
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
-    if (tab && ["overview", "security", "models", "integrations", "team"].includes(tab)) {
+    if (tab === "models" || tab === "integrations" || tab === "ai") {
+      router.replace("/credentials");
+      return;
+    }
+    if (tab && ["overview", "security", "team"].includes(tab)) {
       setActiveTab(tab);
+    }
+    if (searchParams?.get("must_change") === "1") {
+      setActiveTab("security");
+      setPwdMsg("You must set a new password before using NovaFlow.");
     }
     const gmail = searchParams?.get("gmail");
     if (!gmail) return;
@@ -1056,7 +1064,14 @@ export default function SettingsClient() {
       setPwdCurrent("");
       setPwdNew("");
       setPwdConfirm("");
-      setPwdMsg("Password updated successfully.");
+      setPwdMsg("Password updated. Sign in again with your new password.");
+      try {
+        const { logout } = await import("@/lib/api/auth");
+        await logout();
+      } catch (_) {}
+      setTimeout(() => {
+        window.location.href = "/login";
+      }, 1200);
     } catch (err) {
       setPwdMsg(err.message || "Password change failed");
     } finally {
@@ -1212,10 +1227,10 @@ export default function SettingsClient() {
                     {isAdmin && (
                       <button
                         type="button"
-                        onClick={() => setActiveTab("models")}
+                        onClick={() => router.push("/credentials")}
                         className="workspace-btn-ghost mt-5 !py-2 text-sm"
                       >
-                        Manage providers →
+                        Open Credentials →
                       </button>
                     )}
                   </SettingsSection>
@@ -1238,7 +1253,7 @@ export default function SettingsClient() {
                     className="text-center"
                   >
                     <div className="flex flex-wrap justify-center gap-2">
-                      <Link href="/apps" className="workspace-btn-ghost">Apps</Link>
+                      <Link href="/projects?tab=assistants" className="workspace-btn-ghost">Projects</Link>
                       <Link href="/knowledge" className="workspace-btn-ghost">Knowledge</Link>
                       <Link href="/workflows" className="workspace-btn-ghost">Workflows</Link>
                       <Link href="/chat" className="workspace-btn-ghost">Chat</Link>

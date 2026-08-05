@@ -20,7 +20,8 @@ os.environ["JWT_SECRET"] = "novaflow-e2e-secret"
 os.environ["NOVAFLOW_DEMO_SEED"] = "0"
 os.environ["MILVUS_URI"] = ""
 os.environ["NOVAFLOW_ADMIN_USER"] = "admin"
-os.environ["NOVAFLOW_ADMIN_PASSWORD"] = "admin123"
+from tests.conftest import TEST_ADMIN_PASSWORD
+os.environ["NOVAFLOW_ADMIN_PASSWORD"] = TEST_ADMIN_PASSWORD
 # Keep env key empty for offline suite; live tests read LIVE_OPENAI_API_KEY separately.
 # Must clear both before and after imports because app.config.load_dotenv() may reload .env.
 os.environ["OPENAI_API_KEY"] = ""
@@ -71,7 +72,7 @@ def _encrypt(password: str) -> str:
 def _auth(client: TestClient) -> dict:
     login = client.post(
         "/api/v1/user/login",
-        json={"user_name": "admin", "password": _encrypt("admin123")},
+        json={"user_name": "admin", "password": _encrypt(TEST_ADMIN_PASSWORD)},
     )
     assert login.status_code == 200
     token = login.json()["data"]["access_token"]
