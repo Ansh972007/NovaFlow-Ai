@@ -348,9 +348,19 @@ export default function AuthFormPanel({
                         </button>
                       )}
                       {!googleProvider && (
-                        <p className="text-sm text-muted">
-                          Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server.
-                        </p>
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-950">
+                          <p className="font-semibold">Google sign-in is not configured yet</p>
+                          <p className="mt-2 text-amber-900/90">
+                            Password fields are hidden for security. Add Google OAuth credentials on the server,
+                            then restart the API — a <strong>Continue with Google (Gmail)</strong> button will appear here.
+                          </p>
+                          <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-amber-900/85">
+                            <li>Create OAuth credentials in Google Cloud Console</li>
+                            <li>Set redirect URI: <code className="rounded bg-amber-100 px-1">http://localhost:3001/api/v1/auth/oauth/google/callback</code></li>
+                            <li>Add <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_ID</code> and <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_SECRET</code> to your <code className="rounded bg-amber-100 px-1">.env</code> file</li>
+                            <li>Run <code className="rounded bg-amber-100 px-1">docker compose up -d --build</code></li>
+                          </ol>
+                        </div>
                       )}
                     </div>
                   )}

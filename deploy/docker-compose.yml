@@ -87,6 +87,13 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-openai/gpt-4o-mini}
       MILVUS_URI: http://milvus:19530
       SSRF_ALLOW_PRIVATE: "0"
+
+      # Google OAuth (required for Gmail sign-in)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:3001}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ALLOW_PASSWORD_LOGIN: ${ALLOW_PASSWORD_LOGIN:-0}
       
       # Universal AI Chat System Configuration
       UNIVERSAL_CHAT_ENABLED: "1"
