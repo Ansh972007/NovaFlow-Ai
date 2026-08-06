@@ -187,6 +187,57 @@ async def send_discord_notification(
         return {"ok": False, "detail": str(exc)[:500]}
 
 
+async def send_whatsapp_notification(
+    to_phone: str,
+    body: str,
+    *,
+    db: Session | None = None,
+    workspace_id: int | None = None,
+    credential_id: str | None = None,
+) -> dict:
+    from app.services import credential_vault as vault
+
+    fields = (
+        vault.resolve_fields(
+            db,
+            workspace_id,
+            category="whatsapp",
+            kind="whatsapp_cloud",
+            credential_id=credential_id,
+        )
+        if db and workspace_id
+        else {}
+    )
+    token = (fields.get("access_token") or "").strip()
+    phone_id = (fields.get("phone_number_id") or "").strip()
+    if not token or not phone_id:
+        return {
+            "ok": False,
+            "detail": "WhatsApp Cloud API credentials missing — add access token and phone number ID",
+        }
+    if not to_phone:
+        return {"ok": False, "detail": "WhatsApp recipient phone missing"}
+    url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_phone.replace("+", "").replace(" ", "").strip(),
+        "type": "text",
+        "text": {"body": body[:4096]},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                return {"ok": False, "detail": resp.text[:400]}
+        return {"ok": True, "detail": f"WhatsApp message sent to {to_phone}"}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:500]}
+
+
 async def send_notification(
     channel: str,
     to_addr: str,
@@ -220,6 +271,14 @@ async def send_notification(
             db=db,
             workspace_id=workspace_id,
             subject=subject,
+        )
+    if ch == "whatsapp":
+        return await send_whatsapp_notification(
+            to_addr,
+            body,
+            db=db,
+            workspace_id=workspace_id,
+            credential_id=credential_id,
         )
     return await send_telegram_message(
         to_addr,

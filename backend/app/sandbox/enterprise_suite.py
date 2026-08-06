@@ -164,6 +164,9 @@ def run_enterprise_suite(
     field: str | None = None,
     budget_ms: int = DEFAULT_BUDGET_MS,
     include_twin: bool = True,
+    db: Session | None = None,
+    workspace_id: int | None = None,
+    live_credential_probe: bool = True,
 ) -> dict[str, Any]:
     """
     Run enterprise checks. Returns rich report:
@@ -176,6 +179,17 @@ def run_enterprise_suite(
         check_capability_contract(graph, missing_credentials=missing_credentials),
         check_fixture_smoke(graph, field=field),
     ]
+    if live_credential_probe and db and workspace_id:
+        from app.sandbox.credential_probes import check_credential_probe
+
+        checks.append(
+            check_credential_probe(
+                db,
+                workspace_id,
+                graph,
+                missing_credentials=missing_credentials,
+            )
+        )
     twin_trial: dict[str, Any] = {}
     if include_twin:
         twin_check = check_twin_probe(graph)

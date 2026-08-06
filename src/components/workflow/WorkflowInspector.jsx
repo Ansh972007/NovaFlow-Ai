@@ -101,12 +101,30 @@ export default function WorkflowInspector({
   readOnly = false,
   workflowId = "",
   hasNotifyNode = false,
+  customNodeDefs = [],
 }) {
   const [connectTarget, setConnectTarget] = useState("");
   const [connectSource, setConnectSource] = useState("");
   const [runDetail, setRunDetail] = useState(null);
   const [runDetailBusy, setRunDetailBusy] = useState(false);
   const [runDetailError, setRunDetailError] = useState("");
+  const [apiDefDetail, setApiDefDetail] = useState(null);
+
+  useEffect(() => {
+    if (!selected || selected.type !== "api_node" || !selected.data?.node_def_id) {
+      setApiDefDetail(null);
+      return;
+    }
+    const local = customNodeDefs.find((d) => d.id === selected.data.node_def_id);
+    if (local?.definition) {
+      setApiDefDetail(local.definition);
+      return;
+    }
+    import("@/lib/api/nodes")
+      .then(({ getNodeDefinition }) => getNodeDefinition(selected.data.node_def_id))
+      .then((row) => setApiDefDetail(row?.definition || null))
+      .catch(() => setApiDefDetail(null));
+  }, [selected, customNodeDefs]);
 
   async function loadRunDetail(runId) {
     setRunDetailBusy(true);
@@ -481,6 +499,22 @@ export default function WorkflowInspector({
                         </select>
                       </label>
                       <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-neutral-600">Auth</span>
+                        <select
+                          value={selected.data?.auth || "custom"}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { auth: e.target.value } })}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        >
+                          <option value="custom">Custom API (vault)</option>
+                          <option value="youtube">YouTube</option>
+                          <option value="google">Google</option>
+                          <option value="shopify">Shopify</option>
+                          <option value="outlook">Outlook</option>
+                        </select>
+                      </label>
+                      <NotifyCredentialSelect selected={selected} onUpdateNode={onUpdateNode} readOnly={readOnly} />
+                      <label className="mt-4 block">
                         <span className="text-xs font-semibold text-neutral-600">POST body (optional)</span>
                         <textarea
                           value={selected.data?.body || ""}
@@ -489,6 +523,62 @@ export default function WorkflowInspector({
                           rows={4}
                           className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
                         />
+                      </label>
+                    </>
+                  )}
+
+                  {selected.type === "api_node" && (
+                    <>
+                      <label className="mt-6 block">
+                        <span className="text-xs font-semibold text-neutral-600">Library node</span>
+                        <select
+                          value={selected.data?.node_def_id || ""}
+                          onChange={(e) => {
+                            const def = customNodeDefs.find((d) => d.id === e.target.value);
+                            onUpdateNode(selected.id, {
+                              data: {
+                                node_def_id: e.target.value,
+                                label: def?.display_name || def?.slug || "",
+                              },
+                            });
+                          }}
+                          disabled={readOnly}
+                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        >
+                          <option value="">Select saved API node</option>
+                          {customNodeDefs.map((def) => (
+                            <option key={def.id} value={def.id}>
+                              {def.display_name || def.slug}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {apiDefDetail?.http?.url && (
+                        <p className="mt-2 text-[11px] text-neutral-500">
+                          Endpoint: {apiDefDetail.http.url} · {apiDefDetail.http.method || "GET"}
+                        </p>
+                      )}
+                      {(apiDefDetail?.input_schema?.fields || []).map((field) => (
+                        <label key={field.key} className="mt-4 block">
+                          <span className="text-xs font-semibold text-neutral-600">{field.label || field.key}</span>
+                          <input
+                            value={selected.data?.[field.key] ?? field.default ?? ""}
+                            onChange={(e) =>
+                              onUpdateNode(selected.id, { data: { [field.key]: e.target.value } })
+                            }
+                            disabled={readOnly}
+                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                          />
+                        </label>
+                      ))}
+                      <label className="mt-4 flex items-center gap-2 text-sm text-neutral-600">
+                        <input
+                          type="checkbox"
+                          checked={!!selected.data?.set_output}
+                          onChange={(e) => onUpdateNode(selected.id, { data: { set_output: e.target.checked } })}
+                          disabled={readOnly}
+                        />
+                        Set workflow output from API response
                       </label>
                     </>
                   )}

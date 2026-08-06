@@ -188,6 +188,7 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
                   content,
                   streaming: false,
                   event: primary || undefined,
+                  aiosEvents: buffered.length ? buffered : undefined,
                   receipt,
                 },
               ];
@@ -200,6 +201,7 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
                 content: resolveContent(m.content),
                 streaming: false,
                 event: primary || m.event,
+                aiosEvents: buffered.length ? buffered : m.aiosEvents,
                 receipt: receipt || m.receipt,
               };
             });
@@ -246,10 +248,9 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
           conversationIdRef.current = conversationId || "";
         },
         onAiosEvent: (event) => {
-          // Buffer until end — one card per turn (wire already sends primary only)
           aiosTurnActiveRef.current = true;
-          if (event && pendingAiosEventsRef.current.length === 0) {
-            pendingAiosEventsRef.current = [event];
+          if (event) {
+            pendingAiosEventsRef.current = [...(pendingAiosEventsRef.current || []), event];
           }
           setStreaming(false);
           const streamingId = botMsgIdRef.current;

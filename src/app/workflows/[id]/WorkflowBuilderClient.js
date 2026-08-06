@@ -34,7 +34,8 @@ import {
   downloadWorkflowDiffJson,
   downloadWorkflowDiffMarkdown,
 } from "@/lib/workflow/diffExport";
-import { setWorkflowPublic } from "@/lib/api/marketplace";
+import CreateApiNodeModal from "@/components/workflow/CreateApiNodeModal";
+import { listNodeLibrary } from "@/lib/api/nodes";
 
 const ease = [0.16, 1, 0.3, 1];
 const CURSOR_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];
@@ -42,7 +43,7 @@ const CURSOR_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];
 const ADD_NODE_DEFAULTS = {
   transform: { template: "{{input}}" },
   condition: { keyword: "", then_text: "{{input}}", else_text: "" },
-  http: { url: "", method: "GET", body: "" },
+  http: { url: "", method: "GET", body: "", auth: "custom", credential_id: "" },
   notify: { channel: "telegram", to: "{{chat_id}}", subject: "NovaFlow", message: "{{output}}", credential_id: "" },
   jira: {
     action: "create",
@@ -90,6 +91,7 @@ const ADD_NODE_DEFAULTS = {
     knowledge_id: null,
   },
   subgraph: { workflow_id: null, label: "Sub-workflow" },
+  api_node: { node_def_id: "", label: "", set_output: true },
 };
 
 export default function WorkflowBuilderClient({ workflowId }) {
@@ -130,6 +132,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [runResult, setRunResult] = useState(null);
   const [pendingReview, setPendingReview] = useState(null);
   const [recentRuns, setRecentRuns] = useState([]);
+  const [customNodeDefs, setCustomNodeDefs] = useState([]);
+  const [apiNodeModalOpen, setApiNodeModalOpen] = useState(false);
 
   const selected = useMemo(
     () => graph.nodes?.find((n) => n.id === selectedId) || null,
@@ -184,6 +188,13 @@ export default function WorkflowBuilderClient({ workflowId }) {
       setLibraries(kbRes?.data || (Array.isArray(kbRes) ? kbRes : []));
     } catch {
       setLibraries([]);
+    }
+
+    try {
+      const lib = await listNodeLibrary({ include_drafts: false });
+      setCustomNodeDefs(lib?.custom || []);
+    } catch {
+      setCustomNodeDefs([]);
     } finally {
       setLoading(false);
     }
@@ -283,6 +294,41 @@ export default function WorkflowBuilderClient({ workflowId }) {
       ),
     }));
     setSaved(false);
+  }
+
+  function addApiNode(def) {
+    if (user?.role === "viewer" || !def?.id) return;
+    nodeSeqRef.current += 1;
+    const slug = def.slug || "api";
+    const id = `api_${slug}_${nodeSeqRef.current}`;
+    const maxX = Math.max(60, ...(graph.nodes || []).map((n) => n.x || 0));
+    const newNode = {
+      id,
+      type: "api_node",
+      x: maxX + 200,
+      y: 120 + ((graph.nodes?.length || 0) % 4) * 80,
+      data: {
+        node_def_id: def.id,
+        label: def.display_name || def.slug,
+        set_output: true,
+      },
+    };
+    setGraph((prev) => ({
+      ...prev,
+      nodes: [...(prev.nodes || []), newNode],
+    }));
+    setSelectedId(id);
+    setInspectorTab("configure");
+    setSaved(false);
+  }
+
+  function handleApiNodeSaved(def) {
+    setCustomNodeDefs((prev) => {
+      const exists = prev.some((d) => d.id === def.id);
+      if (exists) return prev.map((d) => (d.id === def.id ? def : d));
+      return [def, ...prev];
+    });
+    addApiNode(def);
   }
 
   function addNode(type) {
@@ -786,6 +832,30 @@ export default function WorkflowBuilderClient({ workflowId }) {
                   </button>
                 ))}
               </div>
+              {customNodeDefs.length > 0 && (
+                <div className="mt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">My API nodes</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {customNodeDefs.map((def) => (
+                      <button
+                        key={def.id}
+                        type="button"
+                        onClick={() => addApiNode(def)}
+                        className="rounded-lg bg-violet-50 px-2.5 py-1.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200 hover:bg-violet-100"
+                      >
+                        + {def.display_name || def.slug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setApiNodeModalOpen(true)}
+                className="mt-3 w-full rounded-lg border border-dashed border-violet-300 bg-violet-50/50 px-2 py-2 text-[10px] font-semibold text-violet-700 hover:bg-violet-50"
+              >
+                + Create API node
+              </button>
             </div>
           )}
         </aside>
@@ -887,8 +957,14 @@ export default function WorkflowBuilderClient({ workflowId }) {
           readOnly={readOnly}
           workflowId={workflowId}
           hasNotifyNode={hasNotifyNode}
+          customNodeDefs={customNodeDefs}
         />
       </div>
+      <CreateApiNodeModal
+        open={apiNodeModalOpen}
+        onClose={() => setApiNodeModalOpen(false)}
+        onSaved={handleApiNodeSaved}
+      />
     </div>
   );
 }

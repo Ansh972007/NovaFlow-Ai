@@ -389,17 +389,52 @@ def merge_requirements_from_message(req: dict[str, Any], text: str, *, db: Sessi
 def missing_workflow_slots(req: dict[str, Any]) -> list[dict[str, str]]:
     """Return unfilled critical slots for workflow compose."""
     output = (req.get("output") or "").lower()
+    integration = (req.get("integration") or "").lower()
+    goal_text = (req.get("goal") or req.get("raw") or "").lower()
     missing: list[dict[str, str]] = []
     if output == "email":
         if not req.get("email_topic") and not re.search(
             r"\b(different|various|multiple)\s+(subjects?|topics?)\b",
-            (req.get("goal") or req.get("raw") or "").lower(),
+            goal_text,
         ):
             missing.append({"id": "email_topic", "label": "Email topic or theme (e.g. Diwali)"})
         if not req.get("recipients_label") and not req.get("recipients") and not req.get("email_recipient"):
             missing.append({"id": "recipients", "label": "Who should receive the emails?"})
         if not req.get("auth_preference"):
             missing.append({"id": "auth_preference", "label": "Send via Google OAuth or SMTP?"})
+    if integration == "youtube" or output == "youtube":
+        if not req.get("youtube_channel_id") and not re.search(
+            r"channel\s*(id|#)|UC[\w-]{10,}",
+            goal_text,
+            re.I,
+        ):
+            missing.append(
+                {
+                    "id": "youtube_channel_id",
+                    "label": "YouTube channel ID (optional — uses authenticated channel if omitted)",
+                }
+            )
+    if integration in ("google", "google_sheets") or "google sheets" in goal_text or "spreadsheet" in goal_text:
+        if not req.get("sheet_id") and not re.search(
+            r"docs\.google\.com/spreadsheets|sheet\s*id",
+            goal_text,
+            re.I,
+        ):
+            missing.append(
+                {
+                    "id": "sheet_id",
+                    "label": "Google Sheet ID or spreadsheet URL",
+                }
+            )
+    if integration == "telegram" or output == "telegram":
+        if not req.get("telegram_chat_id") and not re.search(r"chat\s*id|@\w+", goal_text, re.I):
+            missing.append({"id": "telegram_chat_id", "label": "Telegram chat ID or @username"})
+    if integration == "whatsapp" or output == "whatsapp":
+        if not req.get("whatsapp_phone") and not re.search(r"\+\d{8,}", goal_text):
+            missing.append({"id": "whatsapp_phone", "label": "WhatsApp recipient phone number"})
+    if integration == "custom" or output == "http" or "custom api" in goal_text:
+        if not req.get("api_base_url") and not re.search(r"https?://", goal_text):
+            missing.append({"id": "api_base_url", "label": "API base URL for the custom integration"})
     if not req.get("goal") and not req.get("raw"):
         missing.append({"id": "goal", "label": "What should this workflow do?"})
     return missing
@@ -442,6 +477,7 @@ def build_blueprint_preview(
     req: dict[str, Any],
     caps: list[str],
     preview_graph: dict[str, Any] | None = None,
+    missing_credentials: list[str] | None = None,
 ) -> dict[str, Any]:
     """Human-readable blueprint steps + slot table for chat UI."""
     output = (req.get("output") or "workflow").lower()
@@ -517,12 +553,16 @@ def build_blueprint_preview(
 
     nodes = (preview_graph or {}).get("nodes") or []
     edges = (preview_graph or {}).get("edges") or []
+    from app.composer.gap_analysis import integration_runnable_status
+
+    integration_status = integration_runnable_status(caps, missing_credentials)
     return {
         "steps": steps,
         "slots": slots,
         "preview_nodes": nodes,
         "preview_edges": edges,
         "capabilities": caps,
+        "integration_status": integration_status,
     }
 
 

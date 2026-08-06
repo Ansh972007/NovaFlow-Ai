@@ -23,7 +23,7 @@ KNOWN_NODE_TYPES = frozenset(
         "parallel",
         "human",
         "agent",
-        "subgraph",
+        "api_node",
     }
 )
 

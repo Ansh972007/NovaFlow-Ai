@@ -44,6 +44,7 @@ const GOAL_CATEGORIES = [
 const COMPOSER_SUGGESTIONS = GOAL_CATEGORIES.map((c) => c.prompt);
 
 const STATUS_STEPS = [
+  { id: "blueprint", label: "Blueprint", match: ["blueprint", "gather", "await_approve"] },
   { id: "draft", label: "Draft", match: ["pending_approval", "planning", "compiled", "compiled_draft"] },
   { id: "creds", label: "Credentials", match: ["needs_credentials"] },
   { id: "approved", label: "Approved", match: ["approved"] },
@@ -64,21 +65,24 @@ function statusIndexFromEvent(ev) {
   if (!ev) return -1;
   const data = ev.data || {};
   const status = String(data.status || "");
-  if (ev.type === "aios_deploy" && data.workflow_id) return 4;
-  if (ev.type === "aios_credentials_needed" || (data.missing_credentials || []).length) return 1;
-  if (ev.type === "aios_test_report") return 3;
-  if (ev.type === "aios_approved") return 2;
+  if (ev.type === "aios_deploy" && data.workflow_id) return 5;
+  if (ev.type === "aios_credentials_needed" || (data.missing_credentials || []).length) return 2;
+  if (ev.type === "aios_test_report") return 4;
+  if (ev.type === "aios_approved") return 3;
+  if (ev.type === "aios_solution" && (data.phase === "blueprint" || data.status === "blueprint")) return 0;
+  if (STATUS_STEPS[5].match.includes(status)) return 5;
   if (STATUS_STEPS[4].match.includes(status)) return 4;
   if (STATUS_STEPS[3].match.includes(status)) return 3;
   if (STATUS_STEPS[2].match.includes(status)) return 2;
-  if (STATUS_STEPS[0].match.includes(status) || ev.type === "aios_solution") return 0;
+  if (STATUS_STEPS[1].match.includes(status) || ev.type === "aios_solution") return 1;
   if (ev.type === "aios_progress") {
     const next = data.next_action;
-    if (next === "credentials") return 1;
-    if (next === "approve") return 0;
-    if (next === "test") return 2;
-    if (next === "deploy") return 3;
-    if (next === "done") return 4;
+    if (next === "credentials") return 2;
+    if (next === "approve") return 1;
+    if (next === "test") return 4;
+    if (next === "deploy") return 5;
+    if (next === "done") return 5;
+    if (data.compose_phase === "gather") return 0;
   }
   return 0;
 }
@@ -188,7 +192,9 @@ export default function ChatMessages({
               ? "Plan approved"
               : t === "aios_test_report"
                 ? "Sandbox test report"
-                : t === "aios_sandbox"
+                : t === "aios_node_factory"
+                  ? "API node factory"
+                  : t === "aios_sandbox"
                   ? "Enterprise test suite"
                   : t === "aios_deploy"
                   ? "Deployed"
@@ -371,6 +377,21 @@ export default function ChatMessages({
             </div>
           </div>
         )}
+        {t === "aios_node_factory" && (
+          <div className="mt-1 space-y-1.5 rounded-xl border border-violet-200 bg-violet-50/80 p-3 text-xs text-violet-900">
+            <p>{data.message || "Create a custom API node from your credentials."}</p>
+            {data.suggested?.url && (
+              <p className="font-mono text-[10px] text-violet-700">
+                {data.suggested.method || "GET"} {data.suggested.url}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              <a href="/workflows" className={actionBtn}>
+                Open workflow builder
+              </a>
+            </div>
+          </div>
+        )}
         {t === "aios_sandbox" && (
           <div className="mt-1 space-y-1.5">
             <p>
@@ -507,6 +528,26 @@ export default function ChatMessages({
             )}
           </div>
         )}
+        {t === "aios_human_review" && (
+          <div className="mt-1 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px]">
+            <p className="font-semibold text-amber-900">Human review required</p>
+            <p className="text-amber-800">{data.message || "Approve to continue the workflow run."}</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={primaryBtn} onClick={() => onSuggest?.("approve HITL")}>
+                Continue
+              </button>
+              <button type="button" className={actionBtn} onClick={() => onSuggest?.("reject HITL")}>
+                Reject
+              </button>
+            </div>
+          </div>
+        )}
+        {t === "aios_error" && (
+          <div className="mt-1 rounded-lg border border-red-200 bg-red-50 p-2 text-[11px] text-red-900">
+            <p className="font-semibold">Action failed</p>
+            <p>{data.message || data.detail || "Unknown error"}</p>
+          </div>
+        )}
         {t === "aios_run_status" && (
           <div className="mt-1 space-y-1.5">
             <p>
@@ -519,15 +560,17 @@ export default function ChatMessages({
                 {String(data.output).slice(0, 400)}
               </p>
             )}
-            {Array.isArray(data.steps) && data.steps.length > 0 && (
-              <ul className="max-h-28 list-disc space-y-0.5 overflow-y-auto pl-4 text-[10px] text-neutral-600">
-                {data.steps.slice(0, 12).map((step, i) => (
-                  <li key={i}>
-                    {typeof step === "string"
-                      ? step
-                      : `${step.label || step.name || step.id || "step"}${step.status ? ` (${step.status})` : ""}`}
-                  </li>
-                ))}
+            {Array.isArray(data.progress) && data.progress.length > 0 && (
+              <ul className="max-h-32 list-disc space-y-0.5 overflow-y-auto pl-4 text-[10px] text-neutral-600">
+                {data.progress.slice(0, 16).map((stepEv, i) => {
+                  const st = stepEv?.step || {};
+                  return (
+                    <li key={i}>
+                      {st.node_id || st.type || "step"}
+                      {st.status ? ` — ${st.status}` : stepEv?.phase ? ` (${stepEv.phase})` : ""}
+                    </li>
+                  );
+                })}
               </ul>
             )}
             <div className="flex flex-wrap gap-2 pt-1">
@@ -1507,6 +1550,28 @@ export default function ChatMessages({
               </div>
             )}
 
+            {(data.blueprint?.integration_status || []).length > 0 && (
+              <div className="rounded-xl border border-neutral-200 bg-white p-2.5 text-[11px]">
+                <p className="font-semibold text-xs text-indigo-900 mb-1">Integration readiness</p>
+                <ul className="space-y-1">
+                  {(data.blueprint?.integration_status || []).map((row) => (
+                    <li key={row.id} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="text-neutral-700">{row.label}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${
+                          row.runnable
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-900"
+                        }`}
+                      >
+                        {row.runnable ? "Runnable" : "Needs setup"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Visual Workflow Flowchart Diagram */}
             <div className="space-y-1">
               <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-900">
@@ -1526,6 +1591,17 @@ export default function ChatMessages({
                         <span className="text-[11px] font-bold capitalize text-white">
                           {node.data?.label || node.type || node.id}
                         </span>
+                        {(node.type === "http" && node.data?.auth) || node.type === "notify" ? (
+                          <span
+                            className={`text-[8px] font-bold uppercase mt-0.5 ${
+                              (data.missing_credentials || []).length === 0
+                                ? "text-emerald-300"
+                                : "text-amber-300"
+                            }`}
+                          >
+                            {(data.missing_credentials || []).length === 0 ? "Runnable" : "Needs creds"}
+                          </span>
+                        ) : null}
                         {node.data?.subject && (
                           <span className="text-[9px] text-indigo-300 truncate max-w-[120px] font-mono">
                             {node.data.subject}
@@ -1914,7 +1990,9 @@ export default function ChatMessages({
                         : `chat-bubble-assistant px-4 py-3.5 text-neutral-800${msg.streaming ? " chat-bubble-streaming" : ""}`
                     }`}
                   >
-                    {msg.event ? renderAiosCard(msg) : null}
+                    {(msg.aiosEvents?.length ? msg.aiosEvents : msg.event ? [msg.event] : []).map((ev, evIdx) => (
+                      <div key={`${msg.id}-aios-${evIdx}`}>{renderAiosCard({ ...msg, event: ev })}</div>
+                    ))}
                     {msg.role === "assistant" ? (
                       (() => {
                         const body = String(msg.content || "").trim();

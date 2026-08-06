@@ -23,6 +23,9 @@ OPS_INTENTS = frozenset(
         "list_workflows",
         "workflow_status",
         "stop_run",
+        "delete_workflow",
+        "update_workflow",
+        "clone_workflow",
         "use_knowledge",
         "index_attachment",
         "list_credentials_needed",
@@ -217,6 +220,10 @@ def classify_ops_intent(text: str) -> str | None:
         return "use_knowledge"
     if re.search(r"\b(delete|remove|drop)\b.*\bworkflow\b|\bdelete (my )?workflow\b", t):
         return "delete_workflow"
+    if re.search(r"\bclone (my )?(last )?workflow\b|\bduplicate workflow\b", t):
+        return "clone_workflow"
+    if re.search(r"\b(update|refresh|sync) (my )?(last )?workflow\b", t):
+        return "update_workflow"
     if re.search(r"\bmonitor (the )?(run|workflow)\b|\brun timeline\b", t):
         return "monitor"
     return None
@@ -352,7 +359,8 @@ async def run_workflow_action(
             "blocked_normal_reply": True,
             "summary": "No workflow found to run.",
         }
-    from app.services.workflow import run_workflow
+    from app.services.workflow import run_workflow_with_progress
+    from app.services.workflow_run_cancel import clear_run, register_run
 
     user_input = text
     m = re.search(r"with input[:\s]+(.+)$", text or "", re.I)
@@ -361,7 +369,26 @@ async def run_workflow_action(
     elif re.match(r"^\s*run (my )?(last )?workflow", text or "", re.I):
         user_input = aios.get("goal") or "Run from chat"
 
-    result = await run_workflow(db, wf, user_id, user_input, workspace_id)
+    conversation_api_key = aios.get("conversation_api_key")
+    cancel_event = register_run(workspace_id, user_id)
+    progress_events: list[dict[str, Any]] = []
+
+    async def _emit(event: dict):
+        progress_events.append(event)
+
+    try:
+        result = await run_workflow_with_progress(
+            db,
+            wf,
+            user_id,
+            user_input,
+            _emit,
+            workspace_id,
+            conversation_api_key=conversation_api_key,
+            cancel_event=cancel_event,
+        )
+    finally:
+        clear_run(workspace_id, user_id)
     status = result.get("status") or ("pending_human" if result.get("pending_run_id") else "completed")
     if result.get("steps") and any(s.get("status") == "error" for s in (result.get("steps") or []) if isinstance(s, dict)):
         status = "failed"
@@ -402,12 +429,27 @@ async def run_workflow_action(
             "run_id": run_id,
             "output": (result.get("output") or "")[:800],
             "steps": (result.get("steps") or [])[:20],
+            "progress": [
+                {"type": "aios_run_step", "phase": e.get("phase"), "step": e.get("step")}
+                for e in progress_events
+                if e.get("type") == "step"
+            ][:40],
             "links": {"workflow": f"/workflows/{wf.id}"},
             "pending_run_id": result.get("pending_run_id"),
         },
     }
+    step_events = [
+        {"type": "aios_run_step", "phase": e.get("phase"), "step": e.get("step")}
+        for e in progress_events
+        if e.get("type") == "step"
+    ][:40]
+    human_review = next((e for e in progress_events if e.get("type") == "human_review"), None)
+    out_events: list[dict[str, Any]] = step_events[:40]
+    if human_review:
+        out_events.append({"type": "aios_human_review", "data": human_review})
+    out_events.append(event)
     summary = f"Ran workflow **{wf.name}** — status: {status}."
-    return {"events": [event], "blocked_normal_reply": True, "summary": summary}
+    return {"events": out_events, "blocked_normal_reply": True, "summary": summary}
 
 
 async def delete_workflow_action(
@@ -438,6 +480,106 @@ async def delete_workflow_action(
         "events": [{"type": "aios_run_status", "data": {"status": "deleted", "message": f"Deleted workflow '{wf_name}'."}}],
         "blocked_normal_reply": False,
         "summary": f"Workflow '{wf_name}' has been deleted from disk successfully.",
+    }
+
+
+async def clone_workflow_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    conv, aios = _load_aios(db, conversation_id)
+    wf = _find_workflow(db, workspace_id, text, aios)
+    if not wf:
+        return {
+            "events": [{"type": "aios_run_status", "data": {"status": "error", "message": "No workflow found to clone."}}],
+            "blocked_normal_reply": True,
+            "summary": "No workflow found to clone.",
+        }
+    clone = Workflow(
+        name=f"{wf.name} (copy)",
+        desc=wf.desc,
+        graph_json=wf.graph_json,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        status=wf.status,
+    )
+    db.add(clone)
+    db.commit()
+    db.refresh(clone)
+    aios["last_workflow_id"] = clone.id
+    _save_aios(db, conv, aios)
+    return {
+        "events": [
+            {
+                "type": "aios_run_status",
+                "data": {
+                    "status": "cloned",
+                    "workflow_id": clone.id,
+                    "workflow_name": clone.name,
+                    "message": f"Cloned workflow as '{clone.name}'.",
+                    "links": {"workflow": f"/workflows/{clone.id}"},
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": f"Cloned workflow **{clone.name}**.",
+    }
+
+
+async def update_workflow_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    conv, aios = _load_aios(db, conversation_id)
+    wf = _find_workflow(db, workspace_id, text, aios)
+    preview = aios.get("executable_preview") or {}
+    if not wf:
+        return {
+            "events": [{"type": "aios_run_status", "data": {"status": "error", "message": "No workflow found to update."}}],
+            "blocked_normal_reply": True,
+            "summary": "No workflow found to update.",
+        }
+    if not preview.get("nodes"):
+        return {
+            "events": [
+                {
+                    "type": "aios_run_status",
+                    "data": {
+                        "status": "error",
+                        "message": "No blueprint graph in chat — compose and approve first.",
+                    },
+                }
+            ],
+            "blocked_normal_reply": True,
+            "summary": "No blueprint to apply.",
+        }
+    wf.graph_json = json.dumps(
+        {"nodes": preview.get("nodes") or [], "edges": preview.get("edges") or []}
+    )
+    db.commit()
+    return {
+        "events": [
+            {
+                "type": "aios_run_status",
+                "data": {
+                    "status": "updated",
+                    "workflow_id": wf.id,
+                    "workflow_name": wf.name,
+                    "message": f"Updated workflow '{wf.name}' from current blueprint.",
+                    "links": {"workflow": f"/workflows/{wf.id}"},
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": f"Updated workflow **{wf.name}** from blueprint.",
     }
 
 
@@ -726,6 +868,24 @@ async def dispatch_ops_action(
             text=user_message,
         )
 
+    if intent == "clone_workflow":
+        return await clone_workflow_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
+    if intent == "update_workflow":
+        return await update_workflow_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
     if intent == "workflow_status" or intent == "monitor":
         ev = workflow_status_event(db, workspace_id, conversation_id)
         return {
@@ -735,7 +895,10 @@ async def dispatch_ops_action(
         }
 
     if intent == "stop_run":
+        from app.services.workflow_run_cancel import request_cancel
+
         conv, aios = _load_aios(db, conversation_id)
+        cancelled = request_cancel(workspace_id, user_id)
         aios["stop_requested"] = True
         aios["status"] = aios.get("status") or "stopped"
         _save_aios(db, conv, aios)
@@ -745,7 +908,11 @@ async def dispatch_ops_action(
                     "type": "aios_run_status",
                     "data": {
                         "status": "stopped",
-                        "message": "Stop requested for the active chat run (in-flight steps may finish).",
+                        "message": (
+                            "Run stop signalled — in-flight step will end shortly."
+                            if cancelled
+                            else "No active run found to stop."
+                        ),
                         "run_id": aios.get("active_run_id"),
                     },
                 }

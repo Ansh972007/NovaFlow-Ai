@@ -322,6 +322,40 @@ async def _stream_reply(
             )
         except Exception:
             pass
+
+        meta = {"chars": len(buffer), "stopped": stopped, "trace_id": ctx.trace_id}
+        if usage_out.get("total_tokens") is not None:
+            meta["total_tokens"] = usage_out.get("total_tokens")
+            meta["prompt_tokens"] = usage_out.get("prompt_tokens")
+            meta["completion_tokens"] = usage_out.get("completion_tokens")
+        if ab_meta:
+            meta["ab_variant"] = ab_meta.get("variant")
+            meta["ab_model"] = ab_meta.get("model")
+            meta["ab_route_id"] = ab_meta.get("route_id")
+        log_usage(db, user_id, event_type, resource_id, meta, workspace_id)
+
+        try:
+            from app.conversation.integration import persist_chat_turn
+
+            conv_meta = persist_chat_turn(
+                db,
+                workspace_id=workspace_id or 0,
+                user_id=user_id,
+                organization_id=None,
+                assistant_id=assistant_id or resource_id,
+                user_message=user_msg,
+                assistant_message=buffer,
+                conversation_id=(receipt_extra or {}).get("conversation_id"),
+                usage=usage_out,
+                rag_hits=rag_hits,
+                trace_id=ctx.trace_id,
+                event_type=event_type,
+                attachment_ids=attachment_ids or [],
+            )
+            await websocket.send_json({"type": "conversation", "conversation_id": conv_meta.get("conversation_id")})
+        except Exception:
+            pass
+
         await websocket.send_json({"type": "end", "message": {"content": ""}, "receipt": receipt})
         await websocket.send_json({"type": "close"})
 
@@ -457,6 +491,8 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 }
             )
 
+        assistant_cancel: asyncio.Event | None = None
+
         while True:
             raw = await websocket.receive_text()
             try:
@@ -465,7 +501,11 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 continue
 
             if payload.get("action") == "stop":
+                if assistant_cancel is not None:
+                    assistant_cancel.set()
                 continue
+
+            assistant_cancel = asyncio.Event()
 
             user_msg = _parse_user_message(payload)
             if not str(user_msg).strip():
@@ -510,11 +550,32 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     user_message=str(user_msg).strip(),
                     workspace_role=role,
                 )
-            except Exception:
-                bridge = {"events": [], "blocked_normal_reply": False}
+            except Exception as bridge_exc:
+                bridge = {
+                    "events": [
+                        {
+                            "type": "aios_error",
+                            "data": {
+                                "message": str(bridge_exc)[:500],
+                                "detail": "Workflow chat action failed",
+                            },
+                        }
+                    ],
+                    "ui_events": [
+                        {
+                            "type": "aios_error",
+                            "data": {
+                                "message": str(bridge_exc)[:500],
+                                "detail": "Workflow chat action failed",
+                            },
+                        }
+                    ],
+                    "blocked_normal_reply": True,
+                    "summary": f"Action failed: {bridge_exc}",
+                }
 
             # Extract conversation API key from bridge if available
-            conversation_api_key = bridge.get("aios", {}).get("conversation_api_key")
+            conversation_api_key = (bridge.get("aios") or {}).get("conversation_api_key")
 
             for ev in (bridge.get("ui_events") or bridge.get("events") or []):
                 # Send UI card(s) as helpful interactive attachments
@@ -531,12 +592,35 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
 
             if blocked:
                 # AIOS card is the full reply — skip generic LLM handbook stream
+                summary_text = bridge.get("summary") or ""
+                try:
+                    from app.conversation.integration import persist_chat_turn
+
+                    conv_meta = persist_chat_turn(
+                        db,
+                        workspace_id=wid,
+                        user_id=user_id,
+                        organization_id=None,
+                        assistant_id=assistant_id,
+                        user_message=str(user_msg).strip(),
+                        assistant_message=summary_text or "Workflow action completed.",
+                        conversation_id=conversation_id,
+                        usage={},
+                        rag_hits=rag_hits,
+                        trace_id="",
+                        event_type="assistant_chat",
+                        attachment_ids=attachment_ids or [],
+                    )
+                    if conv_meta.get("conversation_id"):
+                        conversation_id = conv_meta.get("conversation_id")
+                except Exception:
+                    pass
                 await websocket.send_json(
                     {
                         "type": "end",
-                        "message": bridge.get("summary") or "",
+                        "message": summary_text,
                         "aios_only": True,
-                        "receipt": receipt_extra,
+                        "receipt": {**receipt_extra, "conversation_id": conversation_id},
                     }
                 )
             else:
@@ -556,7 +640,7 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                         query,
                         wid,
                         receipt_extra=receipt_extra,
-                        cancel_event=None,
+                        cancel_event=assistant_cancel,
                         history=history,
                         assistant_id=assistant_id,
                         rag_query=rag_query,

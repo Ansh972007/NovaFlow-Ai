@@ -119,7 +119,12 @@ def validate_graph(
             )
         if n.type not in KNOWN_NODE_TYPES:
             issues.append(
-                ValidationIssue("unknown_node_type", "warning", f"Unknown node type: {n.type}", node_id=n.id)
+                ValidationIssue(
+                    "unknown_node_type",
+                    "error" if strict else "warning",
+                    f"Unknown node type: {n.type}",
+                    node_id=n.id,
+                )
             )
 
     for e in graph.edges:
@@ -202,6 +207,16 @@ def validate_graph(
         if n.type == "subgraph" and not data.get("workflow_id"):
             issues.append(
                 ValidationIssue("missing_subgraph", "error", "Subgraph node missing workflow_id", node_id=n.id)
+            )
+        if n.type == "api_node" and not data.get("node_def_id"):
+            issues.append(
+                ValidationIssue(
+                    "missing_node_def_id",
+                    "error",
+                    "API node missing node_def_id",
+                    node_id=n.id,
+                    field="node_def_id",
+                )
             )
         if n.type == "loop":
             mx = int(data.get("max") or 5)

@@ -264,6 +264,7 @@ def test_digest_and_github_graph_shapes():
     digest = build_executable_graph(
         required_caps=["cap_smtp", "cap_knowledge"],
         goal="Create a weekly email digest from my documents",
+        requirements={"output": "email"},
     )
     dtypes = [n["type"] for n in digest["nodes"]]
     assert "retrieve" in dtypes
@@ -1803,5 +1804,104 @@ def test_google_sheets_goal_missing_oauth_labels(api_client):
         sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
         missing = sol.get("missing_credentials") or []
         assert any("google" in m for m in missing)
+    finally:
+        db.close()
+
+
+def test_youtube_workflow_run_uses_vault_auth():
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    from app.composer.workflow_composer import build_executable_graph
+    from app.database import CredentialVaultEntry, SessionLocal, Workflow
+    from app.services import credential_vault as vault
+    from app.services.workflow import run_workflow
+
+    db = SessionLocal()
+    try:
+        db.query(CredentialVaultEntry).filter(
+            CredentialVaultEntry.workspace_id == 1,
+            CredentialVaultEntry.category == "youtube",
+        ).delete(synchronize_session=False)
+        db.commit()
+
+        vault.upsert_from_chat(
+            db,
+            workspace_id=1,
+            user_id=1,
+            category="youtube",
+            kind="youtube_api",
+            label="default",
+            fields={"api_key": "AIzaTestKeyForWorkflowRun"},
+        )
+
+        graph = build_executable_graph(
+            required_caps=["cap_youtube", "cap_workflow"],
+            goal="Sync my YouTube stats daily",
+            requirements={"integration": "youtube", "output": "youtube"},
+            db=db,
+            workspace_id=1,
+        )
+        youtube_node = next(n for n in graph["nodes"] if n.get("id") == "youtube")
+        assert youtube_node.get("data", {}).get("credential_id")
+
+        wf = Workflow(
+            name="YouTube stats test",
+            desc="test",
+            graph_json=json.dumps({"nodes": graph["nodes"], "edges": graph["edges"]}),
+            user_id=1,
+            workspace_id=1,
+            status=1,
+        )
+        db.add(wf)
+        db.commit()
+        db.refresh(wf)
+
+        with patch(
+            "app.services.workflow_http_auth.fetch_http_authenticated",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
+            mock_fetch.return_value = '{"items":[{"id":"UCtest"}]}'
+            result = asyncio.run(run_workflow(db, wf, 1, "test input", workspace_id=1))
+            mock_fetch.assert_called()
+            args = mock_fetch.call_args[0]
+            assert args[5] == "youtube"
+            assert result.get("status") == "completed"
+    finally:
+        db.close()
+
+
+def test_build_executable_graph_binds_vault_credentials():
+    from app.composer.workflow_composer import build_executable_graph
+    from app.database import CredentialVaultEntry, SessionLocal
+    from app.services import credential_vault as vault
+
+    db = SessionLocal()
+    try:
+        db.query(CredentialVaultEntry).filter(
+            CredentialVaultEntry.workspace_id == 1,
+            CredentialVaultEntry.category == "youtube",
+        ).delete(synchronize_session=False)
+        db.commit()
+        row = vault.upsert_from_chat(
+            db,
+            workspace_id=1,
+            user_id=1,
+            category="youtube",
+            kind="youtube_api",
+            label="default",
+            fields={"api_key": "AIzaBindTest"},
+        )
+        graph = build_executable_graph(
+            required_caps=["cap_youtube", "cap_workflow"],
+            goal="YouTube channel stats",
+            requirements={"integration": "youtube", "output": "youtube"},
+            db=db,
+            workspace_id=1,
+        )
+        yt = next(n for n in graph["nodes"] if n.get("id") == "youtube")
+        assert yt["data"]["credential_id"] == row.id
+        assert yt["data"]["vault_category"] == "youtube"
     finally:
         db.close()

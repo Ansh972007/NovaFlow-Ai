@@ -211,6 +211,22 @@ async def send_gmail_api_message(
 def resolve_jira_config(db: Session, workspace_id: int | None) -> dict[str, Any]:
     if not workspace_id:
         return {"base_url": "", "email": "", "api_token": "", "configured": False}
+    try:
+        from app.services import credential_vault as vault
+
+        fields = vault.resolve_fields(db, workspace_id, category="jira", kind="jira_cloud")
+        base = (fields.get("base_url") or "").strip().rstrip("/")
+        email = (fields.get("email") or "").strip()
+        token = (fields.get("api_key") or "").strip()
+        if base and email and token:
+            return {
+                "base_url": base,
+                "email": email,
+                "api_token": token,
+                "configured": True,
+            }
+    except Exception:
+        pass
     row = db.get(WorkspaceIntegration, workspace_id)
     if not row:
         return {"base_url": "", "email": "", "api_token": "", "configured": False}

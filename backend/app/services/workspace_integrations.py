@@ -160,25 +160,65 @@ def email_ready(db: Session, workspace_id: int) -> bool:
     return platform_mail_ready()
 
 
-def resolve_slack_webhook(db: Session, workspace_id: int | None, override: str = "") -> str:
+def resolve_slack_webhook(
+    db: Session,
+    workspace_id: int | None,
+    override: str = "",
+    *,
+    credential_id: str | None = None,
+) -> str:
     if override:
         return override.strip()
-    if not workspace_id:
-        return ""
-    row = db.get(WorkspaceIntegration, workspace_id)
-    if row and row.slack_webhook_url_enc:
-        return decrypt_secret(row.slack_webhook_url_enc) or ""
+    if workspace_id:
+        try:
+            from app.services import credential_vault as vault
+
+            fields = vault.resolve_fields(
+                db,
+                workspace_id,
+                category="slack",
+                kind="slack_webhook",
+                credential_id=credential_id,
+            )
+            url = (fields.get("webhook_url") or "").strip()
+            if url:
+                return url
+        except Exception:
+            pass
+        row = db.get(WorkspaceIntegration, workspace_id)
+        if row and row.slack_webhook_url_enc:
+            return decrypt_secret(row.slack_webhook_url_enc) or ""
     return ""
 
 
-def resolve_discord_webhook(db: Session, workspace_id: int | None, override: str = "") -> str:
+def resolve_discord_webhook(
+    db: Session,
+    workspace_id: int | None,
+    override: str = "",
+    *,
+    credential_id: str | None = None,
+) -> str:
     if override:
         return override.strip()
-    if not workspace_id:
-        return ""
-    row = db.get(WorkspaceIntegration, workspace_id)
-    if row and getattr(row, "discord_webhook_url_enc", None):
-        return decrypt_secret(row.discord_webhook_url_enc) or ""
+    if workspace_id:
+        try:
+            from app.services import credential_vault as vault
+
+            fields = vault.resolve_fields(
+                db,
+                workspace_id,
+                category="discord",
+                kind="discord_webhook",
+                credential_id=credential_id,
+            )
+            url = (fields.get("webhook_url") or "").strip()
+            if url:
+                return url
+        except Exception:
+            pass
+        row = db.get(WorkspaceIntegration, workspace_id)
+        if row and getattr(row, "discord_webhook_url_enc", None):
+            return decrypt_secret(row.discord_webhook_url_enc) or ""
     return ""
 
 

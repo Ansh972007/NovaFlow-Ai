@@ -273,6 +273,8 @@ def compile_solution_blueprint(
         knowledge_id=None,
         recipe_id=(recipe or {}).get("id"),
         requirements=requirements,
+        db=db,
+        workspace_id=workspace_id,
     )
 
     def _smart_wf_name(g_text: str, caps_list: list[str]) -> str:

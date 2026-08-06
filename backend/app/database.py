@@ -1166,6 +1166,25 @@ class WorkflowFragment(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class NodeDefinition(Base):
+    """Workspace-scoped declarative API node definitions for the node library."""
+
+    __tablename__ = "aios_node_definitions"
+
+    id = Column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.user_id"), nullable=True, index=True)
+    slug = Column(String(80), nullable=False, index=True)
+    display_name = Column(String(120), nullable=False)
+    definition_json = Column(Text, default="{}")
+    status = Column(String(32), default="draft", index=True)  # draft | published | deprecated
+    version = Column(String(32), default="1.0.0")
+    test_status = Column(String(32), default="untested")  # untested | passed | failed
+    test_result_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ProjectGraph(Base):
     """Root mapping object associating operational goals to solution plans."""
 
@@ -1893,6 +1912,7 @@ def migrate_schema():
         "aios_universal_capabilities",
         "aios_universal_assets",
         "aios_workflow_fragments",
+        "aios_node_definitions",
         "aios_project_graphs",
         "aios_solution_graphs",
         "aios_hierarchical_memories",

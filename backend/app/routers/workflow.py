@@ -224,7 +224,11 @@ def set_workflow_status(
         from app.workflow_intelligence.graph.parser import parse_graph
         from app.workflow_intelligence.publish_gate import check_publish_ready
 
-        gate = check_publish_ready(parse_graph(w.graph_json))
+        gate = check_publish_ready(
+            parse_graph(w.graph_json),
+            db=db,
+            workspace_id=ctx.workspace_id,
+        )
         if not gate.get("ready"):
             return fail(
                 400,

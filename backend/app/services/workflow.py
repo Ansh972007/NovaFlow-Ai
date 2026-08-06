@@ -875,14 +875,37 @@ def _format_notify_body(channel: str, subject: str, body: str) -> str:
     return text
 
 
-async def _fetch_http(url: str, method: str = "GET", body: str = "") -> str:
+async def _fetch_http(
+    url: str,
+    method: str = "GET",
+    body: str = "",
+    *,
+    db: Session | None = None,
+    workspace_id: int | None = None,
+    auth_kind: str | None = None,
+    credential_id: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> str:
+    if auth_kind or credential_id:
+        from app.services.workflow_http_auth import fetch_http_authenticated
+
+        return await fetch_http_authenticated(
+            db,
+            workspace_id,
+            url,
+            method,
+            body,
+            auth_kind,
+            credential_id=credential_id,
+        )
     method = (method or "GET").upper()
     timeout = httpx.Timeout(15.0)
+    req_headers = dict(headers or {})
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         if method == "POST":
-            resp = await client.post(url, content=body or None)
+            resp = await client.post(url, content=body or None, headers=req_headers or None)
         else:
-            resp = await client.get(url)
+            resp = await client.get(url, headers=req_headers or None)
         resp.raise_for_status()
         content_type = resp.headers.get("content-type", "")
         if "json" in content_type:
@@ -917,6 +940,9 @@ async def run_workflow(
     user_input: str,
     workspace_id: int | None = None,
     extra_context: dict | None = None,
+    *,
+    conversation_api_key: str | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -942,7 +968,14 @@ async def run_workflow(
     if extra_context:
         initial_context.update(extra_context)
     context, steps, pause_node = await _execute_graph(
-        db, user_id, graph, user_input.strip(), workspace_id=workspace_id, initial_context=initial_context
+        db,
+        user_id,
+        graph,
+        user_input.strip(),
+        workspace_id=workspace_id,
+        initial_context=initial_context,
+        conversation_api_key=conversation_api_key,
+        cancel_event=cancel_event,
     )
     if pause_node:
         pending = WorkflowPendingRun(
@@ -1040,6 +1073,9 @@ async def run_workflow_with_progress(
     user_input: str,
     emit: EmitFn,
     workspace_id: int | None = None,
+    *,
+    conversation_api_key: str | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -1052,7 +1088,15 @@ async def run_workflow_with_progress(
             await emit(event)
 
     context, steps, pause_node = await _execute_graph(
-        db, user_id, graph, user_input.strip(), emit=_emit, stream_llm=bool(emit), workspace_id=workspace_id
+        db,
+        user_id,
+        graph,
+        user_input.strip(),
+        emit=_emit,
+        stream_llm=bool(emit),
+        workspace_id=workspace_id,
+        conversation_api_key=conversation_api_key,
+        cancel_event=cancel_event,
     )
 
     if pause_node:
@@ -1209,6 +1253,8 @@ async def _execute_graph(
     initial_context: dict | None = None,
     skip_until_after: str | None = None,
     initial_steps: list | None = None,
+    conversation_api_key: str | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> tuple[dict, list[dict], str | None]:
     context = dict(initial_context) if initial_context else {"input": user_input, "retrieved": "", "output": ""}
     if user_input:
@@ -1225,7 +1271,13 @@ async def _execute_graph(
         workflow_retrieve,
     )
 
-    rt_ctx = make_runtime_ctx(db, user_id=user_id, workspace_id=workspace_id)
+    rt_ctx = make_runtime_ctx(
+        db,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        conversation_api_key=conversation_api_key,
+        cancel_event=cancel_event,
+    )
     trace_id = rt_ctx.trace_id
     context["_trace_id"] = trace_id
 
@@ -1234,6 +1286,10 @@ async def _execute_graph(
             await emit(event)
 
     for node in _topo_order(graph):
+        if cancel_event is not None and cancel_event.is_set():
+            step = {"node_id": node.get("id"), "type": node.get("type"), "status": "cancelled", "output": "Run stopped"}
+            steps.append(step)
+            break
         if not passed_pause:
             if node.get("id") == skip_until_after:
                 passed_pause = True
@@ -1291,12 +1347,22 @@ async def _execute_graph(
             url = _apply_template(data.get("url") or "", context).strip()
             method = (data.get("method") or "GET").upper()
             body = _apply_template(data.get("body") or "", context)
+            auth_kind = (data.get("auth") or "").strip() or None
+            credential_id = (data.get("credential_id") or "").strip() or None
             if not url:
                 step["output"] = "(no url)"
                 step["status"] = "error"
             else:
                 try:
-                    result = await _fetch_http(url, method, body)
+                    result = await _fetch_http(
+                        url,
+                        method,
+                        body,
+                        db=db,
+                        workspace_id=workspace_id,
+                        auth_kind=auth_kind,
+                        credential_id=credential_id,
+                    )
                     context["http"] = result
                     if data.get("set_output", True):
                         context["output"] = result
@@ -1659,8 +1725,45 @@ async def _execute_graph(
                 step["output"] = (context["output"] or "")[:500]
                 step["sub_steps"] = len(sub_steps)
                 step["status"] = "ok"
+        elif ntype == "api_node":
+            try:
+                from app.services.api_node_runtime import execute_api_node_definition
+
+                mapped, probe_meta = await execute_api_node_definition(
+                    db,
+                    workspace_id,
+                    data,
+                    context,
+                )
+                context["http"] = mapped
+                if data.get("set_output", True):
+                    context["output"] = mapped
+                step["output"] = mapped[:500] + ("…" if len(mapped) > 500 else "")
+                step["status_code"] = probe_meta.get("status_code")
+                step["status"] = "ok"
+            except Exception as exc:
+                step["output"] = str(exc)[:500]
+                step["status"] = "error"
         else:
-            step["status"] = "skipped"
+            from app.workflow_intelligence.plugin_sdk import plugin_registry
+
+            handler = plugin_registry.get_node_handler(ntype)
+            if handler:
+                try:
+                    result = await handler(rt_ctx, node, context)
+                    if isinstance(result, dict):
+                        if result.get("output"):
+                            context["output"] = result["output"]
+                        step["output"] = str(result.get("output") or result)[:500]
+                    else:
+                        step["output"] = str(result)[:500]
+                    step["status"] = "ok"
+                except Exception as exc:
+                    step["output"] = str(exc)[:500]
+                    step["status"] = "error"
+            else:
+                step["output"] = f"Unknown node type: {ntype}"
+                step["status"] = "error"
 
         steps.append(step)
         await _emit({"type": "step", "phase": "done", "step": step})

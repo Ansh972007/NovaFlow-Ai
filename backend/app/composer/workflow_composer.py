@@ -10,6 +10,82 @@ from sqlalchemy.orm import Session
 from app.composer.recipes import RECIPES, match_recipe
 from app.database import ProjectGraph, SolutionGraph, Workflow
 
+NOTIFY_VAULT_MAP: dict[str, tuple[str, str | None]] = {
+    "email": ("email", None),
+    "telegram": ("telegram", "telegram_bot"),
+    "slack": ("slack", "slack_webhook"),
+    "discord": ("discord", "discord_webhook"),
+    "whatsapp": ("whatsapp", "whatsapp_cloud"),
+}
+
+HTTP_AUTH_VAULT_MAP: dict[str, tuple[str, str]] = {
+    "youtube": ("youtube", "youtube_api"),
+    "google": ("google", "google_oauth"),
+    "google_api": ("google", "google_oauth"),
+    "shopify": ("shopify", "shopify_admin"),
+    "custom": ("custom", "custom"),
+    "outlook": ("outlook", "microsoft_graph"),
+}
+
+
+def _bind_vault_credentials(
+    nodes: list[dict[str, Any]],
+    db: Session | None,
+    workspace_id: int | None,
+) -> list[dict[str, Any]]:
+    if not db or not workspace_id:
+        return nodes
+    from app.services import credential_vault as vault
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") or {}
+        ntype = node.get("type")
+        if ntype == "http":
+            auth = (data.get("auth") or "").strip().lower()
+            if not auth:
+                continue
+            category, kind = HTTP_AUTH_VAULT_MAP.get(auth, ("custom", "custom"))
+            row = vault.get_default(db, workspace_id, category=category, kind=kind)
+            if row:
+                data["credential_id"] = row.id
+                data["vault_category"] = row.category
+                data["vault_kind"] = row.kind
+                node["data"] = data
+        elif ntype == "notify":
+            channel = (data.get("channel") or "").strip().lower()
+            cat_kind = NOTIFY_VAULT_MAP.get(channel)
+            if not cat_kind:
+                continue
+            category, kind = cat_kind
+            row = vault.get_default(db, workspace_id, category=category, kind=kind)
+            if row:
+                data["credential_id"] = row.id
+                data["vault_category"] = row.category
+                data["vault_kind"] = row.kind
+                node["data"] = data
+        elif ntype == "api_node":
+            def_id = (data.get("node_def_id") or "").strip()
+            if def_id:
+                from app.database import NodeDefinition
+
+                row_def = db.get(NodeDefinition, def_id)
+                if row_def:
+                    try:
+                        defn = json.loads(row_def.definition_json or "{}")
+                    except json.JSONDecodeError:
+                        defn = {}
+                    http_cfg = defn.get("http") or {}
+                    auth = (http_cfg.get("auth") or "").strip().lower()
+                    if auth:
+                        category, kind = HTTP_AUTH_VAULT_MAP.get(auth, ("custom", "custom"))
+                        cred_row = vault.get_default(db, workspace_id, category=category, kind=kind)
+                        if cred_row and not data.get("credential_id"):
+                            data["credential_id"] = cred_row.id
+                            node["data"] = data
+    return nodes
+
 
 def _required_caps_from_solution(graph_payload: dict) -> list[str]:
     required = graph_payload.get("required_capabilities") or []
@@ -44,6 +120,8 @@ def build_executable_graph(
     knowledge_id: int | None = None,
     recipe_id: str | None = None,
     requirements: dict[str, Any] | None = None,
+    db: Session | None = None,
+    workspace_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Build a runnable workflow graph (nodes/edges) from capability ids + goal hints.
@@ -388,31 +466,51 @@ def build_executable_graph(
                 prev = nid
 
     if wants_http:
-        # Prefer custom SaaS base_url when detected; else webhook placeholder
-        http_url = "{{webhook_url}}"
-        if any(
-            k in goal_l
-            for k in (
-                "hubspot",
-                "stripe",
-                "notion",
-                "salesforce",
-                "airtable",
-                "zendesk",
-                "custom api",
-                "base_url",
+        library_match = None
+        if db and workspace_id:
+            from app.services.node_library import find_best_library_match
+
+            library_match = find_best_library_match(db, workspace_id, goal)
+        if library_match:
+            nid = add(
+                {
+                    "id": f"api_{library_match.slug}",
+                    "type": "api_node",
+                    "data": {
+                        "node_def_id": library_match.id,
+                        "label": library_match.display_name,
+                        "set_output": True,
+                    },
+                }
             )
-        ):
-            http_url = "{{base_url}}"
-        nid = add(
-            {
-                "id": "http",
-                "type": "http",
-                "data": {"url": http_url, "method": "POST", "body": "{{output}}", "auth": "custom"},
-            }
-        )
-        edges.append({"from": prev, "to": nid})
-        prev = nid
+            edges.append({"from": prev, "to": nid})
+            prev = nid
+        else:
+            # Prefer custom SaaS base_url when detected; else webhook placeholder
+            http_url = "{{webhook_url}}"
+            if any(
+                k in goal_l
+                for k in (
+                    "hubspot",
+                    "stripe",
+                    "notion",
+                    "salesforce",
+                    "airtable",
+                    "zendesk",
+                    "custom api",
+                    "base_url",
+                )
+            ):
+                http_url = "{{base_url}}"
+            nid = add(
+                {
+                    "id": "http",
+                    "type": "http",
+                    "data": {"url": http_url, "method": "POST", "body": "{{output}}", "auth": "custom"},
+                }
+            )
+            edges.append({"from": prev, "to": nid})
+            prev = nid
 
     out_label = "Result"
     if primary_channel == "youtube":
@@ -453,6 +551,8 @@ def build_executable_graph(
     }
     if inputs:
         meta_out["inputs"] = inputs
+
+    nodes = _bind_vault_credentials(nodes, db, workspace_id)
 
     return {
         "nodes": nodes,
@@ -545,12 +645,19 @@ def preview_graph_for_solution(
     solution = db.query(SolutionGraph).filter(SolutionGraph.id == solution_id).first()
     if not solution:
         raise ValueError("Solution graph not found.")
+    project = db.query(ProjectGraph).filter(ProjectGraph.id == solution.project_id).first()
+    workspace_id = project.workspace_id if project else None
     payload = json.loads(solution.graph_payload or "{}")
     caps = _required_caps_from_solution(payload)
     goal = _goal_text(db, solution)
     recipe_id = (payload.get("recipe") or {}).get("id") if isinstance(payload.get("recipe"), dict) else None
     return build_executable_graph(
-        required_caps=caps, goal=goal, knowledge_id=knowledge_id, recipe_id=recipe_id
+        required_caps=caps,
+        goal=goal,
+        knowledge_id=knowledge_id,
+        recipe_id=recipe_id,
+        db=db,
+        workspace_id=workspace_id,
     )
 
 
@@ -568,11 +675,35 @@ def assemble_executable_workflow(
         raise ValueError("Solution graph not found.")
 
     graph_json = preview_graph_for_solution(db, solution_id, knowledge_id=knowledge_id)
+    nodes = list(graph_json.get("nodes") or [])
+    edges = list(graph_json.get("edges") or [])
+    if knowledge_id:
+        for node in nodes:
+            if isinstance(node, dict) and node.get("type") == "retrieve":
+                data = dict(node.get("data") or {})
+                if not data.get("knowledge_id"):
+                    data["knowledge_id"] = knowledge_id
+                    node["data"] = data
+
+    raw_graph = {"nodes": nodes, "edges": edges}
+    try:
+        from app.workflow_intelligence.graph.parser import parse_graph
+        from app.workflow_intelligence.publish_gate import check_publish_ready
+
+        gate = check_publish_ready(parse_graph(raw_graph), db=db, workspace_id=workspace_id)
+        if not gate.get("ready"):
+            blockers = gate.get("blockers") or []
+            detail = blockers[0].get("message") if blockers else "Graph validation failed"
+            raise ValueError(f"Workflow not publish-ready: {detail}")
+    except ValueError:
+        raise
+    except Exception:
+        pass
 
     workflow = Workflow(
         name=f"AIOS Workflow {solution_id[:8]}",
         desc="Executable graph compiled from AIOS SolutionGraph",
-        graph_json=json.dumps({"nodes": graph_json["nodes"], "edges": graph_json["edges"]}),
+        graph_json=json.dumps(raw_graph),
         user_id=user_id,
         workspace_id=workspace_id,
         status=1,

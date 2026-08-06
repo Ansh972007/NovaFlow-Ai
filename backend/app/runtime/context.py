@@ -30,6 +30,7 @@ class RuntimeContext:
     cancel_event: Optional[asyncio.Event] = None
     session_id: str = ""
     trace_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex[:16])
+    conversation_api_key: Optional[str] = None
 
     @classmethod
     def from_platform(cls, ctx: "PlatformContext", *, cancel_event: asyncio.Event | None = None) -> "RuntimeContext":

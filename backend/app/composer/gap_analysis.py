@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 from app.database import WorkspaceIntegration
@@ -213,3 +215,43 @@ def credential_slots_for_missing(missing_labels: list[str]) -> list[dict[str, st
             }
         )
     return slots
+
+
+def integration_runnable_status(
+    required_caps: list[str],
+    missing_credentials: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Per-integration runnable vs needs-setup status for blueprint UI."""
+    from app.composer.chat_channels import friendly_missing_name, get_channel_by_cap
+
+    missing_set = set(missing_credentials or [])
+    statuses: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for cap in required_caps or []:
+        if cap in _NO_SECRET_CAPS or cap in seen:
+            continue
+        channel = get_channel_by_cap(cap)
+        if not channel:
+            if cap == "cap_http":
+                http_missing = [m for m in missing_set if m in ("webhook_url", "custom_api_key")]
+                statuses.append(
+                    {
+                        "id": "http",
+                        "label": "HTTP / Custom API",
+                        "runnable": not http_missing,
+                        "missing": [friendly_missing_name(m) for m in http_missing],
+                    }
+                )
+            seen.add(cap)
+            continue
+        seen.add(cap)
+        channel_missing = [m for m in channel.missing_labels if m in missing_set]
+        statuses.append(
+            {
+                "id": channel.id,
+                "label": channel.friendly_name,
+                "runnable": len(channel_missing) == 0,
+                "missing": [friendly_missing_name(m) for m in channel_missing],
+            }
+        )
+    return statuses

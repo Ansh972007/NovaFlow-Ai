@@ -1,4 +1,10 @@
-"""Workflow orchestrator for complete workflow building and execution."""
+"""Workflow orchestrator — legacy planning stub.
+
+Runtime workflow execution uses `app.services.workflow.run_workflow` /
+`run_workflow_with_progress`. This module is retained for dynamic component
+discovery only; do not persist graphs from `_build_workflow_graph` (uses legacy
+edge shape).
+"""
 
 from typing import Dict, Optional, List
 import json

@@ -16,6 +16,16 @@ LINEAR_GQL = "https://api.linear.app/graphql"
 def resolve_linear_config(db: Session, workspace_id: int | None) -> dict[str, Any]:
     if not workspace_id:
         return {"api_key": "", "team_id": "", "configured": False}
+    try:
+        from app.services import credential_vault as vault
+
+        fields = vault.resolve_fields(db, workspace_id, category="linear", kind="linear_api")
+        key = (fields.get("api_key") or "").strip()
+        team_id = (fields.get("team_id") or "").strip()
+        if key:
+            return {"api_key": key, "team_id": team_id, "configured": True}
+    except Exception:
+        pass
     row = db.get(WorkspaceIntegration, workspace_id)
     if not row:
         return {"api_key": "", "team_id": "", "configured": False}

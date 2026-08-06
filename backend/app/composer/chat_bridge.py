@@ -570,6 +570,18 @@ def _attachment_knowledge_id(
     )
     if not rows:
         return None
+    existing_kb_id = None
+    try:
+        conv = db.get(Conversation, conversation_id)
+        if conv and conv.meta_json:
+            conv_meta = json.loads(conv.meta_json or "{}")
+            existing_kb_id = (conv_meta.get("aios") or {}).get("knowledge_id")
+    except Exception:
+        existing_kb_id = None
+    if existing_kb_id:
+        kb = db.get(KnowledgeBase, int(existing_kb_id))
+        if kb and kb.workspace_id == workspace_id:
+            return kb.id
     kb = KnowledgeBase(
         name=f"Chat Attachments {str(conversation_id)[:8]}",
         description="Auto-indexed from chat conversation attachments.",
@@ -614,7 +626,12 @@ def _attachment_knowledge_id(
     return kb.id
 
 
-def _run_sandbox_for_aios(db: Session, aios: dict[str, Any]) -> dict[str, Any]:
+def _run_sandbox_for_aios(
+    db: Session,
+    aios: dict[str, Any],
+    *,
+    workspace_id: int | None = None,
+) -> dict[str, Any]:
     solution_id = aios.get("solution_id")
     preview = aios.get("executable_preview") or {}
     if solution_id and not (preview.get("nodes") if isinstance(preview, dict) else None):
@@ -627,6 +644,9 @@ def _run_sandbox_for_aios(db: Session, aios: dict[str, Any]) -> dict[str, Any]:
         preview if isinstance(preview, dict) else {},
         missing_credentials=aios.get("missing_credentials") or [],
         field=aios.get("last_field") or (aios.get("recipe") or {}).get("field"),
+        db=db,
+        workspace_id=workspace_id or aios.get("workspace_id"),
+        live_credential_probe=True,
     )
     report["solution_id"] = solution_id
     report["node_types"] = aios.get("node_types") or (preview.get("meta") or {}).get("node_types") or []
@@ -740,8 +760,12 @@ def _refresh_blueprint_from_aios(
         knowledge_id=aios.get("knowledge_id"),
         recipe_id=(recipe or {}).get("id"),
         requirements=req,
+        db=db,
+        workspace_id=workspace_id,
     )
-    blueprint = build_blueprint_preview(enriched_goal, req, required_caps, preview_executable)
+    blueprint = build_blueprint_preview(
+        enriched_goal, req, required_caps, preview_executable, missing_credentials=live_missing
+    )
     friendly_title = req.get("workflow_name") or aios.get("friendly_title") or friendly_title_for_goal(enriched_goal)
 
     aios.update(
@@ -898,17 +922,19 @@ def process_chat_goal(
                         aios["conversation_api_key"] = api_key
                         # Also save to vault for persistent use
                         try:
-                            secure_vault_save(
+                            from app.services import credential_vault as vault
+
+                            vault.upsert_from_chat(
                                 db,
-                                workspace_id,
-                                "llm",
-                                "openai",
-                                api_key,
+                                workspace_id=workspace_id,
                                 user_id=user_id,
-                                label="Conversation-provided API key"
+                                category="llm",
+                                kind="openai",
+                                label="Conversation-provided API key",
+                                fields={"api_key": api_key},
                             )
                         except Exception as e:
-                            print(f"Failed to save API key to vault: {e}")
+                            logger.warning("Failed to save API key to vault: %s", e)
             
             caps = aios.get("required_capabilities") or []
             missing: list[str] = []
@@ -1115,7 +1141,7 @@ def process_chat_goal(
         events.append(_emit_progress(aios))
         return _finalize(events, True, redacted_message)
 
-    if intent == "agent_run" or (intent in ("compose", "refine") and is_complex_agent_goal(text)):
+    if intent == "agent_run":
         goal = text
         if intent == "refine" and aios.get("goal"):
             goal = f"{aios.get('goal')}\n\nRefinement: {text}"
@@ -1205,8 +1231,24 @@ def process_chat_goal(
         fresh_hint = _parse_req_early(text, last_field=aios.get("last_field"), db=db)
         if intent == "compose" and fresh_hint.get("integration"):
             prev_int = (aios.get("requirements") or {}).get("integration")
-            if prev_int and fresh_hint.get("integration") != prev_int:
-                goal = text
+            if prev_int and fresh_hint.get("integration") != prev_int and aios.get("solution_id"):
+                events.append(
+                    {
+                        "type": "aios_solution",
+                        "data": {
+                            **aios,
+                            "message": (
+                                f"New topic **{fresh_hint.get('integration')}** detected — "
+                                "starting a fresh blueprint (previous plan archived)."
+                            ),
+                            "status": "blueprint",
+                            "phase": "blueprint",
+                        },
+                    }
+                )
+                aios["solution_id"] = None
+                aios["approved"] = False
+                aios["tested"] = False
             elif aios.get("goal") and (
                 intent == "refine"
                 or re.search(r"\b(for this|for that|from this)\b", text, re.I)
@@ -1257,6 +1299,10 @@ def process_chat_goal(
         recipe_name = (recipe or {}).get("name")
         attach_n = _attachment_count(db, conversation_id, workspace_id)
         knowledge_id = aios.get("knowledge_id")
+        if not knowledge_id and attach_n:
+            knowledge_id = _attachment_knowledge_id(
+                db, workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id
+            )
 
         preview_executable = build_executable_graph(
             required_caps=required_caps,
@@ -1264,8 +1310,12 @@ def process_chat_goal(
             knowledge_id=knowledge_id,
             recipe_id=(recipe or {}).get("id"),
             requirements=req,
+            db=db,
+            workspace_id=workspace_id,
         )
-        blueprint = build_blueprint_preview(enriched_goal, req, required_caps, preview_executable)
+        blueprint = build_blueprint_preview(
+            enriched_goal, req, required_caps, preview_executable, missing_credentials=live_missing
+        )
         compose_phase = "gather" if missing_slots or live_missing else "await_approve"
         next_action = "gather" if missing_slots else ("credentials" if live_missing else "approve")
         from app.composer.gap_analysis import credential_slots_for_missing
@@ -1358,6 +1408,38 @@ def process_chat_goal(
             "chips": cred_chips,
             "message": solution_msg,
         }
+        node_types = [n.get("type") for n in preview_executable.get("nodes") or [] if isinstance(n, dict)]
+        needs_custom_api = (
+            req.get("integration") == "custom"
+            or "cap_http" in required_caps
+            or any(k in enriched_goal.lower() for k in ("custom api", "base_url", "stripe", "hubspot"))
+        )
+        if needs_custom_api and "api_node" not in node_types:
+            http_node = next(
+                (
+                    n
+                    for n in preview_executable.get("nodes") or []
+                    if isinstance(n, dict) and n.get("type") == "http"
+                ),
+                None,
+            )
+            if http_node:
+                http_data = http_node.get("data") or {}
+                events.append(
+                    {
+                        "type": "aios_node_factory",
+                        "data": {
+                            "message": "No saved API node matched — probe your API, then save it to your node library.",
+                            "suggested": {
+                                "url": http_data.get("url") or "{{base_url}}",
+                                "method": http_data.get("method") or "POST",
+                                "body": http_data.get("body") or "{{output}}",
+                                "auth": http_data.get("auth") or "custom",
+                            },
+                            "chips": ["Probe API", "Open workflow builder"],
+                        },
+                    }
+                )
         events.append({"type": "aios_solution", "data": solution_card})
         return _finalize(events, True, redacted_message, goal=enriched_goal)
 
@@ -1499,7 +1581,7 @@ def process_chat_goal(
             return out
 
         if aios.get("solution_id") and not pending_agent_execute:
-            report = _run_sandbox_for_aios(db, aios)
+            report = _run_sandbox_for_aios(db, aios, workspace_id=workspace_id)
             aios["last_test"] = report
             aios["tested"] = report.get("status") == "success"
             aios["status"] = "tested" if aios["tested"] else "test_failed"
@@ -1612,7 +1694,7 @@ def process_chat_goal(
                 }
             )
             return _finalize(events, True, redacted_message)
-        report = _run_sandbox_for_aios(db, aios)
+        report = _run_sandbox_for_aios(db, aios, workspace_id=workspace_id)
         aios["last_test"] = report
         aios["tested"] = report.get("status") == "success"
         aios["status"] = "tested" if aios["tested"] else "test_failed"
@@ -1676,6 +1758,20 @@ def process_chat_goal(
             )
             return _finalize(events, True, redacted_message)
 
+        force_deploy = bool(re.search(r"\bforce deploy\b", text or "", re.I))
+        if not aios.get("tested") and not force_deploy:
+            events.append(
+                {
+                    "type": "aios_deploy",
+                    "data": {
+                        "status": "blocked",
+                        "message": "Run a sandbox test before deploy, or say **force deploy** to skip.",
+                        "chips": ["Run test", "Retest", "force deploy"],
+                    },
+                }
+            )
+            return _finalize(events, True, redacted_message)
+
         knowledge_id = aios.get("knowledge_id") or _attachment_knowledge_id(
             db, workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id
         )
@@ -1720,7 +1816,7 @@ def process_chat_goal(
             )
         except Exception:  # noqa: BLE001
             pass
-        events.append({"type": "aios_deploy", "data": deploy})
+        events.append({"type": "aios_deploy", "data": {**deploy, "chips": ["Run now", "Schedule", "Run test"]}})
         events.append(_emit_progress(aios))
         if isinstance(aios.get("requirements"), dict):
             events.append(
@@ -1777,6 +1873,20 @@ def _finalize(
     }
 
 
+def _aios_public_snapshot(aios: dict[str, Any] | None) -> dict[str, Any]:
+    """Lightweight aios fields needed by WebSocket / same-turn LLM."""
+    if not aios:
+        return {}
+    return {
+        "conversation_api_key": aios.get("conversation_api_key"),
+        "compose_phase": aios.get("compose_phase"),
+        "status": aios.get("status"),
+        "solution_id": aios.get("solution_id"),
+        "workflow_id": (aios.get("deploy") or {}).get("workflow_id"),
+        "missing_credentials": aios.get("missing_credentials"),
+    }
+
+
 async def process_chat_turn(
     db: Session,
     *,
@@ -1787,6 +1897,19 @@ async def process_chat_turn(
     workspace_role: str | None = "editor",
 ) -> dict[str, Any]:
     """Async chat pipeline: bridge → ops dispatch → optional Agent OS execute."""
+    def _attach_aios_snapshot(out: dict[str, Any]) -> dict[str, Any]:
+        if conversation_id:
+            conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+            if conv:
+                try:
+                    meta = json.loads(conv.meta_json or "{}")
+                except json.JSONDecodeError:
+                    meta = {}
+                snap = _aios_public_snapshot(meta.get("aios") or {})
+                if snap:
+                    out["aios"] = snap
+        return out
+
     bridge = process_chat_goal(
         db,
         workspace_id=workspace_id,
@@ -1816,7 +1939,7 @@ async def process_chat_turn(
             )
             if ops.get("summary"):
                 out["summary"] = ops["summary"]
-            return out
+            return _attach_aios_snapshot(out)
 
     events = list(bridge.get("events") or [])
     summary = bridge.get("summary") or ""
@@ -1913,13 +2036,13 @@ async def process_chat_turn(
         )
         if summary.strip():
             packed["summary"] = summary.strip()
-        return packed
+        return _attach_aios_snapshot(packed)
 
-    return {
+    return _attach_aios_snapshot({
         "events": events,
         "ui_events": ui_events if ui_events is not None else _ui_events_from(events),
         "primary_event": primary or _select_primary_event(events),
         "blocked_normal_reply": blocked,
         "summary": summary.strip(),
         "redacted_message": bridge.get("redacted_message") or user_message,
-    }
+    })

@@ -22,6 +22,7 @@ def make_runtime_ctx(
     role: str = "editor",
     cancel_event=None,
     trace_id: str = "",
+    conversation_api_key: str | None = None,
 ) -> RuntimeContext:
     import uuid
 
@@ -32,6 +33,8 @@ def make_runtime_ctx(
         role=role,
         cancel_event=cancel_event,
     )
+    if conversation_api_key:
+        ctx.conversation_api_key = conversation_api_key
     if not trace_id:
         trace_id = uuid.uuid4().hex[:16]
     ctx.trace_id = trace_id
@@ -64,7 +67,12 @@ async def workflow_llm_sync(
         )
     )
     runtime = AIRuntime(ctx)
-    req = ChatRequest(user_message=compiled.user, system_prompt=compiled.system)
+    req = ChatRequest(
+        user_message=compiled.user,
+        system_prompt=compiled.system,
+        user_id=ctx.user_id,
+        conversation_api_key=ctx.conversation_api_key,
+    )
     result = await runtime.chat(req)
     return validate_markdown_output(result.content).content
 
@@ -84,7 +92,12 @@ async def workflow_llm_stream(
         )
     )
     runtime = AIRuntime(ctx)
-    req = ChatRequest(user_message=compiled.user, system_prompt=compiled.system)
+    req = ChatRequest(
+        user_message=compiled.user,
+        system_prompt=compiled.system,
+        user_id=ctx.user_id,
+        conversation_api_key=ctx.conversation_api_key,
+    )
     async for token in runtime.chat_stream(req):
         yield token
 

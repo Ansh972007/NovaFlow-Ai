@@ -128,6 +128,13 @@ const NODE_META = {
     ring: "subgraph",
     port: "bg-teal-500",
   },
+  api_node: {
+    label: "API",
+    accent: "workflow-node-http",
+    iconBg: "from-indigo-400/20 to-indigo-600/10 text-indigo-700",
+    ring: "http",
+    port: "bg-indigo-500",
+  },
 };
 
 function clamp(n, min, max) {
@@ -166,6 +173,7 @@ function nodeSubtitle(node) {
   if (node.type === "human") return node.data?.require_approval ? "Approval gate" : "Review";
   if (node.type === "agent") return (node.data?.tools || []).join(", ") || "Tools";
   if (node.type === "subgraph") return node.data?.workflow_id ? `WF ${node.data.workflow_id.slice(0, 8)}` : "Link workflow";
+  if (node.type === "api_node") return node.data?.label || node.data?.node_def_id?.slice(0, 12) || "API node";
   return node.data?.label || node.type;
 }
 
