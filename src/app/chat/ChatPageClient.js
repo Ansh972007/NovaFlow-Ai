@@ -81,38 +81,77 @@ export default function ChatPageClient() {
 
   const loadApps = useCallback(async () => {
     setLoadingApps(true);
-    try {
-      let list = await getOnlineApps();
-      if (!list?.length) {
-        const assistants = await getAssistants();
-        list = (assistants || []).map((a) => ({
-          ...a,
-          flow_type: FLOW_TYPE.ASSISTANT,
-        }));
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    const attemptLoad = async () => {
+      try {
+        let list = await getOnlineApps();
+        if (!list?.length) {
+          const assistants = await getAssistants();
+          list = (assistants || []).map((a) => ({
+            ...a,
+            flow_type: FLOW_TYPE.ASSISTANT,
+          }));
+        }
+        setApps(list || []);
+        return list || [];
+      } catch (error) {
+        console.error("Error loading apps:", error);
+        if (retryCount < maxRetries) {
+          retryCount++;
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+          console.log(`Retrying app load in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return attemptLoad();
+        }
+        setApps([]);
+        return [];
       }
-      setApps(list || []);
-      return list || [];
-    } catch {
-      setApps([]);
-      return [];
-    } finally {
-      setLoadingApps(false);
-    }
+    };
+    
+    const result = await attemptLoad();
+    setLoadingApps(false);
+    return result;
   }, []);
 
   useEffect(() => {
-    getUserInfo()
-      .then(setUser)
-      .catch(() => router.push("/login"))
-      .finally(() => setAuthChecked(true));
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    const attemptGetUserInfo = async () => {
+      try {
+        const userInfo = await getUserInfo();
+        setUser(userInfo);
+        setAuthChecked(true);
+      } catch (error) {
+        console.error("Error getting user info:", error);
+        if (retryCount < maxRetries) {
+          retryCount++;
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+          console.log(`Retrying user info in ${delay}ms...`);
+          setTimeout(attemptGetUserInfo, delay);
+        } else {
+          router.push("/login");
+          setAuthChecked(true);
+        }
+      }
+    };
+    
+    attemptGetUserInfo();
   }, [router]);
 
   useEffect(() => {
     if (!authChecked || !user) return;
     loadApps().then((list) => {
-      if (!list.length) return;
+      const defaultApp = { id: "default_assistant", name: "NovaFlow AI", flow_type: "assistant" };
+      if (!list || !list.length) {
+        setSelectedApp(defaultApp);
+        setApps([defaultApp]);
+        return;
+      }
       const app = list.find((a) => String(a.id) === String(appIdParam)) || list[0];
-      setSelectedApp(app);
+      setSelectedApp(app || defaultApp);
     });
   }, [authChecked, user, loadApps, appIdParam]);
 
@@ -145,7 +184,9 @@ export default function ChatPageClient() {
       const first = appSessions[0];
       setSessionId(first.id);
       setInitialMessages(getSessionMessages(first.id));
-      router.replace(`/chat?app=${selectedApp.id}&session=${first.id}`);
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", `/chat?app=${selectedApp.id}&session=${first.id}`);
+      }
       return;
     }
 
@@ -161,8 +202,10 @@ export default function ChatPageClient() {
     setSessionId(newId);
     setInitialMessages([]);
     setSessions(getSessionsForApp(selectedApp.id));
-    router.replace(`/chat?app=${selectedApp.id}&session=${newId}`);
-  }, [selectedApp?.id, sessionParam, router]);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `/chat?app=${selectedApp.id}&session=${newId}`);
+    }
+  }, [selectedApp?.id]);
 
   const startNewChat = useCallback(
     (app = selectedApp) => {
@@ -355,7 +398,7 @@ export default function ChatPageClient() {
                 </div>
               </div>
             ) : (
-              <div key={chatKey} className="flex min-h-0 flex-1 flex-col">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <ChatMessages
                   messages={messages}
                   streaming={streaming}

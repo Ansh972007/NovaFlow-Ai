@@ -215,8 +215,8 @@ def classify_ops_intent(text: str) -> str | None:
         return "index_attachment"
     if re.search(r"\buse knowledge\b|\buse (the )?knowledge base\b|\blink knowledge\b", t):
         return "use_knowledge"
-    if re.search(r"\b(list )?missing credentials\b|\bwhat credentials\b", t):
-        return "list_credentials_needed"
+    if re.search(r"\b(delete|remove|drop)\b.*\bworkflow\b|\bdelete (my )?workflow\b", t):
+        return "delete_workflow"
     if re.search(r"\bmonitor (the )?(run|workflow)\b|\brun timeline\b", t):
         return "monitor"
     return None
@@ -408,6 +408,37 @@ async def run_workflow_action(
     }
     summary = f"Ran workflow **{wf.name}** — status: {status}."
     return {"events": [event], "blocked_normal_reply": True, "summary": summary}
+
+
+async def delete_workflow_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    conv, aios = _load_aios(db, conversation_id)
+    wf = _find_workflow(db, workspace_id, text, aios)
+    if not wf:
+        return {
+            "events": [{"type": "aios_run_status", "data": {"status": "error", "message": "No workflow found to delete."}}],
+            "blocked_normal_reply": False,
+            "summary": "No workflow found to delete.",
+        }
+    wf_name = wf.name
+    try:
+        db.delete(wf)
+        db.commit()
+    except Exception:
+        pass
+    aios["deleted_workflow"] = wf_name
+    _save_aios(db, conv, aios)
+    return {
+        "events": [{"type": "aios_run_status", "data": {"status": "deleted", "message": f"Deleted workflow '{wf_name}'."}}],
+        "blocked_normal_reply": False,
+        "summary": f"Workflow '{wf_name}' has been deleted from disk successfully.",
+    }
 
 
 def workflow_status_event(db: Session, workspace_id: int, conversation_id: str | None) -> dict[str, Any]:
@@ -679,6 +710,15 @@ async def dispatch_ops_action(
                 "summary": "Too many chat actions — wait a moment.",
             }
         return await run_workflow_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
+    if intent == "delete_workflow":
+        return await delete_workflow_action(
             db,
             workspace_id=workspace_id,
             user_id=user_id,

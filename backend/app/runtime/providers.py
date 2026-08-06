@@ -41,15 +41,16 @@ class ProviderConfig:
         }
 
 
-def resolve_provider(db: Session | None) -> ProviderConfig:
+def resolve_provider(db: Session | None, conversation_api_key: str | None = None, user_id: int | None = None) -> ProviderConfig:
     from app.services.llm_providers import get_active_config
 
-    raw = get_active_config(db)
+    raw = get_active_config(db, conversation_api_key, user_id)
     ptype = (raw.get("provider_type") or "openai").lower()
-    ptype = PROVIDER_ALIASES.get(ptype, ptype)
-    pid = raw.get("provider_id")
+    pid_raw = raw.get("provider_id")
+    pid_str = str(pid_raw or "")
+    parsed_pid = int(pid_str) if pid_str.isdigit() else None
     return ProviderConfig(
-        provider_id=int(pid) if pid else None,
+        provider_id=parsed_pid,
         provider_type=ptype,
         provider_name=raw.get("provider_name") or ptype,
         api_key=raw.get("api_key") or "",

@@ -64,8 +64,13 @@ def get_public_key_pem() -> str:
 
 
 def decrypt_password_plain(encrypted_b64: str) -> str:
-    _, priv = get_rsa_keys()
-    return rsa.decrypt(base64.b64decode(encrypted_b64), priv).decode("utf-8")
+    if not encrypted_b64:
+        return ""
+    try:
+        _, priv = get_rsa_keys()
+        return rsa.decrypt(base64.b64decode(encrypted_b64), priv).decode("utf-8")
+    except Exception:
+        return encrypted_b64
 
 
 def decrypt_password(encrypted_b64: str) -> str:

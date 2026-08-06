@@ -53,6 +53,21 @@ export async function getUserInfo(options = {}) {
   if (!fresh && userCache && Date.now() - userCacheAt < USER_CACHE_MS) {
     return userCache;
   }
+  
+  // Pre-flight authentication check
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("nf_token");
+    if (!token) {
+      // Clear cache and redirect to login
+      clearUserCache();
+      const path = window.location.pathname;
+      if (!path.startsWith("/login") && !path.startsWith("/setup")) {
+        window.location.assign(`/login?next=${encodeURIComponent(path)}`);
+      }
+      throw new Error("No authentication token found");
+    }
+  }
+  
   const data = await client.get("/user/info");
   userCache = data;
   userCacheAt = Date.now();

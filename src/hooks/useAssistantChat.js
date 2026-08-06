@@ -59,23 +59,37 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
       /* ignore */
     }
 
-    const created = await createConversation({
-      title: `Chat ${app.name || "session"}`,
-      assistantId: app.id,
-      conversationType: "assistant",
-    });
-    const createdId = created?.id || "";
-    conversationIdRef.current = createdId;
     try {
+      const created = await createConversation({
+        title: `Chat ${app.name || "session"}`,
+        assistantId: app.id === "default_assistant" ? "" : app.id,
+        conversationType: "assistant",
+      });
+      const createdId = created?.id || "";
+      conversationIdRef.current = createdId;
       if (createdId) localStorage.setItem(key, createdId);
+      return createdId;
     } catch {
-      /* ignore */
+      return conversationIdRef.current || "";
     }
-    return createdId;
   }, [app, sessionId]);
 
   const connect = useCallback(async () => {
     if (!app || !sessionId) return;
+    
+    // Pre-flight authentication check
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("nf_token");
+      if (!token) {
+        setError("Authentication required. Please log in again.");
+        const path = window.location.pathname;
+        if (!path.startsWith("/login") && !path.startsWith("/setup")) {
+          window.location.assign(`/login?next=${encodeURIComponent(path)}`);
+        }
+        return;
+      }
+    }
+    
     socketRef.current?.disconnect();
 
     const socket = new AssistantChatSocket({
@@ -104,8 +118,8 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
           });
         },
         onStart: () => {
+          if (aiosTurnActiveRef.current) return;
           pendingAiosEventsRef.current = [];
-          aiosTurnActiveRef.current = false;
           const id = generateId();
           botMsgIdRef.current = id;
           setMessages((prev) => [
@@ -115,13 +129,26 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
         },
         onStream: (chunk, _data, reasoning) => {
           setMessages((prev) => {
-            const id = botMsgIdRef.current;
-            if (!id) return prev;
+            let id = botMsgIdRef.current;
+            if (!id) {
+              id = generateId();
+              botMsgIdRef.current = id;
+              return [
+                ...prev,
+                {
+                  id,
+                  role: "assistant",
+                  content: chunk || "",
+                  reasoning: reasoning || "",
+                  streaming: true,
+                },
+              ];
+            }
             return prev.map((m) =>
               m.id === id
                 ? {
                     ...m,
-                    content: m.content + chunk,
+                    content: (m.content || "") + (chunk || ""),
                     reasoning: (m.reasoning || "") + (reasoning || ""),
                     streaming: true,
                   }
@@ -132,61 +159,50 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
         onStreamEnd: (chunk, data) => {
           const receipt = data?.receipt || null;
           const endText = String(chunk || "").trim();
-          const isAios = receipt?.event_type === "aios" || aiosTurnActiveRef.current;
           const buffered = pendingAiosEventsRef.current || [];
+          const primary = buffered[0] || null;
+          const aiosOnly = Boolean(data?.aios_only || aiosTurnActiveRef.current || primary);
           pendingAiosEventsRef.current = [];
           aiosTurnActiveRef.current = false;
 
-          setMessages((prev) => {
-            let next = [...prev];
-            const streamingId = botMsgIdRef.current;
-            // Drop empty streaming placeholder
-            if (streamingId) {
-              next = next.filter(
-                (m) => !(m.id === streamingId && !String(m.content || "").trim() && !m.event)
-              );
-            }
+          const resolveContent = (existing) => {
+            const trimmed = String(existing || "").trim();
+            if (trimmed) return trimmed;
+            if (endText) return endText;
+            if (primary?.data?.message) return String(primary.data.message);
+            if (primary?.data?.goal) return String(primary.data.goal);
+            if (aiosOnly) return "";
+            return "";
+          };
 
-            if (isAios || buffered.length) {
-              const primary = buffered[0] || null;
-              return pruneEmptyAssistants([
-                ...next,
+          setMessages((prev) => {
+            const streamingId = botMsgIdRef.current;
+
+            if (!streamingId) {
+              const content = resolveContent("");
+              return [
+                ...prev,
                 {
                   id: generateId(),
                   role: "assistant",
-                  content: endText || primary?.data?.message || "",
+                  content,
                   streaming: false,
                   event: primary || undefined,
                   receipt,
                 },
-              ]);
-            }
-
-            if (!streamingId) {
-              if (!endText) return pruneEmptyAssistants(next);
-              return [
-                ...pruneEmptyAssistants(next),
-                {
-                  id: generateId(),
-                  role: "assistant",
-                  content: endText,
-                  streaming: false,
-                  receipt,
-                },
               ];
             }
-            next = next.map((m) => {
+
+            return prev.map((m) => {
               if (m.id !== streamingId) return m;
-              const content = `${m.content || ""}${chunk || ""}`.trim();
-              if (!content) return { ...m, _drop: true, streaming: false };
               return {
                 ...m,
-                content,
+                content: resolveContent(m.content),
                 streaming: false,
-                receipt,
+                event: primary || m.event,
+                receipt: receipt || m.receipt,
               };
             });
-            return pruneEmptyAssistants(next.filter((m) => !m._drop));
           });
           botMsgIdRef.current = null;
           setStreaming(false);
@@ -197,16 +213,31 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
           pendingAiosEventsRef.current = [];
           aiosTurnActiveRef.current = false;
           setMessages((prev) =>
-            pruneEmptyAssistants(prev.map((m) => ({ ...m, streaming: false })))
+            prev.map((m) => ({ ...m, streaming: false }))
           );
         },
         onError: (msg) => {
-          setError(msg);
           setStreaming(false);
+          const streamingId = botMsgIdRef.current;
           botMsgIdRef.current = null;
           pendingAiosEventsRef.current = [];
           aiosTurnActiveRef.current = false;
-          setMessages((prev) => pruneEmptyAssistants(prev));
+          
+          const errText = msg || "API key or provider configuration notice. Please set your API key in Settings -> API Keys.";
+          setError(errText);
+          
+          setMessages((prev) => {
+            const filtered = prev.filter((m) => m.id !== streamingId);
+            return [
+              ...filtered,
+              {
+                id: generateId(),
+                role: "assistant",
+                content: errText,
+                streaming: false,
+              },
+            ];
+          });
         },
         onDisconnect: () => {
           setStreaming(false);
@@ -226,6 +257,7 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
             setMessages((prev) =>
               prev.filter((m) => !(m.id === streamingId && !String(m.content || "").trim()))
             );
+            botMsgIdRef.current = null;
           }
         },
       },
@@ -235,15 +267,20 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
     await socket.connect();
   }, [app, sessionId]);
 
+  const lastSessionIdRef = useRef(sessionId);
+
   useEffect(() => {
-    setMessages(pruneEmptyAssistants(initialMessages));
-    setError("");
-    setStreaming(false);
-    botMsgIdRef.current = null;
-    conversationIdRef.current = "";
-    guideShownRef.current = false;
-    pendingAiosEventsRef.current = [];
-    aiosTurnActiveRef.current = false;
+    if (lastSessionIdRef.current !== sessionId) {
+      lastSessionIdRef.current = sessionId;
+      setMessages(pruneEmptyAssistants(initialMessages));
+      setError("");
+      setStreaming(false);
+      botMsgIdRef.current = null;
+      conversationIdRef.current = "";
+      guideShownRef.current = false;
+      pendingAiosEventsRef.current = [];
+      aiosTurnActiveRef.current = false;
+    }
   }, [sessionId, initialMessages]);
 
   useEffect(() => {
@@ -258,8 +295,9 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
 
   const sendMessage = useCallback(
     async (text, options = {}) => {
-      const trimmed = text.trim();
-      if (!trimmed || streaming || !app) return;
+      const trimmed = text ? String(text).trim() : "";
+      const effectiveApp = app || { id: "default_assistant", name: "NovaFlow AI", flow_type: "assistant" };
+      if (!trimmed || streaming) return;
 
       setError("");
       setStreaming(true);
@@ -287,13 +325,23 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
         ) {
           await connect();
         }
-        socketRef.current.sendMessage(trimmed, historyForModel, {
+        await socketRef.current.sendMessage(trimmed, historyForModel, {
           conversationId: ensuredConversationId || conversationIdRef.current || "",
           attachmentIds: options.attachmentIds || [],
         });
       } catch (err) {
-        setError(err.message || "Failed to send message");
+        const errMsg = err.message || "Failed to send message";
+        setError(errMsg);
         setStreaming(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: generateId(),
+            role: "assistant",
+            content: `Notice: ${errMsg}`,
+            streaming: false,
+          },
+        ]);
       }
     },
     [app, streaming, connect, messages, ensureConversation]

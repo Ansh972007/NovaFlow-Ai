@@ -40,7 +40,8 @@ CHANNELS: list[ChannelSpec] = [
     ChannelSpec(
         id="outlook",
         friendly_name="Outlook / Microsoft 365",
-        aliases=("outlook", "microsoft 365", "office 365", "ms graph", "microsoft graph"),
+        aliases=("outlook", "microsoft 365", "office 365", "ms graph", "microsoft graph",
+                 "outlook calendar", "microsoft calendar", "excel online", "onedrive", "sharepoint"),
         cap="cap_outlook",
         category="outlook",
         kind="microsoft_graph",
@@ -54,7 +55,10 @@ CHANNELS: list[ChannelSpec] = [
     ChannelSpec(
         id="google",
         friendly_name="Google Auth / APIs",
-        aliases=("google auth", "google oauth", "google api", "google sheets", "google drive", "gdrive"),
+        aliases=(
+            "google auth", "google oauth", "google api", "google sheets", "google drive", "gdrive",
+            "excel", "spreadsheet", "google calendar", "gcal", "google cal",
+        ),
         cap="cap_google",
         category="google",
         kind="google_oauth",
@@ -133,7 +137,7 @@ CHANNELS: list[ChannelSpec] = [
     ChannelSpec(
         id="youtube",
         friendly_name="YouTube",
-        aliases=("youtube", "yt channel"),
+        aliases=("youtube", "yt channel", "yt"),
         cap="cap_youtube",
         category="youtube",
         kind="youtube_api",

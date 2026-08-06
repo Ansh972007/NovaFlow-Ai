@@ -11,6 +11,7 @@ UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 PORT = int(os.getenv("NOVAFLOW_PORT", "3001"))
+NOVAFLOW_ENV = os.getenv("NOVAFLOW_ENV", "development")
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     f"sqlite:///{(DATA_DIR / 'novaflow.db').as_posix()}",

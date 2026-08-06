@@ -18,10 +18,14 @@ export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || "NovaFlow AI";
 export function getWsQueryString() {
   if (typeof window === "undefined") return "";
   const params = new URLSearchParams();
-  const token = localStorage.getItem("nf_token");
-  if (token) params.set("t", token);
-  const wid = localStorage.getItem("nf_workspace_id");
-  if (wid) params.set("workspace_id", wid);
+  try {
+    const token = localStorage.getItem("nf_token");
+    if (token) params.set("t", token);
+    const wid = localStorage.getItem("nf_workspace_id");
+    if (wid) params.set("workspace_id", wid);
+  } catch (error) {
+    console.error("Error accessing localStorage in getWsQueryString:", error);
+  }
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

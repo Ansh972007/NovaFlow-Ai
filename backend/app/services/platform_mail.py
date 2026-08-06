@@ -33,17 +33,26 @@ def platform_mail_ready() -> bool:
 
 
 def send_platform_email_sync(to_addr: str, subject: str, body: str) -> dict[str, Any]:
-    """Synchronous send via platform SMTP (safe for FastAPI BackgroundTasks)."""
+    """Synchronous send via platform SMTP with automatic retries for resend attempts."""
+    import time
     from app.services.integrations import _send_email_sync
 
     cfg = platform_smtp_config()
     if not cfg.get("host") or not cfg.get("password"):
         logger.error("Platform SMTP is not configured — cannot send mail to %s", to_addr)
         return {"ok": False, "detail": "Platform SMTP is not configured"}
-    result = _send_email_sync(cfg, to_addr, subject, body)
-    if not result.get("ok"):
-        # Never log credentials; detail is exception text only
-        logger.error("Platform email failed for %s: %s", to_addr, (result.get("detail") or "")[:300])
-    else:
-        logger.info("Platform email sent to %s", to_addr)
+    
+    result = {"ok": False, "detail": "Failed to send email"}
+    for attempt in range(1, 4):
+        try:
+            logger.info("Sending platform email to %s (attempt %d/3)...", to_addr, attempt)
+            result = _send_email_sync(cfg, to_addr, subject, body)
+            if result.get("ok"):
+                logger.info("Platform email delivered to %s on attempt %d", to_addr, attempt)
+                return result
+            logger.warning("Attempt %d failed for %s: %s", attempt, to_addr, result.get("detail"))
+        except Exception as exc:
+            logger.warning("Attempt %d exception for %s: %s", attempt, to_addr, str(exc))
+        time.sleep(1)
+    
     return result

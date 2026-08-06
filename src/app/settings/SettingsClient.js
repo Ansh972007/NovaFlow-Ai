@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
+import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import SettingsNav, { SettingsStatCard } from "@/components/settings/SettingsNav";
 import SettingsSection, {

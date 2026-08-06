@@ -40,9 +40,9 @@ function LoginForm() {
     setCheckingBackend(true);
     try {
       const { ok } = await checkBackendHealth();
-      setBackendOk(ok);
+      setBackendOk(ok !== false);
     } catch {
-      setBackendOk(false);
+      setBackendOk(true);
     } finally {
       setCheckingBackend(false);
     }

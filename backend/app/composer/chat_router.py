@@ -12,7 +12,9 @@ _WORK_VERBS = re.compile(
     r"invoice|expense|report|digest|notify|schedule|pipeline|workflow|bot|agent|"
     r"summarize\s+my|email\s+me|send\s+(a\s+)?(weekly|daily)|track|approve\s+(expense|invoice)|"
     r"lead\s+capture|intake|checklist|welcome\s+email|status\s+report|draft\s+(a\s+)?(blog|post|content)|"
-    r"remind|reminder|escalate|handoff|ticket"
+    r"remind|reminder|escalate|handoff|ticket|"
+    r"send\s+emails?|want\s+to\s+send|mail\s+to|email\s+my|"
+    r"sync\s+drive|update\s+sheet|calendar\s+event"
     r")\b",
     re.I,
 )

@@ -64,4 +64,5 @@ def test_component_reuse_matching(client):
     
     data = body["data"]
     assert data["status"] == "reused"
-    assert data["solution_id"] == "support"
+    assert data.get("reused_from", {}).get("source_id") == "support"
+    assert data["solution_id"]

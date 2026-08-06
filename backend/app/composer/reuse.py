@@ -1,4 +1,5 @@
 import json
+import re
 from sqlalchemy.orm import Session
 from app.database import UniversalAsset, WorkflowFragment
 from app.services.workflow import TEMPLATES
@@ -10,6 +11,14 @@ def find_reusable_template(goal: str) -> dict | None:
         name = (tpl.get("name") or "").lower()
         # Require whole-word / phrase match on template name or explicit "use template X"
         if name and name in goal_lower:
+            return {
+                "id": tid,
+                "name": tpl.get("name"),
+                "desc": tpl.get("desc"),
+                "graph": tpl.get("graph"),
+                "type": "system_template",
+            }
+        if re.search(rf"\b{re.escape(tid)}\b", goal_lower):
             return {
                 "id": tid,
                 "name": tpl.get("name"),

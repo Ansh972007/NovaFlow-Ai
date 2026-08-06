@@ -289,6 +289,69 @@ TEMPLATES = {
             ],
         },
     },
+    "dynamic_email": {
+        "name": "Dynamic email generator",
+        "desc": "Generate and send personalized emails using LLM for any subject",
+        "graph": {
+            "nodes": [
+                {"id": "trigger", "type": "trigger", "x": 40, "y": 140, "data": {"label": "Email request"}},
+                {
+                    "id": "llm_content",
+                    "type": "llm",
+                    "x": 240,
+                    "y": 140,
+                    "data": {
+                        "prompt": (
+                            "You are an expert email writer. Generate a professional email based on the user's request.\n"
+                            "The user wants to send an email about: {{input}}\n"
+                            "Generate a complete email with:\n"
+                            "1. A compelling subject line (under 80 characters)\n"
+                            "2. Professional greeting\n"
+                            "3. Well-structured body paragraphs\n"
+                            "4. Clear call-to-action\n"
+                            "5. Professional closing\n\n"
+                            "Make the email personalized, engaging, and appropriate for the context.\n"
+                            "Format your response as:\n"
+                            "Subject: [your subject line]\n\n"
+                            "[email body]\n\n"
+                            "Keep the tone professional yet conversational."
+                        )
+                    },
+                },
+                {
+                    "id": "llm_subject",
+                    "type": "llm",
+                    "x": 440,
+                    "y": 80,
+                    "data": {
+                        "prompt": (
+                            "Extract the subject line from this email and return ONLY the subject text, nothing else:\n{{output}}"
+                        )
+                    },
+                },
+                {
+                    "id": "notify",
+                    "type": "notify",
+                    "x": 640,
+                    "y": 140,
+                    "data": {
+                        "channel": "email",
+                        "to": "{{recipient}}",
+                        "subject": "{{subject}}",
+                        "message": "{{output}}",
+                    },
+                },
+                {"id": "output", "type": "output", "x": 840, "y": 140, "data": {"label": "Email sent"}},
+            ],
+            "edges": [
+                {"from": "trigger", "to": "llm_content"},
+                {"from": "llm_content", "to": "llm_subject"},
+                {"from": "llm_content", "to": "notify"},
+                {"from": "llm_subject", "to": "notify"},
+                {"from": "notify", "to": "output"},
+            ],
+        },
+    },
     "eval_alert": {
         "name": "Eval alert webhook",
         "desc": "Format eval results and notify via webhook",

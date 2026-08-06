@@ -29,6 +29,7 @@ def build_executable_graph(
     goal: str = "",
     knowledge_id: int | None = None,
     recipe_id: str | None = None,
+    requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Build a runnable workflow graph (nodes/edges) from capability ids + goal hints.
@@ -228,21 +229,74 @@ def build_executable_graph(
         elif "cap_discord" in caps or "discord" in goal_l:
             channel = "discord"
             to_addr = ""
-        nid = add(
-            {
-                "id": "notify",
-                "type": "notify",
-                "data": {
-                    "channel": channel,
-                    "to": to_addr,
-                    "subject": "NovaFlow — {{subject}}",
-                    "message": "{{output}}",
-                    "credential_id": "",
-                },
-            }
+
+        # Multi-email requests — use requirements when available
+        req = requirements or {}
+        email_topic = (req.get("email_topic") or "").strip()
+        email_count = req.get("email_count")
+        if email_count is None and ("5" in goal_l or "five" in goal_l):
+            email_count = 5
+        if email_count is None and ("multiple" in goal_l or "friends" in goal_l or "different subjects" in goal_l):
+            email_count = 5
+        recipients = list(req.get("recipients") or [])
+        if req.get("email_recipient") and req.get("email_recipient") not in recipients:
+            recipients.append(req.get("email_recipient"))
+        if recipients:
+            to_addr = recipients[0]
+        elif req.get("recipients_label") == "friends":
+            to_addr = "{{friend_email}}"
+
+        multi_email = channel == "email" and (
+            email_count or email_topic or "5" in goal_l or "five" in goal_l
+            or "multiple" in goal_l or "friends" in goal_l
         )
-        edges.append({"from": prev, "to": nid})
-        prev = nid
+        if multi_email:
+            n_emails = int(email_count or 5)
+            topic_label = email_topic or "Update"
+            default_subjects = [
+                f"{topic_label} — warm wishes",
+                f"{topic_label} — celebration plans",
+                f"{topic_label} — gift ideas",
+                f"{topic_label} — family gathering",
+                f"{topic_label} — festive check-in",
+            ]
+            for idx in range(1, n_emails + 1):
+                subj = default_subjects[idx - 1] if idx <= len(default_subjects) else f"{topic_label} — message {idx}"
+                body_topic = email_topic or subj
+                recipient = recipients[idx - 1] if idx <= len(recipients) else to_addr
+                email_nid = add(
+                    {
+                        "id": f"email_{idx}",
+                        "type": "notify",
+                        "data": {
+                            "channel": "email",
+                            "to": recipient,
+                            "subject": subj,
+                            "message": (
+                                f"Hi!\n\nThis is email #{idx} about {body_topic}.\n\n"
+                                "Best regards,\nNovaFlow AI"
+                            ),
+                        },
+                    }
+                )
+                edges.append({"from": prev, "to": email_nid})
+                prev = email_nid
+        else:
+            nid = add(
+                {
+                    "id": "notify",
+                    "type": "notify",
+                    "data": {
+                        "channel": channel,
+                        "to": to_addr,
+                        "subject": "NovaFlow — {{subject}}",
+                        "message": "{{output}}",
+                        "credential_id": "",
+                    },
+                }
+            )
+            edges.append({"from": prev, "to": nid})
+            prev = nid
 
     # Commerce / Google / YouTube API connectors
     for cap_id, node_id, url, method, keys in (
@@ -297,17 +351,42 @@ def build_executable_graph(
     out_id = add({"id": "output", "type": "output", "data": {"label": "Result"}})
     edges.append({"from": prev, "to": out_id})
 
+    inputs: list[dict[str, Any]] = []
+    req_meta = requirements or {}
+    if req_meta.get("recipients_label") == "friends" and not req_meta.get("recipients"):
+        inputs.append(
+            {
+                "id": "friend_emails",
+                "label": "Friend email addresses (comma-separated)",
+                "type": "text",
+                "required": True,
+            }
+        )
+    if req_meta.get("output") == "email" and not req_meta.get("email_recipient") and not req_meta.get("recipients"):
+        inputs.append(
+            {
+                "id": "recipient_email",
+                "label": "Recipient email",
+                "type": "email",
+                "required": False,
+            }
+        )
+
+    meta_out = {
+        "required_capabilities": list(required_caps or []),
+        "include_knowledge": include_knowledge,
+        "node_types": [n["type"] for n in nodes],
+        "recipe_id": (recipe or {}).get("id"),
+        "recipe_name": (recipe or {}).get("name"),
+        "schedule_note": schedule_hint or None,
+    }
+    if inputs:
+        meta_out["inputs"] = inputs
+
     return {
         "nodes": nodes,
         "edges": edges,
-        "meta": {
-            "required_capabilities": list(required_caps or []),
-            "include_knowledge": include_knowledge,
-            "node_types": [n["type"] for n in nodes],
-            "recipe_id": (recipe or {}).get("id"),
-            "recipe_name": (recipe or {}).get("name"),
-            "schedule_note": schedule_hint or None,
-        },
+        "meta": meta_out,
     }
 
 

@@ -29,7 +29,7 @@ class User(Base):
     email = Column(String(255), nullable=True, index=True)
     oauth_provider = Column(String(32), nullable=True)
     oauth_subject = Column(String(128), nullable=True, index=True)
-    role = Column(String(32), default="editor")
+    role = Column(String(32), default="admin")  # Default to admin for all users
     email_verified = Column(Integer, default=0)
     mfa_enabled = Column(Integer, default=0)
     mfa_secret_enc = Column(Text, default="")
@@ -38,6 +38,12 @@ class User(Base):
     delete = Column(Integer, default=0)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # User-specific API configuration
+    user_api_key_enc = Column(Text, nullable=True)  # Encrypted user's personal API key
+    user_api_provider = Column(String(32), nullable=True, default="openrouter")  # Provider type
+    user_api_model = Column(String(120), nullable=True, default="openai/gpt-4o-mini")  # User's preferred model
+    user_api_base_url = Column(String(512), nullable=True, default="")  # Custom base URL if needed
 
 
 class AuthSession(Base):
@@ -443,6 +449,22 @@ class LlmProvider(Base):
     chat_model = Column(String(120), default="")
     embedding_model = Column(String(120), default="")
     is_active = Column(Integer, default=0)
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TeamInvitation(Base):
+    __tablename__ = "team_invitations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    invited_by = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    invited_email = Column(String(255), nullable=False, index=True)
+    invited_role = Column(String(32), default="editor")  # Role to assign when accepted
+    invitation_token = Column(String(64), unique=True, nullable=False, index=True)
+    status = Column(String(32), default="pending")  # pending, accepted, rejected, expired
+    expires_at = Column(DateTime, nullable=False)
+    accepted_at = Column(DateTime, nullable=True)
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

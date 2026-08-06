@@ -11,9 +11,9 @@ export default function PageLoader() {
   const [phase, setPhase] = useState(0);
 
   useEffect(() => {
-    const p1 = setTimeout(() => setPhase(1), 400);
-    const p2 = setTimeout(() => setPhase(2), 900);
-    const done = setTimeout(() => setLoading(false), 1400);
+    const p1 = setTimeout(() => setPhase(1), 100);
+    const p2 = setTimeout(() => setPhase(2), 150);
+    const done = setTimeout(() => setLoading(false), 200);
     return () => {
       clearTimeout(p1);
       clearTimeout(p2);

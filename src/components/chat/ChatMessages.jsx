@@ -1450,54 +1450,194 @@ export default function ChatMessages({
           </div>
         )}
         {t === "aios_solution" && (
-          <div className="mt-1 space-y-1.5">
-            <p className="font-medium text-neutral-900">
-              {data.friendly_title || data.display_recipe || "Your automation plan"}
-            </p>
-            {data.goal && (
-              <p className="text-[11px] text-neutral-600 line-clamp-3">{String(data.goal).slice(0, 280)}</p>
-            )}
-            <p className="text-[10px] text-neutral-500">
-              Status: {(data.status || "pending_approval").replace(/_/g, " ")}
-            </p>
-            {(data.missing_credentials || []).length > 0 && (
-              <p className="text-amber-800">
-                Still needed: {(data.missing_credentials || []).map((m) => String(m).replace(/_/g, " ")).join(", ")}
-              </p>
-            )}
-            {data.message && <p className="text-amber-800">{data.message}</p>}
-            <details className="text-[10px] text-neutral-500">
-              <summary className="cursor-pointer font-semibold uppercase tracking-wide">Details</summary>
-              {data.solution_id && <p className="mt-1 break-all">Plan id: {data.solution_id}</p>}
-              {nodeTypes.length > 0 && <p>Steps: {nodeTypes.join(" → ")}</p>}
-              {(data.recipe_name || data.recipe?.name) && (
-                <p>Template: {data.display_recipe || data.recipe_name || data.recipe?.name}</p>
-              )}
-            </details>
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              <button
-                type="button"
-                className={next === "approve" || !next ? primaryBtn : actionBtn}
-                onClick={() => onSuggest?.("approve")}
-              >
-                Approve
-              </button>
-              <button type="button" className={actionBtn} onClick={() => onSuggest?.("run test")}>
-                Test
-              </button>
-              <button
-                type="button"
-                className={next === "deploy" ? primaryBtn : actionBtn}
-                onClick={() => onSuggest?.("deploy")}
-              >
-                Deploy
-              </button>
-              {(data.missing_credentials || []).length > 0 && (
-                <a className={`${actionBtn} inline-flex items-center`} href="/credentials">
-                  Credentials
+          <div className="mt-2 space-y-3 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-purple-50/30 to-white p-3.5 shadow-sm">
+            {(() => {
+              const isBlueprint = data.phase === "blueprint" || data.status === "blueprint";
+              const slots = data.blueprint?.slots || [];
+              const steps = data.blueprint?.steps || [];
+              const req = data.requirements || {};
+              return (
+                <>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-600 text-white font-bold text-xs shadow-sm">⚡</span>
+                <div>
+                  <h4 className="font-semibold text-neutral-900 text-sm">{data.friendly_title || data.display_recipe || "AIOS Workflow Engine"}</h4>
+                  <p className="text-[10px] text-neutral-500 font-medium">
+                    Status: <span className="text-indigo-600 font-semibold uppercase">
+                      {isBlueprint ? "blueprint" : (data.status || "built").replace(/_/g, " ")}
+                    </span>
+                  </p>
+                </div>
+              </div>
+              {data.workflow_id && (
+                <a href={`/workflows/${data.workflow_id}`} className="rounded-lg bg-indigo-100 px-2 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-200 transition-colors">
+                  Workflow #{data.workflow_id} ➔
                 </a>
               )}
             </div>
+
+            {isBlueprint && steps.length > 0 && (
+              <div className="rounded-xl border border-indigo-200 bg-white p-2.5 text-[11px]">
+                <p className="font-semibold text-xs text-indigo-900 mb-1">Planned steps</p>
+                <ol className="list-decimal list-inside space-y-0.5 text-[10px] text-neutral-700">
+                  {steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {isBlueprint && slots.length > 0 && (
+              <div className="rounded-xl border border-neutral-200 bg-white p-2.5 text-[11px]">
+                <p className="font-semibold text-xs text-indigo-900 mb-1">Variables</p>
+                <ul className="space-y-1">
+                  {slots.map((slot) => (
+                    <li
+                      key={slot.id}
+                      className={`flex justify-between gap-2 text-[10px] ${slot.filled ? "text-emerald-800" : "text-amber-800"}`}
+                    >
+                      <span>{slot.label}</span>
+                      <span className="font-mono truncate max-w-[55%]">
+                        {slot.filled ? slot.value : "— needed"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Visual Workflow Flowchart Diagram */}
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-900">
+                {isBlueprint ? "Preview workflow graph" : "Visual Workflow Graph"}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200/80 bg-white p-2.5 shadow-inner">
+                {((data.nodes && data.nodes.length > 0)
+                  ? data.nodes
+                  : (nodeTypes || ["trigger", "llm", "notify"]).map((t, idx) => ({ id: `n_${idx}`, type: t, data: { label: t } }))
+                ).map((node, idx, arr) => (
+                  <div key={node.id || idx} className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 rounded-lg border border-indigo-100 bg-neutral-900 px-3 py-1.5 text-white shadow-sm">
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 text-[9px] font-bold text-white">
+                        {idx + 1}
+                      </span>
+                      <div className="flex flex-col">
+                        <span className="text-[11px] font-bold capitalize text-white">
+                          {node.data?.label || node.type || node.id}
+                        </span>
+                        {node.data?.subject && (
+                          <span className="text-[9px] text-indigo-300 truncate max-w-[120px] font-mono">
+                            {node.data.subject}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {idx < arr.length - 1 && (
+                      <span className="text-indigo-400 font-bold text-xs">➔</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200 bg-neutral-900 p-2.5 text-[11px] text-neutral-200">
+              <p className="font-semibold text-xs text-indigo-300 mb-1">⚡ Parameters</p>
+              <ul className="space-y-0.5 text-[10px] text-neutral-300 font-mono">
+                <li>• Trigger: {req.trigger || data.blueprint?.slots?.find((s) => s.id === "trigger")?.value || "manual"}</li>
+                <li>• Channel: {req.output || "workflow"}</li>
+                {req.email_topic && <li>• Topic: {req.email_topic}</li>}
+                {req.email_count && <li>• Count: {req.email_count} emails</li>}
+                {(req.recipients_label || req.email_recipient) && (
+                  <li>• Recipients: {req.recipients_label || req.email_recipient}</li>
+                )}
+                {req.auth_preference && <li>• Auth: {req.auth_preference}</li>}
+                {!isBlueprint && <li>• Status: saved and ready for test</li>}
+              </ul>
+            </div>
+
+            {!isBlueprint && data.test_report && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5 text-[11px] text-emerald-900 shadow-sm">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-xs text-emerald-950 flex items-center gap-1.5">
+                  <span>✅ Sandbox Test Results</span>
+                  <span className="rounded-full bg-emerald-200 px-2 py-0.5 text-[9px] font-bold text-emerald-900 uppercase">
+                    {data.test_report?.status === "success" ? "PASSED" : "TESTED"}
+                  </span>
+                </p>
+                <span className="text-[10px] text-emerald-700 font-mono font-bold">
+                  {data.test_report?.total_ms || 0}ms
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] text-emerald-800 font-mono">
+                {data.test_report?.passed != null
+                  ? `${data.test_report.passed} checks passed across ${data.nodes?.length || 0} nodes.`
+                  : `Validated ${(data.nodes || []).length} workflow nodes.`}
+              </p>
+            </div>
+            )}
+
+            {(data.credential_slots || []).length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/90 p-2.5 text-[11px]">
+                <p className="font-semibold text-amber-950 mb-1">Credentials checklist</p>
+                <ul className="space-y-1">
+                  {(data.credential_slots || []).map((slot) => (
+                    <li
+                      key={slot.id}
+                      className="flex justify-between gap-2 text-[10px] text-amber-900"
+                    >
+                      <span>{slot.label}</span>
+                      <span className="font-mono text-amber-700">needed</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {(data.missing_credentials || []).length > 0 && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+                <p className="font-semibold text-amber-900 mb-0.5">Missing credentials</p>
+                <p className="text-[10px] text-amber-800">
+                  Paste secrets in chat or save them in Credentials — they are stored in your vault.
+                </p>
+                <a className="mt-1.5 inline-flex items-center text-[10px] font-bold text-amber-900 underline" href="/credentials">
+                  Open Credentials Vault ➔
+                </a>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              {(data.chips || []).map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  className={String(chip).toLowerCase().includes("approve") ? primaryBtn : actionBtn}
+                  onClick={() => onSuggest?.(chip)}
+                >
+                  {chip}
+                </button>
+              ))}
+              {!data.chips?.length && (
+                <>
+                  <button type="button" className={primaryBtn} onClick={() => onSuggest?.("approve")}>
+                    Approve &amp; Save
+                  </button>
+                  {!isBlueprint && (
+                    <>
+                      <button type="button" className={actionBtn} onClick={() => onSuggest?.("run test")}>
+                        ⚡ Run Test
+                      </button>
+                      <button type="button" className={actionBtn} onClick={() => onSuggest?.("deploy")}>
+                        🚀 Deploy / Run
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+                </>
+              );
+            })()}
           </div>
         )}
         {t === "aios_approved" && (
@@ -1754,15 +1894,17 @@ export default function ChatMessages({
                 className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 {msg.role === "assistant" && (
-                  <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-900 text-[10px] font-bold text-white shadow-md">
-                    NF
+                  <div className="relative mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-700 to-purple-600 text-[10px] font-bold text-white shadow-md shadow-indigo-500/20">
+                    <span>NF</span>
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
                   </div>
                 )}
 
                 <div className={`max-w-[88%] sm:max-w-[80%] ${msg.role === "user" ? "text-right" : ""}`}>
                   {msg.role === "assistant" && (
-                    <p className="mb-1.5 text-[10px] font-semibold tracking-[0.14em] text-neutral-400 uppercase">
-                      {assistantName || "Assistant"}
+                    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold tracking-wider text-indigo-700 uppercase">
+                      <span>{assistantName || "NovaFlow AI"}</span>
+                      <span className="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[9px] font-bold text-indigo-600">Pro</span>
                     </p>
                   )}
                   <div

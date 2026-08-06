@@ -1,4 +1,6 @@
 import json
+import re
+from typing import Any
 from sqlalchemy.orm import Session
 from app.database import ProjectGraph, SolutionGraph, HierarchicalMemory
 from app.composer.reuse import match_reusable_asset
@@ -42,13 +44,31 @@ def infer_capabilities_from_goal(goal: str, *, force_workflow: bool = False) -> 
         required.append("cap_linear")
     if any(k in goal_lower for k in ("whatsapp", "whats app", "wa business")):
         required.append("cap_whatsapp")
-    if "youtube" in goal_lower or "yt channel" in goal_lower:
+    if "youtube" in goal_lower or "yt channel" in goal_lower or re.search(r"\byt\b", goal_lower):
         required.append("cap_youtube")
     if "shopify" in goal_lower:
         required.append("cap_shopify")
-    if any(k in goal_lower for k in ("google auth", "google oauth", "google api", "google sheets", "google drive", "gdrive")):
+    if any(
+        k in goal_lower
+        for k in (
+            "google auth", "google oauth", "google api", "google sheets", "google drive", "gdrive",
+            "google calendar", "gcal", "spreadsheet", "excel",
+        )
+    ):
         required.append("cap_google")
-    if any(k in goal_lower for k in ("outlook", "microsoft 365", "office 365", "ms graph", "microsoft graph")):
+    if any(
+        k in goal_lower
+        for k in (
+            "outlook", "microsoft 365", "office 365", "ms graph", "microsoft graph",
+            "outlook calendar", "microsoft calendar", "onedrive", "sharepoint", "excel online",
+        )
+    ):
+        required.append("cap_outlook")
+    if any(k in goal_lower for k in ("calendar", "calendar event")) and "google" in goal_lower:
+        required.append("cap_google")
+    if any(k in goal_lower for k in ("calendar", "calendar event")) and (
+        "outlook" in goal_lower or "microsoft" in goal_lower
+    ):
         required.append("cap_outlook")
     if any(k in goal_lower for k in ("email", "smtp", "mail", "digest", "welcome email", "reminder", "gmail")):
         # Prefer Outlook cap when Outlook mentioned; else SMTP
@@ -142,7 +162,15 @@ def _llm_infer_caps(goal: str) -> list[str]:
     except Exception:
         return []
 
-def compile_solution_blueprint(db: Session, workspace_id: int, goal: str) -> dict:
+def compile_solution_blueprint(
+    db: Session,
+    workspace_id: int,
+    goal: str,
+    *,
+    requirements: dict[str, Any] | None = None,
+    materialize_workflow: bool = True,
+    workflow_name: str | None = None,
+) -> dict:
     """Design the solution blueprint, matching reuse options and running gap checks."""
     reused = match_reusable_asset(db, workspace_id, goal)
     reuse_note = None
@@ -241,12 +269,61 @@ def compile_solution_blueprint(db: Session, workspace_id: int, goal: str) -> dic
         goal=goal,
         knowledge_id=None,
         recipe_id=(recipe or {}).get("id"),
+        requirements=requirements,
     )
+
+    def _smart_wf_name(g_text: str, caps_list: list[str]) -> str:
+        if workflow_name and str(workflow_name).strip():
+            return str(workflow_name).strip()
+        raw = (g_text or "").strip()
+        if not raw or raw.lower() in ("user input", "none", "test", "build a workflow for this"):
+            if "cap_smtp" in caps_list:
+                return "Multi-Subject Email Dispatcher Workflow"
+            if "cap_telegram" in caps_list:
+                return "Telegram AI Assistant Bot Workflow"
+            if "cap_github" in caps_list:
+                return "GitHub Issue Triage Workflow"
+            return "Custom Automated Workflow"
+        clean = re.sub(r"^(build|create|make|compose)\s+(a\s+)?(workflow\s+(to\s+)?|bot\s+(for\s+)?|automation\s+(for\s+)?)?", "", raw, flags=re.I).strip()
+        if not clean:
+            clean = raw
+        words = [w.capitalize() for w in clean.split()[:6]]
+        name_str = " ".join(words)
+        return name_str if name_str.lower().endswith("workflow") else f"{name_str} Workflow"
+
+    smart_name = _smart_wf_name(goal, required_caps)
+
+    created_workflow_id = None
+    if materialize_workflow:
+        try:
+            from app.database import Workflow
+            wf = Workflow(
+                name=smart_name,
+                desc=f"Compiled workflow for goal: {goal}",
+                graph_json=json.dumps({"nodes": executable.get("nodes") or [], "edges": executable.get("edges") or []}),
+                user_id=1,
+                workspace_id=workspace_id,
+                status=1,
+            )
+            db.add(wf)
+            db.commit()
+            db.refresh(wf)
+            created_workflow_id = wf.id
+        except Exception:
+            pass
+
+    if reuse_note:
+        api_status = "reused"
+    elif missing_creds:
+        api_status = "compiled_draft"
+    else:
+        api_status = "active"
 
     out = {
         "project_id": project.id,
         "solution_id": solution.id,
-        "status": "pending_approval",
+        "workflow_id": created_workflow_id,
+        "status": api_status,
         "graph": graph_payload,
         "executable_preview": executable,
         "missing_credentials": missing_creds,

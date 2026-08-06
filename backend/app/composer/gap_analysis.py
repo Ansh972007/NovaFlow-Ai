@@ -5,41 +5,66 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.database import WorkspaceIntegration
+from app.composer.chat_channels import get_channel_by_cap
 from app.services import credential_vault as vault
 
-# capability -> (category, kind, missing_label)
-_CAP_REQUIREMENTS: dict[str, tuple[str, str | None, str]] = {
-    "cap_telegram": ("telegram", "telegram_bot", "telegram_bot_token"),
-    "cap_github": ("github", "github_pat", "github_token"),
-    "cap_jira": ("jira", "jira_cloud", "jira_api_token"),
-    "cap_linear": ("linear", "linear_api", "linear_api_key"),
-    "cap_slack": ("slack", None, "slack_webhook_url"),
-    "cap_discord": ("discord", "discord_webhook", "discord_webhook_url"),
-    "cap_smtp": ("email", None, "smtp_password"),
-    "cap_http": ("webhook", None, "webhook_url"),
-    "cap_whatsapp": ("whatsapp", "whatsapp_cloud", "whatsapp_access_token"),
-    "cap_youtube": ("youtube", "youtube_api", "youtube_api_key"),
-    "cap_shopify": ("shopify", "shopify_admin", "shopify_access_token"),
-    "cap_google": ("google", "google_oauth", "google_refresh_token"),
-    "cap_outlook": ("outlook", "microsoft_graph", "outlook_refresh_token"),
-    "cap_llm": ("llm", "openai", "openai_api_key"),
+# missing_label -> vault field key (within channel category/kind)
+_LABEL_FIELDS: dict[str, str] = {
+    "smtp_password": "smtp_password",
+    "telegram_bot_token": "bot_token",
+    "github_token": "token",
+    "jira_api_token": "api_key",
+    "linear_api_key": "api_key",
+    "slack_webhook_url": "webhook_url",
+    "discord_webhook_url": "webhook_url",
+    "webhook_url": "webhook_url",
+    "whatsapp_access_token": "access_token",
+    "whatsapp_phone_number_id": "phone_number_id",
+    "youtube_api_key": "api_key",
+    "shopify_shop": "shop",
+    "shopify_access_token": "access_token",
+    "google_client_id": "client_id",
+    "google_client_secret": "client_secret",
+    "google_refresh_token": "refresh_token",
+    "outlook_client_id": "client_id",
+    "outlook_client_secret": "client_secret",
+    "outlook_refresh_token": "refresh_token",
+    "custom_api_key": "api_key",
+    "openai_api_key": "api_key",
 }
 
+_NO_SECRET_CAPS = frozenset(
+    {"cap_workflow", "cap_knowledge", "cap_agent", "cap_voice", "cap_ocr"}
+)
 
-def _vault_has(db: Session, workspace_id: int, category: str, kind: str | None) -> bool:
+
+def _vault_fields_for_category(
+    db: Session, workspace_id: int, category: str, kind: str | None
+) -> list[dict]:
     rows = vault.list_entries(db, workspace_id, category=category, kind=kind)
-    if not rows:
-        if kind is None:
-            rows = vault.list_entries(db, workspace_id, category=category)
-        else:
-            # also try category-only (UI may use a sibling kind)
-            rows = vault.list_entries(db, workspace_id, category=category)
-            if not rows:
-                return False
+    if not rows and kind is not None:
+        rows = vault.list_entries(db, workspace_id, category=category)
+    out: list[dict] = []
     for row in rows:
         fields = vault.resolve_fields(
             db, workspace_id, category=row.category, kind=row.kind, credential_id=row.id
         )
+        if fields:
+            out.append(fields)
+    return out
+
+
+def _field_satisfied(category: str, fields: dict, field_key: str) -> bool:
+    val = fields.get(field_key)
+    if val is None or val == "":
+        return False
+    if category == "email" and field_key == "smtp_password":
+        return bool(val)
+    return bool(str(val).strip())
+
+
+def _vault_has(db: Session, workspace_id: int, category: str, kind: str | None) -> bool:
+    for fields in _vault_fields_for_category(db, workspace_id, category, kind):
         if category == "telegram" and fields.get("bot_token"):
             return True
         if category == "github" and fields.get("token"):
@@ -77,6 +102,46 @@ def _vault_has(db: Session, workspace_id: int, category: str, kind: str | None) 
     return False
 
 
+def _missing_labels_for_channel(
+    db: Session,
+    workspace_id: int,
+    channel,
+    *,
+    integration: WorkspaceIntegration | None,
+) -> list[str]:
+    if _vault_has(db, workspace_id, channel.category, channel.kind):
+        return []
+    if _legacy_has(integration, channel.cap):
+        return []
+
+    all_fields = _vault_fields_for_category(db, workspace_id, channel.category, channel.kind)
+    missing: list[str] = []
+    for label in channel.missing_labels:
+        field_key = _LABEL_FIELDS.get(label, label.replace(f"{channel.id}_", "").replace("_", "_"))
+        # Shopify: shop without token vs token without shop
+        if label == "shopify_shop":
+            has_shop = any(_field_satisfied("shopify", f, "shop") for f in all_fields)
+            if not has_shop:
+                missing.append(label)
+            continue
+        if label == "shopify_access_token":
+            has_token = any(_field_satisfied("shopify", f, "access_token") for f in all_fields)
+            if not has_token:
+                missing.append(label)
+            continue
+        satisfied = any(_field_satisfied(channel.category, f, field_key) for f in all_fields)
+        if not satisfied:
+            missing.append(label)
+
+    # Google/Outlook: api_key or refresh alone satisfies OAuth channel
+    if not missing and channel.category in ("google", "outlook") and all_fields:
+        return []
+    if not missing and channel.cap == "cap_shopify" and not all_fields:
+        return list(channel.missing_labels)
+
+    return missing
+
+
 def _legacy_has(integration: WorkspaceIntegration | None, cap: str) -> bool:
     if not integration:
         return False
@@ -98,19 +163,20 @@ def _legacy_has(integration: WorkspaceIntegration | None, cap: str) -> bool:
 def analyze_solution_gaps(
     db: Session, workspace_id: int, required_capabilities: list[str]
 ) -> list[str]:
-    """Return missing credential labels for required capabilities."""
+    """Return missing credential labels for required capabilities (channel-aware)."""
     missing: list[str] = []
     integration = (
         db.query(WorkspaceIntegration)
         .filter(WorkspaceIntegration.workspace_id == workspace_id)
         .first()
     )
+    seen_caps: set[str] = set()
 
     for cap in required_capabilities:
-        # Caps that never need external secrets
-        if cap in ("cap_workflow", "cap_knowledge", "cap_agent", "cap_voice", "cap_ocr"):
+        if cap in _NO_SECRET_CAPS or cap in seen_caps:
             continue
-        # HTTP satisfied by webhook URL OR custom API key
+        seen_caps.add(cap)
+
         if cap == "cap_http":
             if _vault_has(db, workspace_id, "webhook", None) or _vault_has(
                 db, workspace_id, "custom", "custom"
@@ -118,28 +184,32 @@ def analyze_solution_gaps(
                 continue
             missing.append("webhook_url")
             continue
-        req = _CAP_REQUIREMENTS.get(cap)
-        if not req:
-            continue
-        category, kind, label = req
-        if _vault_has(db, workspace_id, category, kind):
-            continue
-        if _legacy_has(integration, cap):
-            continue
-        if cap == "cap_shopify":
-            rows = vault.list_entries(db, workspace_id, category="shopify")
-            shop_only = False
-            for row in rows:
-                fields = vault.resolve_fields(
-                    db, workspace_id, category=row.category, kind=row.kind, credential_id=row.id
+
+        channel = get_channel_by_cap(cap)
+        if channel:
+            missing.extend(
+                _missing_labels_for_channel(
+                    db, workspace_id, channel, integration=integration
                 )
-                if fields.get("access_token") and not fields.get("shop"):
-                    missing.append("shopify_shop")
-                    shop_only = True
-                    break
-            if not shop_only:
-                missing.append(label)
+            )
             continue
-        missing.append(label)
 
     return list(dict.fromkeys(missing))
+
+
+def credential_slots_for_missing(missing_labels: list[str]) -> list[dict[str, str]]:
+    """Friendly checklist rows for UI from missing label list."""
+    from app.composer.chat_channels import friendly_missing_name
+
+    slots: list[dict[str, str]] = []
+    for label in missing_labels or []:
+        field_key = _LABEL_FIELDS.get(label, "")
+        slots.append(
+            {
+                "id": label,
+                "label": friendly_missing_name(label),
+                "field": field_key,
+                "filled": False,
+            }
+        )
+    return slots

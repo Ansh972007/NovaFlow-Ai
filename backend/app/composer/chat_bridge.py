@@ -103,8 +103,12 @@ def _keyword_intent(text: str, *, has_pending: bool) -> str:
         return "workflow_status"
     if re.search(r"\bstop (this |the )?(run|workflow)\b", t):
         return "stop_run"
-    if re.search(r"\brun (my )?(last )?workflow\b|\brun workflow\b", t):
+    if re.search(r"\b(run|execute)\b.*\bworkflow\b|\brun (my )?(last )?workflow\b|\brun workflow\b|\bnow can you run\b|\bexecute workflow\b|\brun the workflow\b", t):
         return "run_workflow"
+    if re.search(r"\b(build|create|make|compose|generate)\b.*\b(workflow|bot|automation|agent|email|digest|system)\b|\bbuild a workflow\b|\bmake a workflow\b|\bworkflow for this\b|\bbuild a workflow for this\b", t):
+        return "compose"
+    if re.search(r"\bsend\b.*\b(emails?|mail)\b|\b(emails?|mail)\b.*\b(send|sending)\b|\bwant\s+to\s+send\b", t):
+        return "compose"
     if re.search(r"\bindex (my )?attachments?\b|\bindex (these|the) files?\b", t):
         return "index_attachment"
     if re.search(r"\buse knowledge\b|\buse (the )?knowledge base\b", t):
@@ -113,7 +117,7 @@ def _keyword_intent(text: str, *, has_pending: bool) -> str:
         return "list_credentials_needed"
 
     if re.search(
-        r"\b(approve|confirm|looks good|lgtm|go ahead|yes,? approve|accept (the )?plan)\b",
+        r"\b(approve|confirm|looks good|lgtm|go ahead|yes,? approve|accept (the )?plan|make it|can you make it|now run it|run it|do it|direct access|direct acess)\b",
         t,
     ):
         return "approve"
@@ -162,7 +166,13 @@ def _keyword_intent(text: str, *, has_pending: bool) -> str:
         "welcome email",
         "status report",
         "lead capture",
+        "send email",
+        "send emails",
     )
+    if re.search(r"\b(build|create|make|compose|generate)\b.*\b(workflow|bot|automation|agent|email|digest|system)\b|\bbuild a workflow\b|\bmake a workflow\b|\bworkflow for this\b|\bbuild a workflow for this\b", t):
+        return "compose"
+    if re.search(r"\bsend\b.*\b(emails?|mail)\b|\b(emails?|mail)\b.*\b(send|sending)\b|\bwant\s+to\s+send\b", t):
+        return "compose"
     if any(p in t for p in compose_patterns):
         return "compose"
     if ("i want" in t or "i need" in t or t.startswith("build ") or t.startswith("create ")) and any(
@@ -178,13 +188,21 @@ def _keyword_intent(text: str, *, has_pending: bool) -> str:
     return "chat"
 
 
-def _llm_classify_intent(text: str, *, has_pending: bool) -> str | None:
-    """Best-effort LLM intent classify; returns None on any failure."""
-    api_key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY") or "").strip()
+def _llm_classify_intent(text: str, *, has_pending: bool, db: Session | None = None, user_id: int | None = None) -> str | None:
+    """Best-effort LLM intent classify using user-specific or system provider configuration."""
+    from app.services.llm_providers import get_active_config
+    try:
+        cfg = get_active_config(db, user_id=user_id)
+        api_key = cfg.get("api_key", "").strip()
+        base = cfg.get("base_url", "").rstrip("/")
+        model = cfg.get("model", "") or "gpt-4o-mini"
+    except Exception:
+        api_key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY") or "").strip()
+        base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        model = os.getenv("NOVAFLOW_INTENT_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+
     if not api_key or len(text) < 4:
         return None
-    base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-    model = os.getenv("NOVAFLOW_INTENT_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
     prompt = (
         "Classify the user chat message into exactly one intent label.\n"
         "Labels: chat, compose, refine, test, deploy, credential, cancel, approve, "
@@ -229,9 +247,9 @@ def _llm_classify_intent(text: str, *, has_pending: bool) -> str | None:
     return None
 
 
-def classify_intent(text: str, *, has_pending: bool = False) -> str:
+def classify_intent(text: str, *, has_pending: bool = False, db: Session | None = None, user_id: int | None = None) -> str:
     """LLM intent with keyword fallback."""
-    llm = _llm_classify_intent(text, has_pending=has_pending)
+    llm = _llm_classify_intent(text, has_pending=has_pending, db=db, user_id=user_id)
     if llm:
         return llm
     return _keyword_intent(text, has_pending=has_pending)
@@ -345,6 +363,13 @@ def _extract_credential_updates(text: str) -> list[dict[str, Any]]:
         (r"(linear_api_key|linear key)\s*[:=]\s*([^\s]+)", "linear", "linear_api", "api_key"),
         (
             r"(openai_api_key|openrouter_api_key|llm api key)\s*[:=]\s*([^\s]+)",
+            "llm",
+            "openai",
+            "api_key",
+        ),
+        # Add pattern for "my llm api key is" or "i have llm api key"
+        (
+            r"(my llm api key is|i have llm api key|api key is)\s*([^\s]+)",
             "llm",
             "openai",
             "api_key",
@@ -649,6 +674,115 @@ def _wants_express(text: str, goal: str) -> bool:
     return is_express_recipe(goal) and not is_vague_goal(goal) and not is_complex_agent_goal(goal)
 
 
+def _build_cred_chips(
+    required_caps: list[str],
+    missing: list[str],
+    missing_slots: list[dict],
+) -> list[str]:
+    from app.composer.chat_channels import paste_hints_for_missing
+
+    cred_chips: list[str] = []
+    if missing:
+        hints = paste_hints_for_missing(missing)
+        cred_chips = (hints[:1] if hints else [])
+        if "cap_google" in required_caps:
+            cred_chips.append("Use Google OAuth")
+        if "cap_smtp" in required_caps:
+            cred_chips.append("Use SMTP")
+        cred_chips.append("Open Credentials")
+    if not missing_slots and not missing:
+        return ["Approve"]
+    if not missing:
+        return ["Approve"]
+    return cred_chips
+
+
+def _refresh_blueprint_from_aios(
+    db: Session,
+    *,
+    workspace_id: int,
+    conv,
+    meta: dict[str, Any],
+    aios: dict[str, Any],
+) -> dict[str, Any]:
+    """Recompute gaps and return an updated aios_solution card payload."""
+    from app.composer.gap_analysis import analyze_solution_gaps, credential_slots_for_missing
+    from app.composer.planner import infer_capabilities_from_goal
+    from app.composer.workflow_composer import build_executable_graph
+    from app.composer.recipes import match_recipe
+    from app.composer.chat_requirements import (
+        build_blueprint_preview,
+        compose_goal_from_requirements,
+        gather_prompt,
+        missing_workflow_slots,
+        sync_checklist_from_aios,
+    )
+    from app.composer.chat_channels import friendly_title_for_goal
+
+    req = dict(aios.get("requirements") or {})
+    enriched_goal = compose_goal_from_requirements(req)
+    required_caps = list(
+        aios.get("required_capabilities")
+        or infer_capabilities_from_goal(enriched_goal, force_workflow=True)
+    )
+    live_missing = analyze_solution_gaps(db, workspace_id, required_caps)
+    missing_slots = missing_workflow_slots(req)
+    compose_phase = "gather" if missing_slots or live_missing else "await_approve"
+    next_action = "gather" if missing_slots else ("credentials" if live_missing else "approve")
+    recipe = match_recipe(enriched_goal, fallback_generic=True)
+    recipe_name = (recipe or {}).get("name")
+    preview_executable = build_executable_graph(
+        required_caps=required_caps,
+        goal=enriched_goal,
+        knowledge_id=aios.get("knowledge_id"),
+        recipe_id=(recipe or {}).get("id"),
+        requirements=req,
+    )
+    blueprint = build_blueprint_preview(enriched_goal, req, required_caps, preview_executable)
+    friendly_title = req.get("workflow_name") or aios.get("friendly_title") or friendly_title_for_goal(enriched_goal)
+
+    aios.update(
+        {
+            "goal": enriched_goal,
+            "missing_credentials": live_missing,
+            "compose_phase": compose_phase,
+            "phase": "blueprint",
+            "status": "blueprint",
+            "next_action": next_action,
+            "required_capabilities": required_caps,
+            "executable_preview": preview_executable,
+            "blueprint": blueprint,
+            "credential_slots": credential_slots_for_missing(live_missing),
+            "friendly_title": friendly_title,
+            "recipe_name": recipe_name,
+            "progress": progress_steps(missing_credentials=live_missing),
+        }
+    )
+    aios["requirements"] = sync_checklist_from_aios(dict(req), aios)
+    meta["aios"] = aios
+    _save_conv_meta(db, conv, meta)
+
+    missing = live_missing
+    cred_chips = _build_cred_chips(required_caps, missing, missing_slots)
+    blueprint = aios.get("blueprint") or {}
+    preview_nodes = blueprint.get("preview_nodes") or preview_executable.get("nodes") or []
+    preview_edges = blueprint.get("preview_edges") or preview_executable.get("edges") or []
+
+    return {
+        **aios,
+        "friendly_title": friendly_title,
+        "display_recipe": (
+            None if recipe_name and "generic" in str(recipe_name).lower() else recipe_name
+        ),
+        "nodes": preview_nodes,
+        "edges": preview_edges,
+        "test_report": None,
+        "credentials_url": "/credentials",
+        "chips": cred_chips,
+        "message": gather_prompt(req, missing_slots, missing),
+    }
+
+
 def process_chat_goal(
     db: Session,
     *,
@@ -663,9 +797,12 @@ def process_chat_goal(
     blocked_normal_reply = False
     redacted_message = text
     aios = meta.get("aios") if isinstance(meta.get("aios"), dict) else {}
-    has_pending = bool(aios.get("solution_id") or (aios.get("agent_os") or {}).get("plan_session_id")) and aios.get(
-        "status"
-    ) not in ("deployed", "cancelled", "done")
+    has_pending = bool(
+        aios.get("solution_id")
+        or aios.get("compose_phase") in ("gather", "await_approve", "blueprint")
+        or aios.get("phase") == "blueprint"
+        or (aios.get("agent_os") or {}).get("plan_session_id")
+    ) and aios.get("status") not in ("deployed", "cancelled", "done")
 
     if is_host_control_request(text):
         events.append(boundary_event())
@@ -699,6 +836,8 @@ def process_chat_goal(
         return _finalize(events, True, redacted_message)
 
     intent = route_info.get("intent_hint") or classify_intent(text, has_pending=has_pending)
+    if intent == "chat" and aios.get("compose_phase") in ("gather", "await_approve", "blueprint"):
+        intent = "refine"
     if route_info.get("route") == "work_compose":
         intent = "compose" if intent not in ("refine",) else intent
     if route_info.get("route") == "agent" or (intent == "compose" and is_complex_agent_goal(text)):
@@ -746,10 +885,32 @@ def process_chat_goal(
             cred_res = apply_workspace_credentials(db, workspace_id, credential_items, user_id=user_id)
             redacted_message = redact_secrets_in_text(text, cred_res.get("raw_secrets") or [])
             blocked_normal_reply = True
+            
+            # Check if LLM API key was provided and store it for conversation use
+            for item in credential_items:
+                if item.get("category") == "llm" and item.get("kind") == "openai":
+                    api_key = item.get("fields", {}).get("api_key")
+                    if api_key:
+                        # Store API key in conversation context for immediate use
+                        aios["conversation_api_key"] = api_key
+                        # Also save to vault for persistent use
+                        try:
+                            secure_vault_save(
+                                db,
+                                workspace_id,
+                                "llm",
+                                "openai",
+                                api_key,
+                                user_id=user_id,
+                                label="Conversation-provided API key"
+                            )
+                        except Exception as e:
+                            print(f"Failed to save API key to vault: {e}")
+            
             caps = aios.get("required_capabilities") or []
             missing: list[str] = []
-            if aios.get("solution_id") or caps:
-                missing = analyze_solution_gaps(db, workspace_id, caps or ["cap_smtp"])
+            if caps:
+                missing = analyze_solution_gaps(db, workspace_id, caps)
                 aios["missing_credentials"] = missing
                 if aios.get("approved"):
                     aios["next_action"] = "test" if not missing else "credentials"
@@ -757,10 +918,10 @@ def process_chat_goal(
                     aios["next_action"] = "approve" if not missing else "credentials"
                 meta["aios"] = aios
                 _save_conv_meta(db, conv, meta)
-            chips = ["Approve", "Run test", "Open Credentials"] if not missing else [
-                "Open Credentials",
-                "Approve",
-            ]
+            from app.composer.chat_requirements import missing_workflow_slots
+
+            missing_slots = missing_workflow_slots(dict(aios.get("requirements") or {}))
+            chips = _build_cred_chips(caps, missing, missing_slots)
             if not missing and aios.get("solution_id"):
                 msg = (
                     "Saved your login in Credentials. Next: tap **Approve**, then I’ll run the test."
@@ -784,6 +945,21 @@ def process_chat_goal(
                     },
                 }
             )
+            if (
+                caps
+                and (
+                    aios.get("compose_phase") in ("gather", "await_approve", "blueprint")
+                    or aios.get("phase") == "blueprint"
+                )
+            ):
+                solution_card = _refresh_blueprint_from_aios(
+                    db,
+                    workspace_id=workspace_id,
+                    conv=conv,
+                    meta=meta,
+                    aios=aios,
+                )
+                events.append({"type": "aios_solution", "data": solution_card})
             # One card only — do not also emit credentials_needed / progress
         elif intent == "credential" or looks_like_secret_message(text):
             from app.composer.gap_analysis import analyze_solution_gaps
@@ -1021,62 +1197,91 @@ def process_chat_goal(
         except Exception:  # noqa: BLE001
             pass
         goal = text
-        if intent == "refine" and aios.get("goal"):
+        if aios.get("goal") and (intent == "refine" or re.search(r"\b(for this|for that|from this)\b", text, re.I) or text.strip().lower() in ("build a workflow", "make a workflow", "build workflow")):
+            goal = aios.get("goal")
+        elif intent == "refine" and aios.get("goal"):
             goal = f"{aios.get('goal')}\n\nRefinement: {text}"
         # Follow-up with remembered field
         if aios.get("last_field") and re.search(r"\b(same|similar|another|also)\b", text, re.I):
             goal = f"[{aios.get('last_field')} field] {goal}"
         express = _wants_express(text, goal)
         t0 = time.perf_counter()
-        result = compile_solution_blueprint(db, workspace_id, goal)
-        # Always recompute gaps from live vault (UI may have saved SMTP already)
         from app.composer.gap_analysis import analyze_solution_gaps
-
-        live_missing = analyze_solution_gaps(
-            db, workspace_id, result.get("required_capabilities") or []
-        )
-        result["missing_credentials"] = live_missing
-        recipe_name = result.get("recipe_name") or (result.get("recipe") or {}).get("name")
-        field = (result.get("recipe") or {}).get("field") or infer_field(goal, aios.get("last_field"))
+        from app.composer.planner import infer_capabilities_from_goal
+        from app.composer.workflow_composer import build_executable_graph
+        from app.composer.recipes import match_recipe
         from app.composer.chat_requirements import (
+            build_blueprint_preview,
+            compose_goal_from_requirements,
+            gather_prompt,
+            merge_requirements_from_message,
+            missing_workflow_slots,
             parse_requirements,
             sync_checklist_from_aios,
         )
 
-        req = aios.get("requirements") or parse_requirements(goal, last_field=aios.get("last_field"))
+        if aios.get("requirements") and intent in ("compose", "refine"):
+            req = merge_requirements_from_message(dict(aios["requirements"]), goal, db=db)
+        else:
+            req = parse_requirements(goal, last_field=aios.get("last_field"), db=db)
+
+        enriched_goal = compose_goal_from_requirements(req)
+        required_caps = infer_capabilities_from_goal(enriched_goal, force_workflow=True)
+        live_missing = analyze_solution_gaps(db, workspace_id, required_caps)
+        missing_slots = missing_workflow_slots(req)
+        field = infer_field(enriched_goal, aios.get("last_field"))
+        recipe = match_recipe(enriched_goal, fallback_generic=True)
+        recipe_name = (recipe or {}).get("name")
         attach_n = _attachment_count(db, conversation_id, workspace_id)
         knowledge_id = aios.get("knowledge_id")
-        executable = result.get("executable_preview") or {}
-        # Data-aware: reuse prior KB; do not sync-index GB files on compose
-        if knowledge_id and isinstance(executable, dict):
-            meta_g = dict(executable.get("meta") or {})
-            meta_g["knowledge_id"] = knowledge_id
-            executable = {**executable, "meta": meta_g}
+
+        preview_executable = build_executable_graph(
+            required_caps=required_caps,
+            goal=enriched_goal,
+            knowledge_id=knowledge_id,
+            recipe_id=(recipe or {}).get("id"),
+            requirements=req,
+        )
+        blueprint = build_blueprint_preview(enriched_goal, req, required_caps, preview_executable)
+        compose_phase = "gather" if missing_slots or live_missing else "await_approve"
+        next_action = "gather" if missing_slots else ("credentials" if live_missing else "approve")
+        from app.composer.gap_analysis import credential_slots_for_missing
+
+        from app.composer.chat_channels import friendly_title_for_goal
+
+        friendly_title = req.get("workflow_name") or friendly_title_for_goal(enriched_goal)
+        if recipe_name and "generic" not in str(recipe_name).lower() and friendly_title == "Your automation plan":
+            friendly_title = str(recipe_name)
 
         meta["aios"] = {
-            "project_id": result.get("project_id"),
-            "solution_id": result.get("solution_id"),
-            "status": "pending_approval",
-            "goal": goal,
+            "project_id": None,
+            "solution_id": None,
+            "status": "blueprint",
+            "goal": enriched_goal,
             "mode": "workflow",
+            "compose_phase": compose_phase,
+            "phase": "blueprint",
             "missing_credentials": live_missing,
-            "graph": result.get("graph") or {},
-            "executable_preview": executable,
-            "required_capabilities": result.get("required_capabilities") or [],
-            "node_types": result.get("node_types") or [],
-            "recipe": result.get("recipe"),
+            "graph": {},
+            "executable_preview": preview_executable,
+            "required_capabilities": required_caps,
+            "node_types": (preview_executable.get("meta") or {}).get("node_types") or [],
+            "recipe": recipe,
             "recipe_name": recipe_name,
             "progress": progress_steps(missing_credentials=live_missing),
-            "next_action": "credentials" if live_missing else "approve",
+            "next_action": next_action,
             "approved": False,
             "tested": False,
             "heal_count": 0,
             "last_recipe": recipe_name,
             "last_field": field,
             "requirements": req,
+            "blueprint": blueprint,
+            "credential_slots": credential_slots_for_missing(live_missing),
             "knowledge_id": knowledge_id,
             "attachment_count": attach_n,
             "express": express,
+            "friendly_title": friendly_title,
             "memory_hints": list(
                 dict.fromkeys(
                     (aios.get("memory_hints") or [])
@@ -1087,39 +1292,6 @@ def process_chat_goal(
             ),
         }
         meta["aios"]["requirements"] = sync_checklist_from_aios(dict(req), meta["aios"])
-
-        report = None
-        if express:
-            report = run_enterprise_suite(
-                executable if isinstance(executable, dict) else {},
-                missing_credentials=meta["aios"].get("missing_credentials") or [],
-                field=field,
-            )
-            meta["aios"]["last_test"] = report
-            meta["aios"]["tested"] = report.get("status") == "success"
-            meta["aios"]["status"] = "tested" if meta["aios"]["tested"] else "test_failed"
-            meta["aios"]["next_action"] = "approve" if meta["aios"]["tested"] else "heal"
-            meta["aios"]["progress"] = progress_steps(
-                missing_credentials=meta["aios"].get("missing_credentials")
-            )
-            if not meta["aios"]["tested"] and int(meta["aios"].get("heal_count") or 0) < 2:
-                healed, report2, fixes = heal_and_retest(
-                    executable,
-                    knowledge_id=knowledge_id,
-                    missing_credentials=meta["aios"].get("missing_credentials") or [],
-                    field=field,
-                    max_rounds=2,
-                )
-                meta["aios"]["executable_preview"] = healed
-                meta["aios"]["last_test"] = report2
-                meta["aios"]["tested"] = report2.get("status") == "success"
-                meta["aios"]["status"] = "tested" if meta["aios"]["tested"] else "test_failed"
-                meta["aios"]["next_action"] = "approve" if meta["aios"]["tested"] else "heal"
-                meta["aios"]["heal_count"] = int(meta["aios"].get("heal_count") or 0) + 1
-                events.append(
-                    {"type": "aios_heal", "data": {"fixes": fixes, "status": "ok", "auto": True, "express": True}}
-                )
-                report = report2
 
         compose_ms = int((time.perf_counter() - t0) * 1000)
         meta["aios"]["compose_ms"] = compose_ms
@@ -1132,83 +1304,43 @@ def process_chat_goal(
                 action="compose",
                 user_id=user_id,
                 workspace_id=workspace_id,
-                resource_type="solution",
-                resource_id=str(result.get("solution_id") or ""),
-                detail={"recipe": recipe_name, "express": express, "compose_ms": compose_ms},
+                resource_type="blueprint",
+                resource_id=str(req.get("id") or ""),
+                detail={"recipe": recipe_name, "express": express, "compose_ms": compose_ms, "phase": compose_phase},
             )
         except Exception:  # noqa: BLE001
             pass
-        # Channel-aware friendly title + credential chips for any automation
-        from app.composer.chat_channels import (
-            detect_channels,
-            friendly_title_for_goal,
-            paste_hints_for_missing,
-            solution_blurb_for_goal,
-        )
 
-        friendly_title = friendly_title_for_goal(goal)
-        if recipe_name and "generic" not in str(recipe_name).lower() and friendly_title == "Your automation plan":
-            friendly_title = str(recipe_name)
-        meta["aios"]["friendly_title"] = friendly_title
         missing = meta["aios"].get("missing_credentials") or []
-        channels = detect_channels(goal)
-        cred_chips = ["Approve", "Open Credentials"]
-        if missing:
-            hints = paste_hints_for_missing(missing)
-            cred_chips = (hints[:1] if hints else []) + ["Open Credentials", "Approve"]
-        elif not missing:
-            cred_chips = ["Approve", "Run test"]
-        solution_msg = solution_blurb_for_goal(goal, missing=missing)
-        if not missing and channels:
-            solution_msg = (
-                f"{channels[0].friendly_name} credentials found in Credentials — "
-                "tap **Approve** to continue."
-            )
+        cred_chips = _build_cred_chips(required_caps, missing, missing_slots)
+
+        solution_msg = gather_prompt(req, missing_slots, missing)
+        preview_nodes = blueprint.get("preview_nodes") or preview_executable.get("nodes") or []
+        preview_edges = blueprint.get("preview_edges") or preview_executable.get("edges") or []
+
         solution_card = {
             **meta["aios"],
             "friendly_title": friendly_title,
             "display_recipe": (
                 None if recipe_name and "generic" in str(recipe_name).lower() else recipe_name
             ),
+            "nodes": preview_nodes,
+            "edges": preview_edges,
+            "test_report": None,
             "credentials_url": "/credentials",
-            "chips": (
-                ["Approve", "Deploy"]
-                if report is not None and report.get("status") == "success" and not missing
-                else cred_chips
-            ),
+            "chips": cred_chips,
             "message": solution_msg,
         }
-        # One primary card: solution (credentials folded in). Skip progress/fulfillment/memory spam.
         events.append({"type": "aios_solution", "data": solution_card})
-        if report is not None and not missing:
-            # Express path: prefer sandbox card as the single actionable card when tests ran
-            events = [
-                {
-                    "type": "aios_sandbox",
-                    "data": {
-                        **report,
-                        "express": True,
-                        "compose_ms": compose_ms,
-                        "friendly_title": friendly_title,
-                        "missing_credentials": missing,
-                        "chips": (
-                            ["Approve", "Deploy"]
-                            if report.get("status") == "success"
-                            else ["Heal & retest", "Approve"]
-                        ),
-                        "primary": "Approve" if report.get("status") == "success" else "Heal & retest",
-                        "message": (
-                            f"Plan ready ({friendly_title}). Tests passed — tap **Approve**."
-                            if report.get("status") == "success"
-                            else f"Plan ready ({friendly_title}). Tests need a fix — tap Heal or Approve."
-                        ),
-                    },
-                }
-            ]
-        return _finalize(events, True, redacted_message, goal=goal)
+        return _finalize(events, True, redacted_message, goal=enriched_goal)
 
     if intent == "approve":
-        if not aios.get("solution_id") and not agent_os.get("plan_session_id"):
+        has_blueprint = (
+            aios.get("compose_phase") in ("gather", "await_approve", "blueprint")
+            or aios.get("phase") == "blueprint"
+            or aios.get("status") == "blueprint"
+        )
+        if not aios.get("solution_id") and not agent_os.get("plan_session_id") and not has_blueprint:
             events.append(
                 {
                     "type": "aios_solution",
@@ -1219,6 +1351,93 @@ def process_chat_goal(
                 }
             )
             return _finalize(events, True, redacted_message)
+
+        caps_check = list(aios.get("required_capabilities") or [])
+        if caps_check:
+            from app.composer.gap_analysis import analyze_solution_gaps
+            from app.composer.chat_channels import friendly_missing_name, paste_hints_for_missing
+
+            missing_now = analyze_solution_gaps(db, workspace_id, caps_check)
+            aios["missing_credentials"] = missing_now
+            if missing_now:
+                meta["aios"] = aios
+                _save_conv_meta(db, conv, meta)
+                hints = paste_hints_for_missing(missing_now)
+                names = ", ".join(friendly_missing_name(m) for m in missing_now[:4])
+                if has_blueprint:
+                    solution_card = _refresh_blueprint_from_aios(
+                        db,
+                        workspace_id=workspace_id,
+                        conv=conv,
+                        meta=meta,
+                        aios=aios,
+                    )
+                    events.append(
+                        {
+                            "type": "aios_credentials_needed",
+                            "data": {
+                                "missing": missing_now,
+                                "credentials_url": "/credentials",
+                                "message": (
+                                    f"Add credentials before approving (need: {names}). "
+                                    "Paste them here or open Credentials."
+                                ),
+                                "chips": (hints[:1] if hints else []) + ["Open Credentials"],
+                            },
+                        }
+                    )
+                    events.append({"type": "aios_solution", "data": solution_card})
+                else:
+                    events.append(
+                        {
+                            "type": "aios_credentials_needed",
+                            "data": {
+                                "missing": missing_now,
+                                "credentials_url": "/credentials",
+                                "message": f"Add credentials before approving (need: {names}).",
+                                "chips": (hints[:1] if hints else []) + ["Open Credentials"],
+                            },
+                        }
+                    )
+                return _finalize(events, True, redacted_message)
+
+        materialized = False
+        if not aios.get("solution_id") and has_blueprint and aios.get("mode") != "agent":
+            from app.composer.chat_requirements import compose_goal_from_requirements, mark_checklist
+
+            req = dict(aios.get("requirements") or {})
+            enriched_goal = compose_goal_from_requirements(req)
+            wf_name = req.get("workflow_name") or aios.get("friendly_title")
+            result = compile_solution_blueprint(
+                db,
+                workspace_id,
+                enriched_goal,
+                requirements=req,
+                materialize_workflow=True,
+                workflow_name=wf_name,
+            )
+            mark_checklist(req, "plan", True)
+            aios.update(
+                {
+                    "project_id": result.get("project_id"),
+                    "solution_id": result.get("solution_id"),
+                    "workflow_id": result.get("workflow_id"),
+                    "goal": enriched_goal,
+                    "missing_credentials": result.get("missing_credentials") or [],
+                    "graph": result.get("graph") or {},
+                    "executable_preview": result.get("executable_preview") or {},
+                    "required_capabilities": result.get("required_capabilities") or [],
+                    "node_types": result.get("node_types") or [],
+                    "recipe": result.get("recipe"),
+                    "recipe_name": result.get("recipe_name"),
+                    "compose_phase": "built",
+                    "phase": "built",
+                    "status": "pending_approval",
+                    "requirements": req,
+                }
+            )
+            materialized = True
+
         aios["approved"] = True
         aios["status"] = "approved"
         aios["next_action"] = "test"
@@ -1285,6 +1504,24 @@ def process_chat_goal(
         meta["aios"] = aios
         _save_conv_meta(db, conv, meta)
         events.append({"type": "aios_approved", "data": {"solution_id": aios.get("solution_id"), "status": "approved"}})
+        if materialized:
+            built_exec = aios.get("executable_preview") or {}
+            events.append(
+                {
+                    "type": "aios_solution",
+                    "data": {
+                        **aios,
+                        "phase": "built",
+                        "nodes": built_exec.get("nodes") or [],
+                        "edges": built_exec.get("edges") or [],
+                        "message": (
+                            f"Workflow **{aios.get('friendly_title') or 'ready'}** built — "
+                            "review the graph below, then run a test."
+                        ),
+                        "chips": ["Run test", "Deploy"],
+                    },
+                }
+            )
         if report is not None:
             events.append({"type": "aios_test_report", "data": report})
             events.append(

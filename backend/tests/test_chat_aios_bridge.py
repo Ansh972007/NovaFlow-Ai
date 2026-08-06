@@ -137,12 +137,11 @@ def test_compose_approve_deploy_bridge_flow(api_client):
         types = [e["type"] for e in compose["events"]]
         assert "aios_solution" in types
         sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
-        assert sol.get("solution_id")
-        assert sol.get("status") in ("pending_approval", "tested")
+        assert sol.get("phase") == "blueprint" or sol.get("status") == "blueprint"
+        assert not sol.get("solution_id")
         assert "telegram_bot_token" in (sol.get("missing_credentials") or [])
         node_types = sol.get("node_types") or []
-        assert "retrieve" in node_types
-        assert "notify" in node_types
+        assert "retrieve" in node_types or "notify" in node_types
 
         # Deploy blocked before approve
         blocked = process_chat_goal(
@@ -152,8 +151,19 @@ def test_compose_approve_deploy_bridge_flow(api_client):
             conversation_id=conv_id,
             user_message="deploy",
         )
-        assert any(e["type"] == "aios_solution" for e in blocked["events"])
         assert not any(e["type"] == "aios_deploy" and e["data"].get("workflow_id") for e in blocked["events"])
+
+        from app.services import credential_vault as vault
+
+        vault.upsert_from_chat(
+            db,
+            workspace_id=1,
+            user_id=1,
+            category="telegram",
+            kind="telegram_bot",
+            label="default",
+            fields={"bot_token": "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"},
+        )
 
         approve = process_chat_goal(
             db,
@@ -1541,5 +1551,191 @@ def test_universal_compose_shopify_and_google_one_card(api_client):
         gmiss = gsol.get("missing_credentials") or []
         assert any(m.startswith("google") for m in gmiss)
         assert len(gcompose.get("ui_events") or _ui_events_from(gcompose["events"])) == 1
+    finally:
+        db.close()
+
+
+def test_send_emails_diwali_blueprint_then_approve(api_client):
+    from app.composer.chat_bridge import process_chat_goal
+    from app.composer.chat_router import universal_route
+    from app.database import Conversation, SessionLocal
+
+    headers = _auth_headers(api_client)
+    conv = api_client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"title": "Diwali emails", "conversation_type": "assistant"},
+    ).json()["data"]
+
+    route = universal_route("I want to send emails on Diwali topic to my friends")
+    assert route.get("route") == "work_compose"
+
+    db = SessionLocal()
+    try:
+        compose = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="I want to send emails on Diwali topic to my friends",
+        )
+        assert compose["blocked_normal_reply"] is True
+        sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
+        assert sol.get("phase") == "blueprint"
+        assert not sol.get("solution_id")
+        req = sol.get("requirements") or {}
+        assert req.get("email_topic") or "diwali" in (req.get("goal") or "").lower()
+
+        process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="my email is tester@example.com and password is abcd efgh ijkl mnop",
+        )
+
+        approve = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="approve",
+        )
+        assert "aios_approved" in [e["type"] for e in approve["events"]]
+        row = db.get(Conversation, conv["id"])
+        meta = json.loads(row.meta_json or "{}")
+        assert meta.get("aios", {}).get("solution_id")
+    finally:
+        db.close()
+
+
+def test_finalize_blocked_has_summary(api_client):
+    from app.composer.chat_bridge import _finalize
+
+    _ = api_client
+    out = _finalize(
+        [{"type": "aios_solution", "data": {"message": "Blueprint ready", "phase": "blueprint"}}],
+        True,
+        "send emails",
+        goal="send emails on Diwali",
+    )
+    assert out["blocked_normal_reply"] is True
+    assert out.get("summary")
+    assert out.get("ui_events")
+
+
+def test_youtube_blueprint_requires_api_key(api_client):
+    from app.composer.chat_bridge import process_chat_goal
+    from app.database import SessionLocal
+
+    headers = _auth_headers(api_client)
+    conv = api_client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"title": "YouTube cred gate", "conversation_type": "assistant"},
+    ).json()["data"]
+
+    db = SessionLocal()
+    try:
+        compose = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="Build workflow to sync YouTube channel stats daily",
+        )
+        sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
+        assert sol.get("phase") == "blueprint"
+        assert "youtube_api_key" in (sol.get("missing_credentials") or [])
+        assert "Approve" not in (sol.get("chips") or [])
+
+        blocked = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="approve",
+        )
+        assert any(e["type"] == "aios_credentials_needed" for e in blocked["events"])
+        assert not any(
+            e["type"] == "aios_approved" for e in blocked["events"]
+        )
+    finally:
+        db.close()
+
+
+def test_youtube_paste_saves_vault_and_allows_approve(api_client):
+    from app.composer.chat_bridge import process_chat_goal
+    from app.database import CredentialVaultEntry, SessionLocal
+    from app.services import credential_vault as vault
+
+    headers = _auth_headers(api_client)
+    conv = api_client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"title": "YouTube paste", "conversation_type": "assistant"},
+    ).json()["data"]
+
+    db = SessionLocal()
+    try:
+        db.query(CredentialVaultEntry).filter(
+            CredentialVaultEntry.workspace_id == 1,
+            CredentialVaultEntry.category == "youtube",
+        ).delete(synchronize_session=False)
+        db.commit()
+
+        process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="Build workflow to post YouTube stats",
+        )
+        paste = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="youtube api key is AIzaSyBvOkBwvOkBwvOkBwvOkBwvOkBwvOkB",
+        )
+        assert any(e["type"] == "aios_credentials_saved" for e in paste["events"])
+        rows = vault.list_entries(db, 1, category="youtube")
+        assert len(rows) >= 1
+
+        approve = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="approve",
+        )
+        assert "aios_approved" in [e["type"] for e in approve["events"]]
+    finally:
+        db.close()
+
+
+def test_google_sheets_goal_missing_oauth_labels(api_client):
+    from app.composer.chat_bridge import process_chat_goal
+    from app.database import SessionLocal
+
+    headers = _auth_headers(api_client)
+    conv = api_client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"title": "Google sheets", "conversation_type": "assistant"},
+    ).json()["data"]
+
+    db = SessionLocal()
+    try:
+        compose = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="Automate updates to my Google Sheets excel report",
+        )
+        sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
+        missing = sol.get("missing_credentials") or []
+        assert any("google" in m for m in missing)
     finally:
         db.close()

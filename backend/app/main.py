@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR, DEMO_SEED
+from app.config import ADMIN_PASSWORD, ADMIN_USER, DATA_DIR, DEMO_SEED, NOVAFLOW_ENV
 from app.crypto import hash_password
 from app.database import SessionLocal, User, init_db
 from app.deps import get_current_user
@@ -27,6 +27,7 @@ from app.routers import (
     model_lab,
     projects,
     user,
+    user_management,
     workflow,
     workspace,
     notifications,
@@ -67,12 +68,15 @@ async def lifespan(_app: FastAPI):
     db = SessionLocal()
     try:
         if db.query(User).count() == 0:
+            # STRICT: Always enforce strong password in all environments
+            # This is a non-bypassable security requirement
             assert_first_admin_password(ADMIN_PASSWORD)
             admin = User(
                 user_name=ADMIN_USER,
                 password=hash_password(ADMIN_PASSWORD),
-                role="super_admin",
-                must_change_password=1,
+                role="admin",
+                email="novaflow85@gmail.com",  # STRICT: Gmail-only authentication
+                must_change_password=1,  # Force password change for security
                 password_changed_at=None,
             )
             db.add(admin)
@@ -123,6 +127,7 @@ app.add_middleware(
 )
 
 app.include_router(user.router, prefix=API_PREFIX)
+app.include_router(user_management.router, prefix=API_PREFIX)
 app.include_router(auth_oauth.router, prefix=API_PREFIX)
 app.include_router(auth_saml.router, prefix=API_PREFIX)
 app.include_router(assistant.router, prefix=API_PREFIX)

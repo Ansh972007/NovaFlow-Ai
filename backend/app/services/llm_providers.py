@@ -301,50 +301,109 @@ def get_active_provider_row(db: Session) -> LlmProvider | None:
 def resolve_api_key(row: LlmProvider | None) -> str:
     if row and row.api_key_enc:
         return decrypt_secret(row.api_key_enc)
-    return OPENAI_API_KEY
+    # Fallback to environment variable
+    if OPENAI_API_KEY:
+        return OPENAI_API_KEY
+    return ""
 
 
-def get_active_config(db: Session | None = None) -> dict[str, str]:
-    # Prefer vault default LLM when available
+def get_active_config(db: Session | None = None, conversation_api_key: str | None = None, user_id: int | None = None) -> dict[str, str]:
+    # STRICT SECURITY: User API keys are MANDATORY - no system fallback allowed
+    # This is a production-grade security requirement
+    
+    # Priority 1: Use API key from conversation if provided
+    if conversation_api_key:
+        # Detect provider type from API key format
+        ptype = "openrouter" if conversation_api_key.startswith("sk-or-") else "openai"
+        meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
+        
+        return {
+            "provider_id": "conversation",
+            "provider_type": ptype,
+            "provider_name": f"Conversation-provided ({ptype})",
+            "api_key": conversation_api_key,
+            "base_url": meta["base_url"].rstrip("/"),
+            "model": meta["default_chat"],
+            "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
+        }
+    
+    # Priority 2: Use user-specific API key (MANDATORY for chat)
+    if db is not None and user_id is not None:
+        from app.services.user_management import UserApiKeyManager
+        user_api_manager = UserApiKeyManager(db)
+        user_api_key = user_api_manager.get_user_api_key(user_id)
+        
+        if user_api_key:
+            user_config = user_api_manager.get_user_api_config(user_id)
+            ptype = user_config.get("provider", "openrouter")
+            meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
+            
+            return {
+                "provider_id": f"user_{user_id}",
+                "provider_type": ptype,
+                "provider_name": f"User-specific ({ptype})",
+                "api_key": user_api_key,
+                "base_url": user_api_manager.get_base_url_for_user(user_id),
+                "model": user_api_manager.get_model_for_user(user_id),
+                "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
+            }
+        
+    # Priority 2.5: Use Credential Vault API key if saved in workspace credentials
     if db is not None:
         try:
-            from app.services import credential_vault as vault
-
-            # workspace-scoped configs are preferred via providers; vault syncs into LlmProvider
-            fields = None
-            # Without workspace_id here, fall through to provider row
+            from app.services.credential_vault import get_credential
+            ws_id = getattr(db, "_workspace_id", 1) or 1
+            vault_key = get_credential(db, ws_id, "llm", "openai", "api_key") or get_credential(db, ws_id, "llm", "openrouter", "api_key")
+            if vault_key:
+                ptype = "openrouter" if vault_key.startswith("sk-or-") else "openai"
+                meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
+                return {
+                    "provider_id": "vault",
+                    "provider_type": ptype,
+                    "provider_name": f"Vault-provided ({ptype})",
+                    "api_key": vault_key,
+                    "base_url": meta["base_url"].rstrip("/"),
+                    "model": meta["default_chat"],
+                    "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
+                }
         except Exception:
-            fields = None
+            pass
 
-    row = None
+    # Priority 3: Fall back to system active provider or environment configuration
     if db is not None:
         row = get_active_provider_row(db)
+        if row:
+            ptype = (row.provider_type or "openai").lower()
+            meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
+            return {
+                "provider_id": str(row.id),
+                "provider_type": ptype,
+                "provider_name": row.name,
+                "api_key": resolve_api_key(row),
+                "base_url": (row.base_url or meta["base_url"]).rstrip("/"),
+                "model": row.chat_model or meta["default_chat"],
+                "embedding_model": row.embedding_model or meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
+            }
 
-    if row:
-        ptype = row.provider_type or "openai"
-        meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
-        return {
-            "provider_id": str(row.id),
-            "provider_type": ptype,
-            "provider_name": row.name,
-            "api_key": resolve_api_key(row),
-            "base_url": (row.base_url or meta["base_url"]).rstrip("/"),
-            "model": row.chat_model or meta["default_chat"],
-            "embedding_model": row.embedding_model or meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
-        }
-
+    # Environment fallback (only if set by user or admin in environment)
+    import os
+    ptype = (os.getenv("OPENAI_PROVIDER_TYPE") or "openrouter").lower()
+    meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openrouter"])
+    env_key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY") or "").strip()
     return {
         "provider_id": "",
-        "provider_type": "openai",
+        "provider_type": ptype,
         "provider_name": "Environment",
-        "api_key": OPENAI_API_KEY,
-        "base_url": OPENAI_BASE_URL.rstrip("/"),
-        "model": OPENAI_MODEL,
-        "embedding_model": OPENAI_EMBEDDING_MODEL,
+        "api_key": env_key,
+        "base_url": (os.getenv("OPENAI_BASE_URL") or meta["base_url"]).rstrip("/"),
+        "model": os.getenv("OPENAI_MODEL") or meta["default_chat"],
+        "embedding_model": OPENAI_EMBEDDING_MODEL or meta.get("default_embedding") or "openai/text-embedding-3-small",
     }
 
 
 def ensure_default_provider(db: Session) -> None:
+    # Only set up default provider if user has explicitly configured one
+    # Don't auto-create from environment variables - require user to upload their own key
     if db.query(LlmProvider).count() > 0:
         if not get_active_provider_row(db):
             first = db.query(LlmProvider).order_by(LlmProvider.id).first()
@@ -353,21 +412,8 @@ def ensure_default_provider(db: Session) -> None:
                 db.commit()
         return
 
-    if not OPENAI_API_KEY:
-        return
-
-    is_openrouter = "openrouter.ai" in (OPENAI_BASE_URL or "").lower() or OPENAI_API_KEY.startswith("sk-or-")
-    row = LlmProvider(
-        name="OpenRouter (env)" if is_openrouter else "OpenAI (env)",
-        provider_type="openrouter" if is_openrouter else "openai",
-        base_url=OPENAI_BASE_URL.rstrip("/"),
-        api_key_enc="",
-        chat_model=OPENAI_MODEL,
-        embedding_model=OPENAI_EMBEDDING_MODEL,
-        is_active=1,
-    )
-    db.add(row)
-    db.commit()
+    # Don't auto-create default provider - user must upload their own API key
+    return
 
 
 def create_provider(db: Session, data: dict) -> dict:

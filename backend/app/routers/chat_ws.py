@@ -9,6 +9,7 @@ from app.config import UPLOAD_DIR
 from app.crypto import decode_token
 from app.database import Assistant, ConversationAttachment, SessionLocal, User, Workflow
 from app.deps import effective_role
+from app.services.security_validator import validate_chat_request_security, SecurityValidationError
 from app.services.tenancy import ensure_personal_workspace, get_membership
 from app.services.knowledge import rag_hits_for_assistant
 from app.services.workflow import log_usage, resolve_workflow_llm_messages, run_workflow_with_progress
@@ -23,28 +24,47 @@ def get_user_id_from_ws(websocket: WebSocket) -> int | None:
 
     # Prefer Authorization header; fall back to query token for browser WS clients.
     token = None
-    auth = websocket.headers.get("authorization")
-    if auth and auth.lower().startswith("bearer "):
-        token = auth.split(" ", 1)[1].strip()
+    try:
+        auth = websocket.headers.get("authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+        if not token:
+            token = websocket.query_params.get("t") or websocket.query_params.get("token")
+    except Exception as e:
+        print(f"Error extracting token from WebSocket: {e}")
+        return None
+        
     if not token:
-        token = websocket.query_params.get("t") or websocket.query_params.get("token")
-    if not token:
         return None
-    client = websocket.client.host if websocket.client else "ws"
-    if not rate_limiter.allow("ws", client, limit=RATE_LIMIT_WS_PER_MINUTE, window_seconds=60):
-        return None
-    payload = decode_token(token)
-    if not payload:
-        return None
-    sid = payload.get("sid")
-    if sid:
-        db = SessionLocal()
-        try:
-            if not session_is_active(db, sid):
+        
+    try:
+        client = websocket.client.host if websocket.client else "ws"
+        if not rate_limiter.allow("ws", client, limit=RATE_LIMIT_WS_PER_MINUTE, window_seconds=60):
+            print(f"Rate limit exceeded for WebSocket client: {client}")
+            return None
+            
+        payload = decode_token(token)
+        if not payload:
+            print("Failed to decode WebSocket token")
+            return None
+            
+        sid = payload.get("sid")
+        if sid:
+            db = SessionLocal()
+            try:
+                if not session_is_active(db, sid):
+                    print("WebSocket session is not active")
+                    return None
+            except Exception as e:
+                print(f"Error checking session activity: {e}")
                 return None
-        finally:
-            db.close()
-    return int(payload["sub"])
+            finally:
+                db.close()
+                
+        return int(payload["sub"])
+    except Exception as e:
+        print(f"Error in get_user_id_from_ws: {e}")
+        return None
 
 
 def get_ws_workspace(db: Session, websocket: WebSocket, user_id: int) -> tuple[int, str] | None:
@@ -89,6 +109,10 @@ def _parse_user_message(payload: dict) -> str:
         payload.get("inputs", {}).get("input")
         or payload.get("data", {}).get("dialog_input", {}).get("message")
         or payload.get("data", {}).get("dialog_input", {}).get("data", {}).get("user_input")
+        or payload.get("message")
+        or payload.get("query")
+        or payload.get("content")
+        or payload.get("input")
         or ""
     )
     return sanitize_user_prompt(str(raw))
@@ -117,6 +141,18 @@ def _parse_attachment_ids(payload: dict) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [str(x).strip() for x in raw if str(x or "").strip()][:20]
+
+
+def handle_heartbeat(websocket: WebSocket, data: dict) -> bool:
+    """Handle WebSocket heartbeat/ping messages."""
+    if data.get("type") == "ping" or data.get("action") == "ping":
+        try:
+            import asyncio
+            asyncio.create_task(websocket.send_json({"type": "pong"}))
+        except Exception as e:
+            print(f"Error sending pong: {e}")
+        return True
+    return False
 
 
 def _attachment_texts(db: Session, *, workspace_id: int, attachment_ids: list[str]) -> list[str]:
@@ -180,104 +216,186 @@ async def _stream_reply(
     )
     runtime = AIRuntime(ctx)
 
-    provider = resolve_provider(db)
-    route = route_model(db, workspace_id, provider)
-    ab_meta = None
-    if route.route_id:
-        ab_meta = {"model": route.model, "variant": route.variant, "route_id": route.route_id}
-    elif route.model:
-        ab_meta = {"model": route.model, "variant": route.variant, "route_id": route.route_id}
-
-    await websocket.send_json({"type": "start"})
-    buffer = ""
-    usage_out: dict = {}
-    stopped = False
-    rag_hits = (receipt_extra or {}).get("rag_hits")
-
-    req = ChatRequest(
-        user_message=user_msg,
-        system_prompt=system,
-        assistant_id=assistant_id,
-        history=history,
-        rag_query=rag_query or user_msg,
-    )
     try:
-        async for token in runtime.chat_stream(req, usage_out=usage_out):
-            if cancel_event is not None and cancel_event.is_set():
-                stopped = True
-                break
-            buffer += token
-            await websocket.send_json(
-                {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
+        effective_user_id = (receipt_extra or {}).get("user_id") if receipt_extra else user_id
+        try:
+            validate_chat_request_security(db, effective_user_id)
+        except SecurityValidationError as e:
+            msg = (
+                "Please configure your personal API key under Settings → API Keys to get custom responses. "
+                "You can also ask general questions or request workflow automations!"
             )
-            await asyncio.sleep(0)
-    except Exception as exc:
-        await websocket.send_json({"type": "error", "category": "error", "message": str(exc)})
-        await websocket.send_json({"type": "close"})
-        return
+            await websocket.send_json({"type": "start"})
+            await websocket.send_json({"type": "stream", "message": {"content": msg, "reasoning_content": ""}})
+            await websocket.send_json({"type": "end", "message": {"content": msg}, "receipt": {}})
+            await websocket.send_json({"type": "close"})
+            return
 
-    if cancel_event is not None and cancel_event.is_set():
-        stopped = True
-    if not rag_hits and assistant_id:
-        from app.runtime.knowledge import resolve_assistant_knowledge
+        conversation_api_key = (receipt_extra or {}).get("conversation_api_key")
+        try:
+            provider = resolve_provider(db, conversation_api_key, effective_user_id)
+            route = route_model(db, workspace_id, provider)
+        except Exception:
+            provider = None
+            route = None
 
-        kb = resolve_assistant_knowledge(ctx, assistant_id, rag_query or user_msg)
-        rag_hits = [h.to_dict() for h in kb.hits]
+        if not provider or not provider.api_key:
+            msg = (
+                "No active API key was found for your account. Please add your OpenAI/OpenRouter API key "
+                "in Settings → API Keys to unlock full AI chat responses, or ask an admin to set up a global key."
+            )
+            await websocket.send_json({"type": "start"})
+            await websocket.send_json({"type": "stream", "message": {"content": msg, "reasoning_content": ""}})
+            await websocket.send_json({"type": "end", "message": {"content": msg}, "receipt": {}})
+            await websocket.send_json({"type": "close"})
+            return
 
-    receipt = build_chat_receipt(
-        model=ab_meta.get("model") if ab_meta else (usage_out.get("model") or ""),
-        rag_hits=rag_hits,
-        ab_meta=ab_meta,
-        chars=len(buffer),
-        event_type=event_type,
-        usage=usage_out,
-        stopped=stopped,
-    )
-    try:
-        from app.composer.chat_powerhouse import accumulate_receipt
+        await websocket.send_json({"type": "start"})
+        buffer = ""
+        usage_out: dict = {}
+        stopped = False
+        rag_hits = (receipt_extra or {}).get("rag_hits")
 
-        accumulate_receipt(
-            db,
-            conversation_id=(receipt_extra or {}).get("conversation_id"),
-            usage=usage_out,
-            model=str(receipt.get("model") or ""),
-        )
-    except Exception:
-        pass
-    await websocket.send_json({"type": "end", "message": {"content": buffer}, "receipt": receipt})
-    await websocket.send_json({"type": "close"})
-    meta = {"chars": len(buffer), "stopped": stopped, "trace_id": ctx.trace_id}
-    if usage_out.get("total_tokens") is not None:
-        meta["total_tokens"] = usage_out.get("total_tokens")
-        meta["prompt_tokens"] = usage_out.get("prompt_tokens")
-        meta["completion_tokens"] = usage_out.get("completion_tokens")
-    if ab_meta:
-        meta["ab_variant"] = ab_meta.get("variant")
-        meta["ab_model"] = ab_meta.get("model")
-        meta["ab_route_id"] = ab_meta.get("route_id")
-    log_usage(db, user_id, event_type, resource_id, meta, workspace_id)
-
-    try:
-        from app.conversation.integration import persist_chat_turn
-
-        conv_meta = persist_chat_turn(
-            db,
-            workspace_id=workspace_id or 0,
-            user_id=user_id,
-            organization_id=None,
-            assistant_id=assistant_id or resource_id,
+        req = ChatRequest(
             user_message=user_msg,
-            assistant_message=buffer,
-            conversation_id=(receipt_extra or {}).get("conversation_id"),
-            usage=usage_out,
-            rag_hits=rag_hits,
-            trace_id=ctx.trace_id,
-            event_type=event_type,
-            attachment_ids=attachment_ids or [],
+            system_prompt=system,
+            assistant_id=assistant_id,
+            history=history,
+            rag_query=rag_query or user_msg,
+            conversation_api_key=conversation_api_key,
+            user_id=effective_user_id,
+            metadata=receipt_extra,
         )
-        await websocket.send_json({"type": "conversation", "conversation_id": conv_meta.get("conversation_id")})
-    except Exception:
-        pass
+        try:
+            async for token in runtime.chat_stream(req, usage_out=usage_out):
+                if cancel_event is not None and cancel_event.is_set():
+                    stopped = True
+                    break
+                buffer += token
+                await websocket.send_json(
+                    {"type": "stream", "message": {"content": token, "reasoning_content": ""}}
+                )
+                await asyncio.sleep(0)
+        except Exception as exc:
+            err_msg = str(exc)
+            if "401" in err_msg or "API key" in err_msg or "Unauthorized" in err_msg:
+                fallback = (
+                    "\n\n[Notice: The API key provided was invalid or expired. "
+                    "Please update your API key in Settings → API Keys.]"
+                )
+                buffer += fallback
+            elif not buffer:
+                buffer = f"Response notice: {err_msg}"
+            await websocket.send_json({"type": "stream", "message": {"content": buffer, "reasoning_content": ""}})
+            await websocket.send_json({"type": "end", "message": {"content": buffer}, "receipt": {}})
+            await websocket.send_json({"type": "close"})
+            return
+
+        if cancel_event is not None and cancel_event.is_set():
+            stopped = True
+        if not rag_hits and assistant_id:
+            from app.runtime.knowledge import resolve_assistant_knowledge
+            try:
+                kb = resolve_assistant_knowledge(ctx, assistant_id, rag_query or user_msg)
+                rag_hits = [h.to_dict() for h in kb.hits] if kb else []
+            except Exception:
+                rag_hits = []
+
+        ab_meta = {"model": route.model, "variant": route.variant, "route_id": route.route_id} if route else None
+        receipt = build_chat_receipt(
+            model=ab_meta.get("model") if ab_meta else (usage_out.get("model") or ""),
+            rag_hits=rag_hits,
+            ab_meta=ab_meta,
+            chars=len(buffer),
+            event_type=event_type,
+            usage=usage_out,
+            stopped=stopped,
+        )
+        try:
+            from app.composer.chat_powerhouse import accumulate_receipt
+
+            accumulate_receipt(
+                db,
+                conversation_id=(receipt_extra or {}).get("conversation_id"),
+                usage=usage_out,
+                model=str(receipt.get("model") or ""),
+            )
+        except Exception:
+            pass
+        await websocket.send_json({"type": "end", "message": {"content": ""}, "receipt": receipt})
+        await websocket.send_json({"type": "close"})
+
+    except Exception as top_exc:
+        err_text = f"Notice: {top_exc}"
+        try:
+            await websocket.send_json({"type": "start"})
+            await websocket.send_json({"type": "stream", "message": {"content": err_text, "reasoning_content": ""}})
+            await websocket.send_json({"type": "end", "message": {"content": err_text}, "receipt": {}})
+            await websocket.send_json({"type": "close"})
+        except Exception:
+            pass
+        meta = {"chars": len(buffer), "stopped": stopped, "trace_id": ctx.trace_id}
+        if usage_out.get("total_tokens") is not None:
+            meta["total_tokens"] = usage_out.get("total_tokens")
+            meta["prompt_tokens"] = usage_out.get("prompt_tokens")
+            meta["completion_tokens"] = usage_out.get("completion_tokens")
+        if ab_meta:
+            meta["ab_variant"] = ab_meta.get("variant")
+            meta["ab_model"] = ab_meta.get("model")
+            meta["ab_route_id"] = ab_meta.get("route_id")
+        log_usage(db, user_id, event_type, resource_id, meta, workspace_id)
+
+        try:
+            from app.conversation.integration import persist_chat_turn
+
+            conv_meta = persist_chat_turn(
+                db,
+                workspace_id=workspace_id or 0,
+                user_id=user_id,
+                organization_id=None,
+                assistant_id=assistant_id or resource_id,
+                user_message=user_msg,
+                assistant_message=buffer,
+                conversation_id=(receipt_extra or {}).get("conversation_id"),
+                usage=usage_out,
+                rag_hits=rag_hits,
+                trace_id=ctx.trace_id,
+                event_type=event_type,
+                attachment_ids=attachment_ids or [],
+            )
+            await websocket.send_json({"type": "conversation", "conversation_id": conv_meta.get("conversation_id")})
+        except Exception:
+            pass
+    except ValueError as e:
+        # Handle missing API key gracefully in WebSocket
+        if "No LLM provider configured" in str(e) or "No API key configured" in str(e):
+            await websocket.send_json({"type": "start"})
+            
+            # Provide workflow management fallback
+            try:
+                from app.services.workflow_manager import WorkflowManager
+                workflow_manager = WorkflowManager(db, user_id, workspace_id)
+                suggestion = workflow_manager.suggest_workflow_action(user_msg)
+                
+                # Send as stream
+                for line in suggestion.split('\n'):
+                    await websocket.send_json({
+                        "type": "stream", 
+                        "message": {"content": line + "\n", "reasoning_content": ""}
+                    })
+                    await asyncio.sleep(0.1)
+            except Exception:
+                # Fallback to basic message
+                fallback_msg = "I'd be happy to help you with that! However, to use AI features, you'll need to add your API key in **Settings → Model providers**. In the meantime, I can help you manage your workflows. Just ask me to list, run, test, or update your workflows!"
+                await websocket.send_json({
+                    "type": "stream", 
+                    "message": {"content": fallback_msg, "reasoning_content": ""}
+                })
+            
+            await websocket.send_json({"type": "end", "message": {"content": "", "receipt": {}}})
+            await websocket.send_json({"type": "close"})
+        else:
+            raise
 
 
 @router.websocket("/assistant/chat/{assistant_id}")
@@ -300,9 +418,30 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
 
         assistant = db.get(Assistant, assistant_id)
         if not assistant or assistant.workspace_id != wid:
-            await websocket.send_json({"type": "error", "category": "error", "message": "Assistant not found"})
-            await websocket.close()
-            return
+            assistant = db.query(Assistant).filter(Assistant.workspace_id == wid).first()
+            if not assistant:
+                default_prompt = (
+                    "You are NovaFlow AI — a world-class, state-of-the-art AI OS Assistant & Workflow Composer created by Google Deepmind engineers. "
+                    "Your responses must always be exceptionally helpful, beautifully formatted, highly structured, and warm.\n\n"
+                    "Formatting Rules:\n"
+                    "1. Always start with a concise executive summary or direct answer.\n"
+                    "2. Use markdown headings (### Section) to organize complex topics into readable chunks.\n"
+                    "3. Use bold bullet points for lists and key takeaways.\n"
+                    "4. Wrap all code snippets, scripts, or JSON payloads in fenced markdown code blocks (` ```python ` or ` ```json `).\n"
+                    "5. When creating or analyzing workflows, clearly outline step-by-step reasoning, required credentials/inputs, and execution flow.\n"
+                    "6. Conclude with actionable next steps or recommendations."
+                )
+                assistant = Assistant(
+                    id=assistant_id if len(assistant_id) > 10 else "default_assistant",
+                    workspace_id=wid,
+                    name="NovaFlow Assistant",
+                    desc="Conversational workspace composer & AI assistant",
+                    prompt=default_prompt,
+                    status=1,
+                )
+                db.add(assistant)
+                db.commit()
+                db.refresh(assistant)
 
         init_raw = await websocket.receive_text()
         try:
@@ -344,6 +483,10 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 except Exception:
                     pass
             # Prefer last user turn for retrieval; fall back to full query
+            # Handle heartbeat/ping messages
+            if handle_heartbeat(websocket, payload):
+                continue
+
             rag_query = query
             if history:
                 # Light rewrite: include previous user question for follow-ups
@@ -370,83 +513,56 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
             except Exception:
                 bridge = {"events": [], "blocked_normal_reply": False}
 
+            # Extract conversation API key from bridge if available
+            conversation_api_key = bridge.get("aios", {}).get("conversation_api_key")
+
             for ev in (bridge.get("ui_events") or bridge.get("events") or []):
-                # Send only UI card(s) — typically one primary event
+                # Send UI card(s) as helpful interactive attachments
                 await websocket.send_json(ev)
-                # Stop after first card for blocked AIOS (one reply unit)
-                if bridge.get("blocked_normal_reply"):
-                    break
-            if bridge.get("blocked_normal_reply"):
-                summary = (bridge.get("summary") or "").strip()
-                if not summary:
-                    summary = "Done — use the buttons on the card."
+
+            blocked = bool(bridge.get("blocked_normal_reply"))
+            receipt_extra = {
+                "rag_hits": rag_hits,
+                "role": role,
+                "conversation_id": conversation_id,
+                "conversation_api_key": conversation_api_key,
+                "user_id": user_id,
+            }
+
+            if blocked:
+                # AIOS card is the full reply — skip generic LLM handbook stream
                 await websocket.send_json(
-                    {"type": "end", "message": {"content": summary}, "receipt": {"event_type": "aios"}}
+                    {
+                        "type": "end",
+                        "message": bridge.get("summary") or "",
+                        "aios_only": True,
+                        "receipt": receipt_extra,
+                    }
                 )
-                try:
-                    from app.conversation.integration import persist_chat_turn
+            else:
+                # Enrich prompt context with AIOS action summary for conversational streaming
+                aios_summary = bridge.get("summary") or ""
+                if aios_summary:
+                    query = f"{query}\n\n[Workflow System Context: {aios_summary}]"
 
-                    conv_meta = persist_chat_turn(
+                try:
+                    await _stream_reply(
+                        websocket,
                         db,
-                        workspace_id=wid,
-                        user_id=user_id,
-                        organization_id=None,
+                        user_id,
+                        assistant_id,
+                        "chat",
+                        system_prompt,
+                        query,
+                        wid,
+                        receipt_extra=receipt_extra,
+                        cancel_event=None,
+                        history=history,
                         assistant_id=assistant_id,
-                        user_message=(bridge.get("redacted_message") or str(user_msg)).strip(),
-                        assistant_message=summary,
-                        conversation_id=conversation_id,
+                        rag_query=rag_query,
                         attachment_ids=attachment_ids,
-                        event_type="chat",
                     )
-                    await websocket.send_json(
-                        {"type": "conversation", "conversation_id": conv_meta.get("conversation_id")}
-                    )
-                except Exception:
-                    pass
-                await websocket.send_json({"type": "close"})
-                continue
-
-            cancel_event = asyncio.Event()
-
-            async def _watch_stop(evt: asyncio.Event):
-                while not evt.is_set():
-                    try:
-                        raw_stop = await websocket.receive_text()
-                    except Exception:
-                        evt.set()
-                        return
-                    try:
-                        stop_payload = json.loads(raw_stop)
-                    except json.JSONDecodeError:
-                        continue
-                    if stop_payload.get("action") == "stop":
-                        evt.set()
-                        return
-
-            watcher = asyncio.create_task(_watch_stop(cancel_event))
-            try:
-                await _stream_reply(
-                    websocket,
-                    db,
-                    user_id,
-                    assistant_id,
-                    "chat",
-                    system_prompt,
-                    query,
-                    wid,
-                    receipt_extra={"rag_hits": rag_hits, "role": role, "conversation_id": conversation_id},
-                    cancel_event=cancel_event,
-                    history=history,
-                    assistant_id=assistant_id,
-                    rag_query=rag_query,
-                    attachment_ids=attachment_ids,
-                )
-            finally:
-                cancel_event.set()
-                watcher.cancel()
-                try:
-                    await watcher
-                except asyncio.CancelledError:
+                finally:
                     pass
     except WebSocketDisconnect:
         pass
@@ -504,6 +620,10 @@ async def workflow_chat_ws(websocket: WebSocket, workflow_id: str):
                 continue
 
             if payload.get("action") == "stop":
+                continue
+
+            # Handle heartbeat/ping messages
+            if handle_heartbeat(websocket, payload):
                 continue
 
             user_msg = _parse_user_message(payload)
@@ -601,6 +721,11 @@ async def workflow_run_ws(websocket: WebSocket, workflow_id: str):
             await websocket.send_json({"type": "error", "message": "Invalid payload"})
             await websocket.close()
             return
+
+        # Handle heartbeat/ping messages
+        if handle_heartbeat(websocket, payload):
+            # Continue to next message instead of returning
+            pass
 
         user_input = (payload.get("input") or "").strip()
         if not user_input:
