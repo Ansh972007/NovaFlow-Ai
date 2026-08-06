@@ -23,6 +23,20 @@ def _goal_text(db: Session, solution: SolutionGraph) -> str:
     return (project.business_goal or "").strip() if project else ""
 
 
+def _primary_output_channel(req: dict[str, Any] | None, goal_l: str) -> str:
+    """Resolve the user's primary delivery channel (not co-mentioned keywords)."""
+    req = req or {}
+    integration = (req.get("integration") or "").lower()
+    output = (req.get("output") or "workflow").lower()
+    if integration == "youtube" or output == "youtube":
+        return "youtube"
+    if output == "email":
+        return "email"
+    if integration:
+        return integration
+    return output
+
+
 def build_executable_graph(
     *,
     required_caps: list[str],
@@ -37,6 +51,9 @@ def build_executable_graph(
     """
     caps = set(required_caps or [])
     goal_l = (goal or "").lower()
+    req_meta = requirements or {}
+    primary_channel = _primary_output_channel(req_meta, goal_l)
+    wants_email_delivery = primary_channel == "email"
     recipe = None
     if recipe_id:
         recipe = next((r for r in RECIPES if r["id"] == recipe_id), None)
@@ -86,6 +103,18 @@ def build_executable_graph(
         "Produce a clear operational deliverable. "
         "If credentials or data are missing, state what is missing."
     )
+    if primary_channel == "youtube":
+        llm_prompt = (
+            "You analyze YouTube channel and video data. "
+            f"Goal: {goal or '(see input)'}\n"
+            "Summarize key metrics, trends, and actionable insights in clear markdown."
+        )
+    elif wants_email_delivery:
+        llm_prompt = (
+            "You draft professional emails from the user's workflow goal. "
+            f"Goal: {goal or '(see input)'}\n"
+            "Output ready-to-send subject and body text."
+        )
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, str]] = []
@@ -101,6 +130,10 @@ def build_executable_graph(
     trigger_label = "Start / Goal"
     if schedule_hint:
         trigger_label = "Scheduled start"
+    if primary_channel == "youtube":
+        trigger_label = "YouTube sync trigger"
+    elif wants_email_delivery:
+        trigger_label = "Email workflow start"
     prev = add({"id": "trigger", "type": "trigger", "data": {"label": trigger_label, "schedule_note": schedule_hint}})
 
     if wants_transform:
@@ -192,12 +225,18 @@ def build_executable_graph(
         edges.append({"from": prev, "to": nid})
         prev = nid
 
-    wants_notify = any(
-        c in caps
-        for c in ("cap_telegram", "cap_slack", "cap_discord", "cap_smtp", "cap_whatsapp", "cap_outlook")
+    wants_notify = (
+        wants_email_delivery
+        and (
+            "cap_smtp" in caps
+            or "cap_outlook" in caps
+            or any(k in goal_l for k in ("email", "mail", "send", "friends", "recipients"))
+        )
     ) or any(
-        k in goal_l
-        for k in ("telegram", "slack", "discord", "email", "digest", "notify", "bot", "whatsapp", "outlook")
+        c in caps
+        for c in ("cap_telegram", "cap_slack", "cap_discord", "cap_whatsapp")
+    ) or any(k in goal_l for k in ("telegram", "slack", "discord", "whatsapp")) or (
+        "outlook" in goal_l and primary_channel != "youtube"
     )
 
     if wants_human and (wants_notify or wants_http or "cap_github" in caps):
@@ -217,7 +256,10 @@ def build_executable_graph(
         if "cap_outlook" in caps or "outlook" in goal_l or "microsoft 365" in goal_l:
             channel = "email"
             to_addr = "{{email}}"
-        elif "cap_smtp" in caps or "email" in goal_l or "digest" in goal_l or "mail" in goal_l or "gmail" in goal_l:
+        elif wants_email_delivery and (
+            "cap_smtp" in caps
+            or any(k in goal_l for k in ("email", "mail", "gmail", "send"))
+        ):
             channel = "email"
             to_addr = "{{email}}"
         elif "cap_whatsapp" in caps or "whatsapp" in goal_l:
@@ -234,9 +276,11 @@ def build_executable_graph(
         req = requirements or {}
         email_topic = (req.get("email_topic") or "").strip()
         email_count = req.get("email_count")
-        if email_count is None and ("5" in goal_l or "five" in goal_l):
+        if email_count is None and wants_email_delivery and ("5" in goal_l or "five" in goal_l):
             email_count = 5
-        if email_count is None and ("multiple" in goal_l or "friends" in goal_l or "different subjects" in goal_l):
+        if email_count is None and wants_email_delivery and (
+            "multiple" in goal_l or "friends" in goal_l or "different subjects" in goal_l
+        ):
             email_count = 5
         recipients = list(req.get("recipients") or [])
         if req.get("email_recipient") and req.get("email_recipient") not in recipients:
@@ -246,7 +290,7 @@ def build_executable_graph(
         elif req.get("recipients_label") == "friends":
             to_addr = "{{friend_email}}"
 
-        multi_email = channel == "email" and (
+        multi_email = wants_email_delivery and channel == "email" and (
             email_count or email_topic or "5" in goal_l or "five" in goal_l
             or "multiple" in goal_l or "friends" in goal_l
         )
@@ -298,12 +342,34 @@ def build_executable_graph(
             edges.append({"from": prev, "to": nid})
             prev = nid
 
-    # Commerce / Google / YouTube API connectors
-    for cap_id, node_id, url, method, keys in (
+    # Commerce / Google / YouTube API connectors — place API fetch before LLM when primary
+    api_connectors = (
         ("cap_shopify", "shopify", "https://{{shop}}/admin/api/2024-01/graphql.json", "POST", ("shopify",)),
-        ("cap_google", "google_api", "https://www.googleapis.com/", "GET", ("google",)),
-        ("cap_youtube", "youtube", "https://www.googleapis.com/youtube/v3/search", "GET", ("youtube",)),
-    ):
+        ("cap_google", "google_api", "https://www.googleapis.com/", "GET", ("google", "sheets", "drive")),
+        ("cap_youtube", "youtube", "https://www.googleapis.com/youtube/v3/channels", "GET", ("youtube",)),
+    )
+    if primary_channel == "youtube" and ("cap_youtube" in caps or "youtube" in goal_l):
+        if not any(n.get("id") == "youtube" for n in nodes):
+            nid = add(
+                {
+                    "id": "youtube",
+                    "type": "http",
+                    "data": {
+                        "url": "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true",
+                        "method": "GET",
+                        "body": "",
+                        "auth": "youtube",
+                        "label": "Fetch YouTube stats",
+                    },
+                }
+            )
+            # Re-wire: trigger -> youtube -> llm (skip duplicate path)
+            edges = [e for e in edges if e.get("from") != "trigger" or e.get("to") != "llm"]
+            edges.append({"from": "trigger", "to": nid})
+            llm_node = next((n.get("id") for n in nodes if n.get("type") == "llm"), "llm")
+            edges.append({"from": nid, "to": llm_node})
+
+    for cap_id, node_id, url, method, keys in api_connectors:
         if cap_id in caps or any(k in goal_l for k in keys):
             if not any(n.get("id") == node_id for n in nodes):
                 nid = add(
@@ -348,7 +414,12 @@ def build_executable_graph(
         edges.append({"from": prev, "to": nid})
         prev = nid
 
-    out_id = add({"id": "output", "type": "output", "data": {"label": "Result"}})
+    out_label = "Result"
+    if primary_channel == "youtube":
+        out_label = "YouTube summary"
+    elif wants_email_delivery:
+        out_label = "Email send log"
+    out_id = add({"id": "output", "type": "output", "data": {"label": out_label}})
     edges.append({"from": prev, "to": out_id})
 
     inputs: list[dict[str, Any]] = []

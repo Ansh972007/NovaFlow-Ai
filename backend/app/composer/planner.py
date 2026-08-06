@@ -70,10 +70,13 @@ def infer_capabilities_from_goal(goal: str, *, force_workflow: bool = False) -> 
         "outlook" in goal_lower or "microsoft" in goal_lower
     ):
         required.append("cap_outlook")
-    if any(k in goal_lower for k in ("email", "smtp", "mail", "digest", "welcome email", "reminder", "gmail")):
+    youtube_primary = bool(re.search(r"\byoutube\b|\byt\s+channel\b", goal_lower))
+    if any(k in goal_lower for k in ("email", "smtp", "mail", "welcome email", "reminder", "gmail")):
         # Prefer Outlook cap when Outlook mentioned; else SMTP
         if "outlook" not in goal_lower and "microsoft" not in goal_lower:
             required.append("cap_smtp")
+    elif "digest" in goal_lower and not youtube_primary:
+        required.append("cap_smtp")
     if any(k in goal_lower for k in ("webhook", "http call", "call api", "lead capture", "crm")):
         required.append("cap_http")
         required.append("cap_workflow")

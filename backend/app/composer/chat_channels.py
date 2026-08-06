@@ -310,8 +310,19 @@ def friendly_title_for_goal(goal: str) -> str:
     t = (goal or "").lower()
     email = _EMAIL.search(goal or "")
     schedule = bool(re.search(r"\b(daily|every day|weekly|schedule)\b", t))
+    if re.search(r"\byoutube\b|\byt\s+channel\b", t):
+        yt = next((c for c in channels if c.id == "youtube"), None)
+        if yt and yt.title_templates:
+            return yt.title_templates[0]
+        return "YouTube channel workflow"
     if channels:
-        primary = channels[0]
+        priority = ("youtube", "telegram", "shopify", "google", "github", "slack", "discord", "email", "outlook")
+        primary = None
+        for pid in priority:
+            primary = next((c for c in channels if c.id == pid), None)
+            if primary:
+                break
+        primary = primary or channels[0]
         if primary.id == "email" and email:
             return f"{'Daily email' if schedule else 'Email'} to {email.group(1)}"
         if primary.id == "custom":

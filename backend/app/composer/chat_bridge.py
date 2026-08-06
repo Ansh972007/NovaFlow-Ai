@@ -729,7 +729,10 @@ def _refresh_blueprint_from_aios(
     missing_slots = missing_workflow_slots(req)
     compose_phase = "gather" if missing_slots or live_missing else "await_approve"
     next_action = "gather" if missing_slots else ("credentials" if live_missing else "approve")
-    recipe = match_recipe(enriched_goal, fallback_generic=True)
+    recipe_goal = req.get("raw") or req.get("goal") or enriched_goal
+    if req.get("integration"):
+        recipe_goal = f"{req.get('integration')} {recipe_goal}"
+    recipe = match_recipe(recipe_goal, fallback_generic=True)
     recipe_name = (recipe or {}).get("name")
     preview_executable = build_executable_graph(
         required_caps=required_caps,
@@ -1196,8 +1199,25 @@ def process_chat_goal(
                 return _finalize(events, True, redacted_message)
         except Exception:  # noqa: BLE001
             pass
+        from app.composer.chat_requirements import parse_requirements as _parse_req_early
+
         goal = text
-        if aios.get("goal") and (intent == "refine" or re.search(r"\b(for this|for that|from this)\b", text, re.I) or text.strip().lower() in ("build a workflow", "make a workflow", "build workflow")):
+        fresh_hint = _parse_req_early(text, last_field=aios.get("last_field"), db=db)
+        if intent == "compose" and fresh_hint.get("integration"):
+            prev_int = (aios.get("requirements") or {}).get("integration")
+            if prev_int and fresh_hint.get("integration") != prev_int:
+                goal = text
+            elif aios.get("goal") and (
+                intent == "refine"
+                or re.search(r"\b(for this|for that|from this)\b", text, re.I)
+                or text.strip().lower() in ("build a workflow", "make a workflow", "build workflow")
+            ):
+                goal = aios.get("goal")
+        elif aios.get("goal") and (
+            intent == "refine"
+            or re.search(r"\b(for this|for that|from this)\b", text, re.I)
+            or text.strip().lower() in ("build a workflow", "make a workflow", "build workflow")
+        ):
             goal = aios.get("goal")
         elif intent == "refine" and aios.get("goal"):
             goal = f"{aios.get('goal')}\n\nRefinement: {text}"
@@ -1226,11 +1246,14 @@ def process_chat_goal(
             req = parse_requirements(goal, last_field=aios.get("last_field"), db=db)
 
         enriched_goal = compose_goal_from_requirements(req)
+        recipe_goal = req.get("raw") or req.get("goal") or goal
+        if req.get("integration"):
+            recipe_goal = f"{req.get('integration')} {recipe_goal}"
         required_caps = infer_capabilities_from_goal(enriched_goal, force_workflow=True)
         live_missing = analyze_solution_gaps(db, workspace_id, required_caps)
         missing_slots = missing_workflow_slots(req)
         field = infer_field(enriched_goal, aios.get("last_field"))
-        recipe = match_recipe(enriched_goal, fallback_generic=True)
+        recipe = match_recipe(recipe_goal, fallback_generic=True)
         recipe_name = (recipe or {}).get("name")
         attach_n = _attachment_count(db, conversation_id, workspace_id)
         knowledge_id = aios.get("knowledge_id")
@@ -1250,6 +1273,10 @@ def process_chat_goal(
         from app.composer.chat_channels import friendly_title_for_goal
 
         friendly_title = req.get("workflow_name") or friendly_title_for_goal(enriched_goal)
+        if req.get("integration") == "youtube":
+            friendly_title = "YouTube channel workflow"
+        elif req.get("integration") == "google_sheets":
+            friendly_title = "Google Sheets workflow"
         if recipe_name and "generic" not in str(recipe_name).lower() and friendly_title == "Your automation plan":
             friendly_title = str(recipe_name)
 

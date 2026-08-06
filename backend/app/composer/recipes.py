@@ -271,6 +271,20 @@ def score_recipe(goal: str) -> dict[str, Any] | None:
         if score > best_score:
             best_score = score
             best = dict(recipe)
+    # Prefer integration-specific recipes on ties (e.g. youtube over email_digest)
+    if "youtube" in g:
+        yt = next((r for r in RECIPES if r.get("id") == "youtube_digest"), None)
+        if yt:
+            yt_score = 0
+            for token in yt.get("any_of") or ():
+                if token in g:
+                    yt_score += 3
+            for token in yt.get("match") or ():
+                if token in g:
+                    yt_score += 1
+            if yt_score >= best_score:
+                best = dict(yt)
+                best_score = yt_score + 1  # prefer YouTube over generic schedule/email ties
     if not best:
         return None
     best["score"] = best_score

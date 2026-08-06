@@ -37,17 +37,6 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
         data = "dynamic_llm"
 
     output = "workflow"
-    if re.search(r"\b(email|smtp|mail|welcome email|reminder|send email)\b", g):
-        output = "email"
-    elif re.search(r"\bslack\b", g):
-        output = "slack"
-    elif re.search(r"\btelegram\b", g):
-        output = "telegram"
-    elif re.search(r"\bdiscord\b", g):
-        output = "discord"
-    elif re.search(r"\b(github|jira|linear)\b", g):
-        output = "ticket"
-
     integration = None
     if re.search(r"\byoutube\b|\byt\s+channel\b", g):
         integration = "youtube"
@@ -63,6 +52,29 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
         integration = "google_api"
     elif re.search(r"\boutlook\b|\bmicrosoft\s+365\b|\boffice\s+365\b", g):
         integration = "outlook_mail"
+
+    explicit_email = bool(
+        re.search(r"\b(send|emails?|smtp|mail|welcome email|reminder)\b", g)
+        and not re.search(r"\b(send\s+to\s+chat|in\s+chat)\b", g)
+    )
+    if integration == "youtube" and not explicit_email:
+        output = "youtube"
+    elif re.search(r"\b(emails?|smtp|mail|welcome email|reminder)\b", g) or re.search(
+        r"\bsend\s+\d+\s+emails?\b", g
+    ):
+        output = "email"
+    elif re.search(r"\bslack\b", g):
+        output = "slack"
+    elif re.search(r"\btelegram\b", g):
+        output = "telegram"
+    elif re.search(r"\bdiscord\b", g):
+        output = "discord"
+    elif re.search(r"\b(github|jira|linear)\b", g):
+        output = "ticket"
+    elif integration in ("google_sheets", "google_drive", "google_calendar", "google_api"):
+        output = integration
+    elif integration == "youtube":
+        output = "youtube"
 
     needs_approval = bool(
         re.search(r"\b(approve|approval|ask me|hitl|human)\b", g)
@@ -92,25 +104,27 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
         recipients_label = None
 
     email_topic = None
-    topic_m = re.search(
-        r"\b(?:on|about|regarding|for|topic)\s+(?:the\s+)?([a-zA-Z][a-zA-Z0-9\s\-]{2,40}?)(?:\s+topic)?(?:\s+to|\s+for|\s+with|\s+using|$|[.,!])",
-        t,
-        re.I,
-    )
-    if topic_m:
-        email_topic = topic_m.group(1).strip()
-    elif re.search(r"\bdiwali\b", g):
-        email_topic = "Diwali"
+    if output == "email":
+        topic_m = re.search(
+            r"\b(?:on|about|regarding|for|topic)\s+(?:the\s+)?([a-zA-Z][a-zA-Z0-9\s\-]{2,40}?)(?:\s+topic)?(?:\s+to|\s+for|\s+with|\s+using|$|[.,!])",
+            t,
+            re.I,
+        )
+        if topic_m and not re.search(r"\byoutube\b", topic_m.group(1), re.I):
+            email_topic = topic_m.group(1).strip()
+        elif re.search(r"\bdiwali\b", g):
+            email_topic = "Diwali"
 
     email_count = None
-    count_m = re.search(r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+emails?\b", g)
-    if count_m:
-        word = count_m.group(1)
-        word_map = {
-            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-        }
-        email_count = int(word) if word.isdigit() else word_map.get(word, None)
+    if output == "email":
+        count_m = re.search(r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+emails?\b", g)
+        if count_m:
+            word = count_m.group(1)
+            word_map = {
+                "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+            }
+            email_count = int(word) if word.isdigit() else word_map.get(word, None)
 
     auth_preference = None
     if re.search(r"\b(google oauth|google auth|gmail oauth|oauth)\b", g):
@@ -311,13 +325,18 @@ def sync_checklist_from_aios(req: dict[str, Any], aios: dict[str, Any]) -> dict[
 
 
 def compose_goal_from_requirements(req: dict[str, Any]) -> str:
+    trigger_label = req.get("trigger") or "manual"
+    if trigger_label == "schedule":
+        trigger_label = "scheduled"
     parts = [
         req.get("goal") or req.get("raw") or "Automate this work",
         f"Field: {req.get('field')}.",
-        f"Trigger: {req.get('trigger')}.",
+        f"Run cadence: {trigger_label}.",
         f"Data source: {req.get('data')}.",
         f"Output channel: {req.get('output')}.",
     ]
+    if req.get("integration"):
+        parts.append(f"Primary integration: {req['integration']}.")
     if req.get("email_topic"):
         parts.append(f"Email topic: {req['email_topic']}.")
     if req.get("email_count"):
@@ -426,7 +445,43 @@ def build_blueprint_preview(
 ) -> dict[str, Any]:
     """Human-readable blueprint steps + slot table for chat UI."""
     output = (req.get("output") or "workflow").lower()
-    steps = [
+    integration = (req.get("integration") or "").lower()
+    topic = (req.get("email_topic") or req.get("goal") or goal or "your request")[:80]
+
+    integration_steps: dict[str, list[str]] = {
+        "youtube": [
+            "Trigger workflow (manual or scheduled)",
+            "Call YouTube Data API for channel / video stats",
+            f"Analyze and summarize: {topic}",
+            "Show results in chat",
+        ],
+        "google_sheets": [
+            "Trigger on schedule or manual run",
+            "Read or update Google Sheets via API",
+            f"Process data for: {topic}",
+            "Return sheet summary in chat",
+        ],
+        "google_drive": [
+            "Trigger workflow",
+            "List or sync files from Google Drive",
+            f"Process content for: {topic}",
+            "Return results in chat",
+        ],
+        "google_calendar": [
+            "Trigger on schedule",
+            "Fetch or create Google Calendar events",
+            f"Handle calendar task: {topic}",
+            "Confirm results in chat",
+        ],
+        "telegram": [
+            "Receive message via Telegram bot trigger",
+            "Process user request with AI",
+            f"Reply on Telegram about: {topic}",
+            "Log outcome in chat",
+        ],
+    }
+
+    steps = integration_steps.get(integration) or integration_steps.get(output) or [
         "Capture trigger and inputs",
         "Prepare message content from your requirements",
         f"Deliver via {output}",

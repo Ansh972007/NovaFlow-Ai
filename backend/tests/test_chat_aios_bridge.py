@@ -1664,6 +1664,72 @@ def test_youtube_blueprint_requires_api_key(api_client):
         db.close()
 
 
+def test_youtube_goal_uses_youtube_not_email_template(api_client):
+    from app.composer.chat_bridge import process_chat_goal
+    from app.database import SessionLocal
+
+    headers = _auth_headers(api_client)
+    conv = api_client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"title": "YouTube template", "conversation_type": "assistant"},
+    ).json()["data"]
+
+    db = SessionLocal()
+    try:
+        compose = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="Build workflow to sync YouTube channel stats daily",
+        )
+        sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
+        preview = sol.get("executable_preview") or {}
+        nodes = preview.get("nodes") or []
+        node_ids = [n.get("id") for n in nodes]
+        assert any(nid == "youtube" for nid in node_ids)
+        assert not any(str(nid).startswith("email_") for nid in node_ids)
+        steps = (sol.get("blueprint") or {}).get("steps") or []
+        joined = " ".join(steps).lower()
+        assert "youtube" in joined
+        assert "email digest" not in joined
+        assert sol.get("requirements", {}).get("integration") == "youtube"
+        assert "YouTube" in (sol.get("friendly_title") or "")
+    finally:
+        db.close()
+
+
+def test_email_goal_still_builds_multi_email_workflow(api_client):
+    from app.composer.chat_bridge import process_chat_goal
+    from app.database import SessionLocal
+
+    headers = _auth_headers(api_client)
+    conv = api_client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"title": "Email template", "conversation_type": "assistant"},
+    ).json()["data"]
+
+    db = SessionLocal()
+    try:
+        compose = process_chat_goal(
+            db,
+            workspace_id=1,
+            user_id=1,
+            conversation_id=conv["id"],
+            user_message="Create a workflow to send 5 emails on different subjects to my friends about Diwali",
+        )
+        sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
+        preview = sol.get("executable_preview") or {}
+        node_ids = [n.get("id") for n in (preview.get("nodes") or [])]
+        assert any(str(nid).startswith("email_") for nid in node_ids)
+        steps = (sol.get("blueprint") or {}).get("steps") or []
+        assert "email" in " ".join(steps).lower()
+    finally:
+        db.close()
+
+
 def test_youtube_paste_saves_vault_and_allows_approve(api_client):
     from app.composer.chat_bridge import process_chat_goal
     from app.database import CredentialVaultEntry, SessionLocal
