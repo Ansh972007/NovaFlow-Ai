@@ -5,6 +5,10 @@ let userCache = null;
 let userCacheAt = 0;
 const USER_CACHE_MS = 20000;
 
+export async function getLoginMode() {
+  return client.get("/auth/login/mode");
+}
+
 export async function getPublicKey() {
   return client.get("/user/public_key");
 }

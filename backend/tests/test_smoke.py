@@ -148,6 +148,24 @@ def test_login_and_user_info(client):
     assert body["data"]["user_name"] == "admin"
 
 
+def test_weak_admin_credentials_blocked(client):
+    res = client.post(
+        "/api/v1/user/login",
+        json={"user_name": "admin", "password": _encrypt("admin123")},
+    )
+    body = res.json()
+    assert body["status_code"] == 403
+    assert "Gmail" in body.get("status_message", "") or "Invalid" in body.get("status_message", "")
+
+
+def test_login_mode_gmail_only(client):
+    res = client.get("/api/v1/auth/login/mode")
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["gmail_only"] is True
+    assert data["password_login"] is True  # enabled in test harness only
+
+
 def test_unauthorized_blocked(client):
     res = client.get("/api/v1/workflow")
     assert res.status_code in (401, 403)

@@ -17,6 +17,8 @@ os.environ["NOVAFLOW_ADMIN_USER"] = "admin"
 os.environ["NOVAFLOW_ADMIN_PASSWORD"] = TEST_ADMIN_PASSWORD
 os.environ["NOVAFLOW_ENV"] = "development"
 os.environ["ALLOW_PUBLIC_REGISTER"] = "1"
+os.environ["ALLOW_PASSWORD_LOGIN"] = "1"
+os.environ["GMAIL_ONLY_AUTH"] = "1"
 
 from app.database import Base, engine, SessionLocal, User
 from app.crypto import hash_password
@@ -36,6 +38,7 @@ def clean_db_and_keys():
         admin = User(
             user_name="admin",
             password=hash_password(TEST_ADMIN_PASSWORD),
+            email="admin-test@gmail.com",
             role="super_admin",
             must_change_password=0,
         )

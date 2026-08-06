@@ -31,6 +31,10 @@ ADMIN_PASSWORD = os.getenv("NOVAFLOW_ADMIN_PASSWORD", "")
 
 DEMO_SEED = os.getenv("NOVAFLOW_DEMO_SEED", "").lower() in {"1", "true", "yes"}
 ALLOW_PUBLIC_REGISTER = os.getenv("ALLOW_PUBLIC_REGISTER", "0").lower() in {"1", "true", "yes"}
+# Password login disabled by default — use Google (Gmail) OAuth in production.
+ALLOW_PASSWORD_LOGIN = os.getenv("ALLOW_PASSWORD_LOGIN", "0").lower() in {"1", "true", "yes"}
+# When enabled, only @gmail.com addresses may authenticate (OAuth or password).
+GMAIL_ONLY_AUTH = os.getenv("GMAIL_ONLY_AUTH", "1").lower() in {"1", "true", "yes"}
 
 EMBEDDING_MODELS = [
     "text-embedding-3-small",

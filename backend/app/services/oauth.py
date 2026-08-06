@@ -8,6 +8,7 @@ from jose import JWTError, jwt
 
 from app.config import (
     FRONTEND_URL,
+    GMAIL_ONLY_AUTH,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     JWT_SECRET,
@@ -49,6 +50,8 @@ def list_enabled_providers() -> list[dict[str, str]]:
     for key, cfg in _provider_config().items():
         if cfg["client_id"] and cfg["client_secret"]:
             items.append({"id": key, "label": cfg["label"]})
+    if GMAIL_ONLY_AUTH:
+        items = [p for p in items if p["id"] == "google"]
     return items
 
 
@@ -161,6 +164,16 @@ def find_or_create_oauth_user(
     email: str | None,
     name: str,
 ) -> User:
+    from app.services.security_validator import SecurityValidationError, StrictSecurityValidator
+
+    if GMAIL_ONLY_AUTH and provider == "google":
+        validator = StrictSecurityValidator(db)
+        if not email:
+            raise SecurityValidationError(
+                "Google sign-in requires a Gmail address. Use a @gmail.com account."
+            )
+        validator.validate_gmail_authentication(User(email=email))
+
     user = (
         db.query(User)
         .filter(User.oauth_provider == provider, User.oauth_subject == sub)
@@ -170,12 +183,16 @@ def find_or_create_oauth_user(
         if email and not user.email:
             user.email = email
             db.commit()
+        if GMAIL_ONLY_AUTH and provider == "google":
+            StrictSecurityValidator(db).validate_gmail_authentication(user)
         ensure_personal_workspace(db, user)
         return user
 
     if email:
         existing = db.query(User).filter(User.email == email).first()
         if existing:
+            if GMAIL_ONLY_AUTH and provider == "google":
+                StrictSecurityValidator(db).validate_gmail_authentication(existing)
             existing.oauth_provider = provider
             existing.oauth_subject = sub
             db.commit()
@@ -190,6 +207,7 @@ def find_or_create_oauth_user(
         oauth_provider=provider,
         oauth_subject=sub,
         role="editor",
+        email_verified=1 if email else 0,
     )
     db.add(user)
     db.commit()

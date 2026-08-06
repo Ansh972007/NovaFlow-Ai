@@ -101,6 +101,8 @@ export default function AuthFormPanel({
   oauthProviders = [],
   ldapEnabled = false,
   samlEnabled = false,
+  passwordLogin = false,
+  gmailOnly = true,
   onForgotPassword,
 }) {
   const [clientReady, setClientReady] = useState(false);
@@ -171,6 +173,10 @@ export default function AuthFormPanel({
     }
   }
 
+  const showPasswordForm = passwordLogin || ldapEnabled;
+  const showOAuth = oauthProviders.length > 0 || samlEnabled;
+  const googleProvider = oauthProviders.find((p) => p.id === "google");
+
   if (!clientReady) {
     return (
       <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10 sm:px-8">
@@ -237,7 +243,7 @@ export default function AuthFormPanel({
 
         <div className="gradient-border shadow-[0_40px_100px_rgba(0,0,0,0.1)]">
           <div className="relative overflow-hidden rounded-[1.35rem] bg-white/90 p-8 backdrop-blur-xl sm:p-10">
-            {!isForgot && (
+            {!isForgot && showPasswordForm && (
               <div className="mb-6 h-1 overflow-hidden rounded-full bg-surface">
                 <motion.div
                   animate={{ width: `${formProgress}%` }}
@@ -247,7 +253,7 @@ export default function AuthFormPanel({
               </div>
             )}
 
-            {!isForgot && (
+            {!isForgot && showPasswordForm && passwordLogin && (
               <div className="relative flex rounded-full bg-surface p-1">
                 <motion.div
                   layout
@@ -298,7 +304,11 @@ export default function AuthFormPanel({
                         {isRegister ? "Create account" : "Welcome back"}
                       </h1>
                       <p className="text-xs text-muted">
-                        {isRegister ? "Free during beta · No card needed" : "Access your AI workspace"}
+                        {gmailOnly
+                          ? "Sign in with your Gmail account using Google"
+                          : isRegister
+                            ? "Free during beta · No card needed"
+                            : "Access your AI workspace"}
                       </p>
                       {ldapEnabled && !isRegister && (
                         <span className="mt-2 inline-flex rounded-full bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700">
@@ -308,6 +318,44 @@ export default function AuthFormPanel({
                     </div>
                   </div>
 
+                  {showOAuth && !showPasswordForm && (
+                    <div className="mt-8 space-y-4">
+                      {error && (
+                        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                          {error}
+                        </p>
+                      )}
+                      {googleProvider && (
+                        <Magnetic strength={0.28} className="w-full">
+                          <button
+                            type="button"
+                            disabled={loading || backendOk === false}
+                            onClick={() => startOAuthLogin("google")}
+                            className="auth-submit-btn flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-semibold"
+                          >
+                            Continue with Google (Gmail)
+                          </button>
+                        </Magnetic>
+                      )}
+                      {samlEnabled && (
+                        <button
+                          type="button"
+                          disabled={loading || backendOk === false}
+                          onClick={startSamlLogin}
+                          className="flex w-full items-center justify-center gap-2 rounded-full border border-border bg-white py-3 text-sm font-semibold transition hover:bg-surface disabled:opacity-50"
+                        >
+                          SAML SSO
+                        </button>
+                      )}
+                      {!googleProvider && (
+                        <p className="text-sm text-muted">
+                          Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {showPasswordForm && (
                   <form onSubmit={handleSubmit} className="mt-8 space-y-6">
                     <AuthInput
                       id={isRegister ? "email" : "username"}
@@ -318,14 +366,14 @@ export default function AuthFormPanel({
                       onFocus={() => setFocused("email")}
                       onBlur={() => setFocused(null)}
                       focused={focused === "email"}
-                      placeholder={isRegister ? "you@company.com" : "admin"}
+                      placeholder={isRegister ? "you@company.com" : ldapEnabled ? "username" : "you@gmail.com"}
                       autoComplete={isRegister ? "email" : "username"}
                     />
-                    {!isRegister && (
+                    {!isRegister && passwordLogin && (
                       <p className="-mt-4 text-xs text-muted">
-                        Use the username and password from your{" "}
-                        <strong className="text-foreground">NOVAFLOW_ADMIN_PASSWORD</strong> env
-                        (or an account your admin created).
+                        {gmailOnly
+                          ? "Password sign-in requires a Gmail-linked account."
+                          : "Use credentials issued by your administrator."}
                       </p>
                     )}
 
@@ -425,8 +473,9 @@ export default function AuthFormPanel({
                       </button>
                     </Magnetic>
                   </form>
+                  )}
 
-                  {!isRegister && (oauthProviders.length > 0 || samlEnabled) && (
+                  {showOAuth && showPasswordForm && (
                     <div className="mt-6">
                       <div className="relative mb-4">
                         <div className="absolute inset-0 flex items-center">
@@ -463,7 +512,7 @@ export default function AuthFormPanel({
                   )}
 
                   <div className="mt-6 flex flex-wrap gap-2">
-                    {["Encrypted", "Free beta"].map((tag) => (
+                    {["Encrypted", gmailOnly ? "Gmail only" : "Secure"].map((tag) => (
                       <span
                         key={tag}
                         className="rounded-full border border-border bg-surface px-3 py-1 text-[10px] font-medium text-muted"
@@ -473,6 +522,7 @@ export default function AuthFormPanel({
                     ))}
                   </div>
 
+                  {passwordLogin && (
                   <p className="mt-6 text-center text-sm text-muted">
                     {isRegister ? "Already have an account?" : "New to NovaFlow?"}{" "}
                     <button
@@ -483,6 +533,7 @@ export default function AuthFormPanel({
                       {isRegister ? "Sign in" : "Create account"}
                     </button>
                   </p>
+                  )}
                 </motion.div>
               ) : (
                 <motion.div

@@ -6,7 +6,7 @@ import AuthShowcasePanel from "@/components/AuthShowcasePanel";
 import AuthFormPanel from "@/components/AuthFormPanel";
 import LiveBackground from "@/components/LiveBackground";
 import CursorGlow from "@/components/CursorGlow";
-import { confirmPasswordReset, getLdapStatus, login, register, requestPasswordReset } from "@/lib/api/auth";
+import { confirmPasswordReset, getLdapStatus, getLoginMode, login, register, requestPasswordReset } from "@/lib/api/auth";
 import { checkBackendHealth } from "@/lib/api/health";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { getSamlStatus } from "@/lib/api/saml";
@@ -34,6 +34,8 @@ function LoginForm() {
   const [oauthProviders, setOauthProviders] = useState([]);
   const [ldapEnabled, setLdapEnabled] = useState(false);
   const [samlEnabled, setSamlEnabled] = useState(false);
+  const [passwordLogin, setPasswordLogin] = useState(false);
+  const [gmailOnly, setGmailOnly] = useState(true);
   const [resetMode, setResetMode] = useState(false);
 
   async function probeBackend() {
@@ -59,6 +61,15 @@ function LoginForm() {
     getSamlStatus()
       .then((s) => setSamlEnabled(!!s?.enabled))
       .catch(() => setSamlEnabled(false));
+    getLoginMode()
+      .then((mode) => {
+        setPasswordLogin(!!mode?.password_login);
+        setGmailOnly(!!mode?.gmail_only);
+      })
+      .catch(() => {
+        setPasswordLogin(false);
+        setGmailOnly(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -192,6 +203,8 @@ function LoginForm() {
           oauthProviders={oauthProviders}
           ldapEnabled={ldapEnabled}
           samlEnabled={samlEnabled}
+          passwordLogin={passwordLogin}
+          gmailOnly={gmailOnly}
           onForgotPassword={() => setResetMode(true)}
         />
       </div>

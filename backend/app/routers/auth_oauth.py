@@ -42,9 +42,16 @@ async def oauth_callback(
     error: str | None = None,
     db: Session = Depends(get_db),
 ):
+    from app.config import GMAIL_ONLY_AUTH
+
     base = FRONTEND_URL.rstrip("/")
     if error:
         return RedirectResponse(f"{base}/login/oauth-callback?error={quote(error)}")
+
+    if GMAIL_ONLY_AUTH and provider != "google":
+        return RedirectResponse(
+            f"{base}/login/oauth-callback?error={quote('Only Google (Gmail) sign-in is allowed')}"
+        )
 
     if provider not in {"google", "microsoft"}:
         return RedirectResponse(f"{base}/login/oauth-callback?error={quote('Unknown provider')}")

@@ -130,11 +130,26 @@ def ldap_auth_status():
     return ok(ldap_status())
 
 
+@router.get("/auth/login/mode")
+def login_mode():
+    from app.config import ALLOW_PASSWORD_LOGIN, ALLOW_PUBLIC_REGISTER, GMAIL_ONLY_AUTH
+
+    return ok(
+        {
+            "password_login": ALLOW_PASSWORD_LOGIN,
+            "public_register": ALLOW_PUBLIC_REGISTER,
+            "gmail_only": GMAIL_ONLY_AUTH,
+        }
+    )
+
+
 @router.post("/user/regist")
 def register(body: UserCreate, request: Request, db: Session = Depends(get_db)):
-    from app.config import ALLOW_PUBLIC_REGISTER
+    from app.config import ALLOW_PASSWORD_LOGIN, ALLOW_PUBLIC_REGISTER, GMAIL_ONLY_AUTH
     from app.security.config import IS_PRODUCTION
 
+    if not ALLOW_PASSWORD_LOGIN or GMAIL_ONLY_AUTH:
+        return fail(403, "Registration is only available via Google (Gmail) sign-in.")
     if IS_PRODUCTION and not ALLOW_PUBLIC_REGISTER:
         return fail(403, "Public registration is disabled. Ask an admin for an invite.")
     if db.query(User).filter(User.user_name == body.user_name).first():
@@ -176,12 +191,30 @@ def register(body: UserCreate, request: Request, db: Session = Depends(get_db)):
 
 @router.post("/user/login")
 def login(body: UserLogin, request: Request, db: Session = Depends(get_db)):
+    from app.config import ALLOW_PASSWORD_LOGIN, GMAIL_ONLY_AUTH
+    from app.security.config import WEAK_ADMIN_PASSWORDS
+
     ip, ua = _request_meta(request)
     plain_pwd = None
     try:
         plain_pwd = decrypt_password_plain(body.password)
     except Exception:
         plain_pwd = None
+
+    val = body.user_name.strip()
+    pwd_check = (plain_pwd or "").strip().lower()
+
+    # Block known-weak credentials (e.g. admin / admin123) before any lookup.
+    if pwd_check in WEAK_ADMIN_PASSWORDS or val.lower() == "admin" and pwd_check in WEAK_ADMIN_PASSWORDS:
+        audit_log(
+            db,
+            action="auth.login.failed",
+            success=False,
+            ip=ip,
+            user_agent=ua,
+            detail={"user_name": body.user_name, "reason": "weak_password_blocked"},
+        )
+        return fail(403, "Invalid credentials. Sign in with your Gmail account using Google.")
 
     if ldap_status().get("enabled") and plain_pwd:
         try:
@@ -193,7 +226,17 @@ def login(body: UserLogin, request: Request, db: Session = Depends(get_db)):
             audit_log(db, action="auth.login.ldap", actor_user_id=user.user_id, ip=ip, user_agent=ua)
             return ok(_issue_session(db, user, request))
 
-    val = body.user_name.strip()
+    if not ALLOW_PASSWORD_LOGIN:
+        audit_log(
+            db,
+            action="auth.login.failed",
+            success=False,
+            ip=ip,
+            user_agent=ua,
+            detail={"user_name": body.user_name, "reason": "password_login_disabled"},
+        )
+        return fail(403, "Password sign-in is disabled. Use Google (Gmail) to sign in.")
+
     norm = _normalise_email(val)
     user = (
         db.query(User)
@@ -211,33 +254,25 @@ def login(body: UserLogin, request: Request, db: Session = Depends(get_db)):
         )
         return {"status_code": 403, "status_message": "Invalid username or password", "data": None}
 
-    # Ensure user email is populated
-    if not user.email:
-        user.email = norm if "@" in val else f"{user.user_name}@gmail.com"
-        db.commit()
-
-    # Strict security validation
-    try:
-        validate_login_security(db, user)
-    except SecurityValidationError as e:
-        if "@" in val and not user.email.endswith("@gmail.com"):
-            user.email = norm
-            db.commit()
+    if GMAIL_ONLY_AUTH:
+        try:
+            validate_login_security(db, user)
+        except SecurityValidationError as exc:
+            audit_log(
+                db,
+                action="auth.login.failed",
+                success=False,
+                ip=ip,
+                user_agent=ua,
+                detail={"user_name": body.user_name, "reason": "gmail_only"},
+            )
+            return fail(403, str(exc))
 
     # Transparent upgrade from legacy MD5 → Argon2id
     if needs_rehash(user.password):
         user.password = hash_password(plain_pwd)
         user.password_changed_at = user.password_changed_at or datetime.utcnow()
         db.add(PasswordHistory(user_id=user.user_id, password_hash=user.password))
-        db.commit()
-
-    # Force password change for known-weak / bootstrap passwords
-    from app.security.config import WEAK_ADMIN_PASSWORDS
-
-    if plain_pwd.strip().lower() in WEAK_ADMIN_PASSWORDS or (
-        getattr(user, "must_change_password", 0) and not user.password_changed_at
-    ):
-        user.must_change_password = 1
         db.commit()
 
     audit_log(db, action="auth.login", actor_user_id=user.user_id, ip=ip, user_agent=ua)
