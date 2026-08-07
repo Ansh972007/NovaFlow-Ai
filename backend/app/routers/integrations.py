@@ -101,7 +101,13 @@ async def gmail_oauth_callback(
         access = token_data.get("access_token") or ""
         profile = await fetch_gmail_profile(access) if access else {}
         email = profile.get("email") or ""
-        store_gmail_oauth_tokens(db, int(payload["workspace_id"]), token_data, email)
+        store_gmail_oauth_tokens(
+            db,
+            int(payload["workspace_id"]),
+            token_data,
+            email,
+            user_id=int(payload.get("user_id") or 0),
+        )
         return RedirectResponse(frontend_settings_redirect("tab=integrations&gmail=connected"))
     except Exception as exc:
         return RedirectResponse(

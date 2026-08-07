@@ -14,11 +14,13 @@ import {
   deleteCredential,
   getCredentialsCatalog,
   getCredentialsOverview,
+  getOAuthSetup,
   listCredentials,
   setDefaultCredential,
   updateCredential,
   verifyCredential,
 } from "@/lib/api/credentials";
+import { startGmailOAuth } from "@/lib/api/integrations";
 import {
   createApiKey,
   deleteApiKey,
@@ -35,8 +37,62 @@ const CATEGORY_TABS = [
   { id: "digests", label: "Digests" },
 ];
 
-const MESSAGING_CATS = new Set(["telegram", "slack", "discord"]);
+const OAUTH_FORM_HINTS = {
+  "email::gmail_oauth":
+    "Connect Gmail in Settings → Integrations, or paste OAuth refresh tokens from Google.",
+  "outlook::microsoft_graph":
+    "Register an Azure app and paste tokens, or complete setup in Settings → Integrations.",
+};
+
 const DEV_CATS = new Set(["github", "jira", "linear", "webhook", "custom"]);
+const MESSAGING_CATS = new Set(["telegram", "slack", "discord", "whatsapp"]);
+
+const PLACEHOLDER_EMAILS = new Set(["you@gmail.com", "user@example.com", "test@example.com", "me@gmail.com"]);
+
+function isPlaceholderField(category, key, value) {
+  const val = (value || "").trim();
+  if (!val || val.length < 4) return true;
+  const low = val.toLowerCase();
+  if (low.startsWith("paste:")) return true;
+  if ((key === "smtp_user" || key === "smtp_from" || key === "email") && PLACEHOLDER_EMAILS.has(low)) return true;
+  if (low.includes("@example.")) return true;
+  if (key === "smtp_password" && /^x{4}(\s+x{4}){3}$/i.test(low)) return true;
+  return false;
+}
+
+function OAuthSetupPanel({ setup, onConnectGmail }) {
+  const google = setup?.google;
+  if (!google) return null;
+  return (
+    <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/80 p-4 text-sm text-sky-950">
+      <p className="font-semibold">Google Cloud Console setup</p>
+      <p className="text-xs text-sky-800">{google.instructions}</p>
+      <a href={google.console_url} target="_blank" rel="noreferrer" className="text-xs font-semibold underline">
+        Open Google Cloud Credentials
+      </a>
+      <div className="space-y-2">
+        {(google.redirect_uris || []).map((row) => (
+          <div key={row.id} className="rounded-lg bg-white/90 p-2 ring-1 ring-sky-100">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">{row.label}</p>
+            <p className="mt-1 break-all font-mono text-[11px] text-neutral-700">{row.uri}</p>
+            <button
+              type="button"
+              className="mt-1 text-xs font-semibold text-sky-800 underline"
+              onClick={() => navigator.clipboard?.writeText(row.uri)}
+            >
+              Copy redirect URI
+            </button>
+          </div>
+        ))}
+      </div>
+      {google.gmail_oauth_enabled && onConnectGmail ? (
+        <button type="button" className="btn-primary !py-2 !text-sm" onClick={onConnectGmail}>
+          Connect with Google (Gmail send)
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function emptyFields(spec) {
   const out = {};
@@ -64,6 +120,9 @@ export default function CredentialsClient() {
   const [formDefault, setFormDefault] = useState(true);
   const [newKeyName, setNewKeyName] = useState("API key");
   const [createdRawKey, setCreatedRawKey] = useState("");
+  const [oauthSetup, setOauthSetup] = useState(null);
+  const [showAdvancedOAuth, setShowAdvancedOAuth] = useState(false);
+  const [formErrors, setFormErrors] = useState([]);
 
   const isAdmin = user?.role === "admin" || user?.role === "super_admin" || user?.is_admin;
 
@@ -71,16 +130,18 @@ export default function CredentialsClient() {
     setLoading(true);
     setError("");
     try {
-      const [cat, list, ov, keys] = await Promise.all([
+      const [cat, list, ov, keys, oauth] = await Promise.all([
         getCredentialsCatalog().catch(() => []),
         listCredentials().catch(() => []),
         getCredentialsOverview().catch(() => null),
         listApiKeys().catch(() => []),
+        getOAuthSetup().catch(() => null),
       ]);
       setCatalog(Array.isArray(cat) ? cat : []);
       setEntries(Array.isArray(list) ? list : []);
       setOverview(ov || null);
       setApiKeys(Array.isArray(keys) ? keys : []);
+      setOauthSetup(oauth || null);
     } catch (e) {
       setError(e.message || "Failed to load credentials");
     } finally {
@@ -104,7 +165,7 @@ export default function CredentialsClient() {
   const filtered = useMemo(() => {
     if (tab === "overview" || tab === "api_keys" || tab === "digests") return entries;
     if (tab === "llm") return entries.filter((e) => e.category === "llm");
-    if (tab === "email") return entries.filter((e) => e.category === "email");
+    if (tab === "email") return entries.filter((e) => e.category === "email" || e.category === "google");
     if (tab === "messaging") return entries.filter((e) => MESSAGING_CATS.has(e.category));
     if (tab === "devtools") return entries.filter((e) => DEV_CATS.has(e.category));
     return entries;
@@ -112,7 +173,7 @@ export default function CredentialsClient() {
 
   const kindOptions = useMemo(() => {
     if (tab === "llm") return catalog.filter((c) => c.category === "llm");
-    if (tab === "email") return catalog.filter((c) => c.category === "email");
+    if (tab === "email") return catalog.filter((c) => c.category === "email" || c.category === "google");
     if (tab === "messaging") return catalog.filter((c) => MESSAGING_CATS.has(c.category));
     if (tab === "devtools") return catalog.filter((c) => DEV_CATS.has(c.category));
     return catalog;
@@ -132,6 +193,22 @@ export default function CredentialsClient() {
     e.preventDefault();
     const [category, kind] = (formKind || "").split("::");
     if (!category || !kind) return;
+    const spec = kindOptions.find((k) => k.category === category && k.kind === kind);
+    const fieldDefs = [
+      ...(spec?.fields || []),
+      ...(showAdvancedOAuth ? spec?.advanced_fields || [] : []),
+    ];
+    const errors = [];
+    fieldDefs.forEach((f) => {
+      const val = formFields[f.key];
+      if (f.required && !String(val || "").trim()) errors.push(`${f.label} is required`);
+      if (val && isPlaceholderField(category, f.key, val)) errors.push(`${f.label} looks like example/hint text`);
+    });
+    if (errors.length) {
+      setFormErrors(errors);
+      return;
+    }
+    setFormErrors([]);
     setBusy("create");
     setError("");
     try {
@@ -363,6 +440,24 @@ export default function CredentialsClient() {
                   />
                 </label>
               </div>
+              {(selectedSpec?.oauth ||
+                selectedSpec?.setup === "guided" ||
+                (selectedSpec?.category === "email" && selectedSpec?.kind === "gmail_oauth") ||
+                (selectedSpec?.category === "google" && selectedSpec?.kind === "google_oauth")) && (
+                <OAuthSetupPanel setup={oauthSetup} onConnectGmail={startGmailOAuth} />
+              )}
+              {formErrors.length > 0 ? (
+                <ul className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+                  {formErrors.map((msg) => (
+                    <li key={msg}>{msg}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {selectedSpec?.setup === "guided" && selectedSpec?.kind === "gmail_oauth" ? (
+                <p className="text-xs text-neutral-500">
+                  Use Connect with Google above — token paste is optional under Advanced.
+                </p>
+              ) : null}
               {(selectedSpec?.fields || []).map((f) => (
                 <label key={f.key} className="block text-sm">
                   <span className="text-neutral-500">{f.label}{f.required ? " *" : ""}</span>
@@ -376,6 +471,29 @@ export default function CredentialsClient() {
                   />
                 </label>
               ))}
+              {(selectedSpec?.advanced_fields || []).length > 0 ? (
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-neutral-600 underline"
+                  onClick={() => setShowAdvancedOAuth((v) => !v)}
+                >
+                  {showAdvancedOAuth ? "Hide advanced token fields" : "Show advanced token fields"}
+                </button>
+              ) : null}
+              {showAdvancedOAuth &&
+                (selectedSpec?.advanced_fields || []).map((f) => (
+                  <label key={f.key} className="block text-sm">
+                    <span className="text-neutral-500">{f.label}{f.required ? " *" : ""}</span>
+                    <input
+                      type={f.secret ? "password" : "text"}
+                      className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2"
+                      value={formFields[f.key] || ""}
+                      onChange={(e) => setFormFields((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                      required={!!f.required}
+                      autoComplete="off"
+                    />
+                  </label>
+                ))}
               <label className="flex items-center gap-2 text-sm text-neutral-700">
                 <input type="checkbox" checked={formDefault} onChange={(e) => setFormDefault(e.target.checked)} />
                 Set as default for this type

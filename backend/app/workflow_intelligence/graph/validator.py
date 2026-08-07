@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.workflow_intelligence.graph.model import KNOWN_NODE_TYPES, WorkflowGraph
+from app.workflow_intelligence.node_registry import credential_binding_for_node, validate_node_data
 
 
 @dataclass
@@ -178,23 +179,19 @@ def validate_graph(
 
     for n in graph.nodes:
         data = n.data or {}
-        if n.type == "retrieve" and not data.get("knowledge_id"):
+        for miss in validate_node_data(n.type, data):
             issues.append(
                 ValidationIssue(
-                    "missing_knowledge",
-                    "warning",
-                    "Retrieve node has no knowledge base linked",
+                    "missing_required_field",
+                    "error",
+                    miss.get("message") or "Missing required field",
                     node_id=n.id,
-                    field="knowledge_id",
+                    field=miss.get("field") or "",
                 )
             )
         if n.type == "http":
             url = str(data.get("url") or "")
-            if not url.strip():
-                issues.append(
-                    ValidationIssue("missing_url", "error", "HTTP node missing URL", node_id=n.id, field="url")
-                )
-            elif "{{" not in url and not re.match(r"^https?://", url, re.I):
+            if url.strip() and "{{" not in url and not re.match(r"^https?://", url, re.I):
                 issues.append(
                     ValidationIssue("invalid_url", "warning", "HTTP URL may be invalid", node_id=n.id, field="url")
                 )
@@ -204,18 +201,16 @@ def validate_graph(
                 issues.append(
                     ValidationIssue("no_agent_tools", "suggestion", "Agent node has no tools", node_id=n.id)
                 )
-        if n.type == "subgraph" and not data.get("workflow_id"):
-            issues.append(
-                ValidationIssue("missing_subgraph", "error", "Subgraph node missing workflow_id", node_id=n.id)
-            )
-        if n.type == "api_node" and not data.get("node_def_id"):
+        binding = credential_binding_for_node(n.type, data)
+        if binding and not data.get("credential_id"):
+            cat, kind = binding
             issues.append(
                 ValidationIssue(
-                    "missing_node_def_id",
-                    "error",
-                    "API node missing node_def_id",
+                    "missing_credential",
+                    "warning",
+                    f"Node may need a {cat} credential — select one or save in Credentials",
                     node_id=n.id,
-                    field="node_def_id",
+                    field="credential_id",
                 )
             )
         if n.type == "loop":

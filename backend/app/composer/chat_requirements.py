@@ -12,6 +12,89 @@ from sqlalchemy.orm import Session
 from app.composer.chat_router import infer_field
 
 
+def _detect_integrations(g: str) -> list[str]:
+    found: list[str] = []
+    mapping = [
+        ("telegram", r"\btelegram\b"),
+        ("jira", r"\bjira\b"),
+        ("github", r"\bgithub\b"),
+        ("linear", r"\blinear\b"),
+        ("slack", r"\bslack\b"),
+        ("discord", r"\bdiscord\b"),
+        ("whatsapp", r"\bwhatsapp\b"),
+        ("email", r"\b(emails?|smtp|gmail|mail)\b"),
+        ("youtube", r"\byoutube\b|\byt\s+channel\b"),
+        ("google_calendar", r"\b(calendar|calander|meeting)\b"),
+        ("google_sheets", r"\bgoogle\s+sheets\b|\bspreadsheet\b"),
+    ]
+    for name, pat in mapping:
+        if re.search(pat, g):
+            found.append(name)
+    return list(dict.fromkeys(found))
+
+
+def _detect_input_output_channels(g: str, integrations: list[str]) -> tuple[list[str], list[str]]:
+    input_ch: list[str] = []
+    output_ch: list[str] = []
+    if re.search(
+        r"\b(send|give|input|receive|task|message)\b.*\btelegram\b|\btelegram\b.*\b(input|message|task|send|receive)\b",
+        g,
+    ):
+        input_ch.append("telegram")
+    if re.search(
+        r"\b(response|reply|notify|send|give)\b.*\btelegram\b|\btelegram\b.*\b(response|reply|notify|answer)\b",
+        g,
+    ):
+        output_ch.append("telegram")
+    if re.search(r"\b(send|email|mail)\b.*\b(emails?|mail|smtp|gmail)\b|\b(emails?|mail)\b.*\b(send|sending)\b", g):
+        output_ch.append("email")
+    if re.search(r"\b(send|notify|post)\b.*\b(slack|discord|whatsapp)\b", g):
+        for ch in ("slack", "discord", "whatsapp"):
+            if ch in g:
+                output_ch.append(ch)
+    if re.search(r"\btelegram\s+bot\b", g) and "telegram" not in input_ch and "telegram" not in output_ch:
+        input_ch.append("telegram")
+        output_ch.append("telegram")
+    for ch in integrations:
+        if ch in ("jira", "github", "linear") and ch not in input_ch and ch not in output_ch:
+            pass
+    return list(dict.fromkeys(input_ch)), list(dict.fromkeys(output_ch))
+
+
+def _build_email_plan(
+    g: str,
+    *,
+    email_count: int | None,
+    recipients: list[str],
+    email_topic: str | None,
+) -> dict[str, Any]:
+    mode = "same_recipient"
+    if re.search(r"\b(\d+|ten)\s+(people|persons|recipients|friends|diff)\b", g):
+        mode = "per_recipient"
+    if re.search(r"\bsame person\b|\bsame recipient\b|\bone person\b|\bsame people\b", g):
+        mode = "same_recipient"
+    if re.search(r"\bbroadcast\b|\ball contacts\b", g):
+        mode = "broadcast"
+    count = email_count or 1
+    count_m = re.search(r"\b(\d+|ten)\s+emails?\b", g)
+    if count_m:
+        word = count_m.group(1)
+        word_map = {"ten": 10, "five": 5}
+        count = int(word) if word.isdigit() else word_map.get(word, count)
+    topics: list[str] = []
+    if email_topic:
+        topics.append(email_topic)
+    if re.search(r"\b(\d+|five)\s+diff(erent)?\s+(topics?|subjects?)\b", g):
+        dm = re.search(r"\b(\d+|five)\s+diff", g)
+        n = 5 if dm and "five" in dm.group(1) else int(dm.group(1)) if dm else 5
+        base = email_topic or "Update"
+        topics = [f"{base} — part {i}" for i in range(1, n + 1)]
+    return {
+        "mode": mode,
+        "count": count,
+        "topics": topics,
+        "recipients": list(recipients),
+    }
 def parse_requirements(text: str, *, last_field: str | None = None, db: Session | None = None) -> dict[str, Any]:
     """Extract a structured requirements brief from free text (heuristic)."""
     t = (text or "").strip()
@@ -24,7 +107,11 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
     elif re.search(r"\b(webhook|http|api call)\b", g):
         trigger = "webhook"
     elif re.search(r"\b(telegram|slack|discord)\s+bot\b|\bfrom chat\b", g):
-        trigger = "chat"
+        trigger = "telegram_chat"
+    elif re.search(r"\btelegram\b", g) and re.search(
+        r"\b(send|task|message|input|receive|bot)\b", g
+    ):
+        trigger = "telegram_chat"
 
     data = "none"
     if re.search(r"\b(knowledge|docs|documents|from my|policy|rag)\b", g):
@@ -44,6 +131,11 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
         integration = "google_drive" if "onedrive" not in g else "onedrive"
     elif re.search(r"\bgoogle\s+sheets\b|\bspreadsheet\b|\bexcel\b", g):
         integration = "google_sheets"
+    elif re.search(r"\b(calendar|calander|meeting|meetings|appointment|meeting dates)\b", g):
+        if re.search(r"\boutlook\b|\bmicrosoft\b", g):
+            integration = "outlook_calendar"
+        else:
+            integration = "google_calendar"
     elif re.search(r"\bgoogle\s+calendar\b|\bgcal\b", g):
         integration = "google_calendar"
     elif re.search(r"\boutlook\s+calendar\b|\bmicrosoft\s+calendar\b", g):
@@ -71,7 +163,7 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
         output = "discord"
     elif re.search(r"\b(github|jira|linear)\b", g):
         output = "ticket"
-    elif integration in ("google_sheets", "google_drive", "google_calendar", "google_api"):
+    elif integration in ("google_sheets", "google_drive", "google_calendar", "google_api", "outlook_calendar"):
         output = integration
     elif integration == "youtube":
         output = "youtube"
@@ -179,6 +271,23 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
             {"id": "hitl", "label": "Human approval required before side-effects", "done": False},
         )
 
+    integrations = _detect_integrations(g)
+    input_channels, output_channels = _detect_input_output_channels(g, integrations)
+    if integration and integration not in integrations:
+        integrations.insert(0, integration)
+    if output == "email" and "email" not in output_channels:
+        output_channels.append("email")
+    if output == "telegram" and "telegram" not in output_channels:
+        output_channels.append("telegram")
+    email_plan = None
+    if output == "email" or "email" in output_channels:
+        email_plan = _build_email_plan(
+            g,
+            email_count=email_count,
+            recipients=recipients,
+            email_topic=email_topic,
+        )
+
     return {
         "id": uuid.uuid4().hex[:16],
         "raw": t[:2000],
@@ -198,6 +307,10 @@ def parse_requirements(text: str, *, last_field: str | None = None, db: Session 
         "auth_preference": auth_preference,
         "workflow_name": workflow_name,
         "integration": integration,
+        "integrations": integrations,
+        "input_channels": input_channels,
+        "output_channels": output_channels,
+        "email_plan": email_plan,
         "has_api_key": has_api_key,
         "checklist": checklist,
         "status": "captured",
@@ -337,6 +450,12 @@ def compose_goal_from_requirements(req: dict[str, Any]) -> str:
     ]
     if req.get("integration"):
         parts.append(f"Primary integration: {req['integration']}.")
+    if req.get("integrations"):
+        parts.append(f"Integrations: {', '.join(req['integrations'])}.")
+    if req.get("input_channels"):
+        parts.append(f"Input channels: {', '.join(req['input_channels'])}.")
+    if req.get("output_channels"):
+        parts.append(f"Output channels: {', '.join(req['output_channels'])}.")
     if req.get("email_topic"):
         parts.append(f"Email topic: {req['email_topic']}.")
     if req.get("email_count"):
@@ -364,7 +483,8 @@ def merge_requirements_from_message(req: dict[str, Any], text: str, *, db: Sessi
         "goal", "raw", "field", "trigger", "data", "output",
         "email_recipient", "email_sender",         "email_topic", "email_count",
         "recipients_label", "auth_preference", "workflow_name", "integration", "sla",
-        "needs_approval", "has_api_key",
+        "needs_approval", "has_api_key", "integrations", "input_channels", "output_channels",
+        "email_plan",
     ):
         val = fresh.get(key)
         if val is not None and val != "" and val is not False:
@@ -375,6 +495,16 @@ def merge_requirements_from_message(req: dict[str, Any], text: str, *, db: Sessi
             if r not in existing:
                 existing.append(r)
         merged["recipients"] = existing
+    for list_key in ("integrations", "input_channels", "output_channels"):
+        fresh_list = fresh.get(list_key) or []
+        if fresh_list:
+            existing = list(merged.get(list_key) or [])
+            for item in fresh_list:
+                if item not in existing:
+                    existing.append(item)
+            merged[list_key] = existing
+    if fresh.get("email_plan"):
+        merged["email_plan"] = {**(merged.get("email_plan") or {}), **fresh["email_plan"]}
     if not merged.get("goal") and text.strip():
         merged["goal"] = text.strip()[:1000]
     g = (text or "").lower()
@@ -426,9 +556,31 @@ def missing_workflow_slots(req: dict[str, Any]) -> list[dict[str, str]]:
                     "label": "Google Sheet ID or spreadsheet URL",
                 }
             )
-    if integration == "telegram" or output == "telegram":
+    if integration == "telegram" or output == "telegram" or "telegram" in (req.get("input_channels") or []):
         if not req.get("telegram_chat_id") and not re.search(r"chat\s*id|@\w+", goal_text, re.I):
             missing.append({"id": "telegram_chat_id", "label": "Telegram chat ID or @username"})
+    if integration == "jira" or "jira" in (req.get("integrations") or []):
+        if not req.get("jira_project_key") and not re.search(r"project\s*key|[A-Z]{2,10}-\d+", goal_text, re.I):
+            missing.append({"id": "jira_project_key", "label": "Jira project key (e.g. OPS)"})
+    if re.search(r"\bcalendar\b|\bmeeting\b|\bmeetings\b", goal_text) and integration not in (
+        "google_calendar",
+        "outlook_calendar",
+    ):
+        if not req.get("auth_preference"):
+            missing.append(
+                {
+                    "id": "auth_preference",
+                    "label": "Connect Google Calendar (OAuth) in Credentials before approving",
+                }
+            )
+    if integration in ("google_calendar", "outlook_calendar") or output in ("google_calendar", "outlook_calendar"):
+        if not req.get("auth_preference"):
+            label = (
+                "Connect Outlook Calendar via Microsoft OAuth"
+                if integration == "outlook_calendar"
+                else "Connect Google Calendar via OAuth"
+            )
+            missing.append({"id": "auth_preference", "label": label})
     if integration == "whatsapp" or output == "whatsapp":
         if not req.get("whatsapp_phone") and not re.search(r"\+\d{8,}", goal_text):
             missing.append({"id": "whatsapp_phone", "label": "WhatsApp recipient phone number"})
@@ -438,6 +590,62 @@ def missing_workflow_slots(req: dict[str, Any]) -> list[dict[str, str]]:
     if not req.get("goal") and not req.get("raw"):
         missing.append({"id": "goal", "label": "What should this workflow do?"})
     return missing
+
+
+def build_requirements_brief(
+    req: dict[str, Any],
+    llm_cfg: dict[str, Any],
+    missing_slots: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Pre-compose confirmation card with hybrid LLM source label."""
+    integration = str(req.get("integration") or "general").replace("_", " ")
+    trigger = str(req.get("trigger") or "manual")
+    output = str(req.get("output") or "workflow")
+    goal = (req.get("goal") or req.get("raw") or "").strip()[:240]
+    fields: list[dict[str, str]] = [
+        {"label": "Trigger", "value": trigger},
+        {"label": "Integration", "value": integration},
+        {"label": "Output", "value": output},
+    ]
+    if goal:
+        fields.append({"label": "Goal", "value": goal})
+    for slot in (missing_slots or [])[:4]:
+        fields.append({"label": "Still needed", "value": slot.get("label") or slot.get("id") or ""})
+    chips = ["Yes build this", "Switch model", "Use workspace default"]
+    integration_raw = str(req.get("integration") or "").lower()
+    slot_ids = {s.get("id") for s in (missing_slots or [])}
+    if integration_raw == "custom" or "api_base_url" in slot_ids:
+        chips.extend(["Probe API", "Import OpenAPI spec"])
+        fields.append(
+            {
+                "label": "Custom API",
+                "value": "Use API Node Factory — probe, test, publish, then attach to workflow",
+            }
+        )
+        try:
+            from app.services.api_requirement_gatherer import APIRequirementGatherer
+
+            basic = APIRequirementGatherer()._generate_basic_requirements(
+                goal or str(req.get("raw") or "")
+            )
+            comps = basic.get("required_components") or []
+            if comps:
+                names = ", ".join(str(c.get("name") or "") for c in comps[:4])
+                fields.append({"label": "Suggested components", "value": names})
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "type": "aios_requirements_brief",
+        "data": {
+            "status": "pending",
+            "message": "Review this plan — I'll build the workflow blueprint after you confirm.",
+            "fields": fields,
+            "planning_label": llm_cfg.get("planning_label"),
+            "planning_source": llm_cfg.get("source"),
+            "providers": llm_cfg.get("available_alternatives") or [],
+            "chips": chips,
+        },
+    }
 
 
 def gather_prompt(
@@ -566,6 +774,21 @@ def build_blueprint_preview(
     }
 
 
+def oauth_assist_url(integration: str | None) -> str:
+    """Deep link to Credentials with return-to-chat context."""
+    key = (integration or "").lower().replace("-", "_")
+    mapping = {
+        "google_calendar": "/credentials?oauth=google&return=chat",
+        "google_sheets": "/credentials?oauth=google&return=chat",
+        "google_drive": "/credentials?oauth=google&return=chat",
+        "youtube": "/credentials?oauth=google&return=chat",
+        "outlook_calendar": "/credentials?oauth=microsoft&return=chat",
+        "outlook_mail": "/credentials?oauth=microsoft&return=chat",
+        "microsoft": "/credentials?oauth=microsoft&return=chat",
+    }
+    return mapping.get(key, "/credentials?return=chat")
+
+
 def check_chat_policy(
     db: Session,
     *,
@@ -601,7 +824,15 @@ def check_chat_policy(
         "schedule_pause": ("chat.block_schedule",),
         "test_notification": ("chat.block_notify",),
     }
+    remediation = {
+        "run_workflow": ["Workspace health", "List my workflows", "Compliance report"],
+        "deploy": ["Run test", "Workspace health", "Compliance report", "force deploy"],
+        "schedule_create": ["Workspace health", "List schedules"],
+        "fulfill_requirements": ["Show requirements", "Workspace health"],
+        "test_notification": ["Integrations health", "Open credentials"],
+    }
     keys = blocked_keys.get(action) or ()
+    chips = remediation.get(action) or ["Workspace health", "Compliance report"]
     for row in rows:
         rk = (row.rule_key or "").strip().lower()
         if rk in keys or (rk == "chat.deny_all" and action != "capabilities"):
@@ -618,7 +849,10 @@ def check_chat_policy(
                                 f"Workspace policy `{row.rule_key}` blocks `{action}`. "
                                 f"{(row.rule_value or '')[:200]}"
                             ).strip(),
-                            "chips": ["Workspace health", "Show requirements", "Compliance report"],
+                            "remediation": (
+                                f"Ask an admin to review policy `{row.rule_key}` or use an allowed alternative."
+                            ),
+                            "chips": chips,
                         },
                     }
                 ],

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.composer.recipes import RECIPES, match_recipe
-from app.database import ProjectGraph, SolutionGraph, Workflow
+from app.database import KnowledgeBase, ProjectGraph, SolutionGraph, Workflow
+from app.workflow_intelligence.node_registry import (
+    default_data_for_type,
+    merge_node_data_with_defaults,
+    INTEGRATION_VAULT_MAP,
+)
 
 NOTIFY_VAULT_MAP: dict[str, tuple[str, str | None]] = {
     "email": ("email", None),
@@ -26,6 +32,10 @@ HTTP_AUTH_VAULT_MAP: dict[str, tuple[str, str]] = {
     "custom": ("custom", "custom"),
     "outlook": ("outlook", "microsoft_graph"),
 }
+
+
+def _composer_node_data(ntype: str, **overrides: Any) -> dict[str, Any]:
+    return merge_node_data_with_defaults(ntype, overrides)
 
 
 def _bind_vault_credentials(
@@ -84,6 +94,15 @@ def _bind_vault_credentials(
                         if cred_row and not data.get("credential_id"):
                             data["credential_id"] = cred_row.id
                             node["data"] = data
+        elif ntype in INTEGRATION_VAULT_MAP:
+            category, kind = INTEGRATION_VAULT_MAP[ntype]
+            if not data.get("credential_id"):
+                row = vault.get_default(db, workspace_id, category=category, kind=kind)
+                if row:
+                    data["credential_id"] = row.id
+                    data["vault_category"] = row.category
+                    data["vault_kind"] = row.kind
+                    node["data"] = data
     return nodes
 
 
@@ -111,6 +130,114 @@ def _primary_output_channel(req: dict[str, Any] | None, goal_l: str) -> str:
     if integration:
         return integration
     return output
+
+
+def _apply_output_channel_deliveries(
+    graph: dict[str, Any],
+    requirements: dict[str, Any] | None,
+    goal: str,
+) -> dict[str, Any]:
+    """Ensure notify nodes exist for declared output channels (e.g. telegram bot replies)."""
+    req = requirements or {}
+    goal_l = (goal or "").lower()
+    output_channels = list(req.get("output_channels") or [])
+    integration = str(req.get("integration") or "").lower()
+    input_channels = list(req.get("input_channels") or [])
+    output = str(req.get("output") or "").lower()
+    if not output_channels:
+        if output == "email":
+            output_channels = ["email"]
+        elif integration == "telegram" or "telegram" in input_channels:
+            output_channels = ["telegram"]
+        elif re.search(r"\btelegram\s+(support\s+)?bot\b", goal_l):
+            output_channels = ["telegram"]
+        elif re.search(r"\b(email|digest)\b", goal_l) and re.search(r"\b(send|mail|digest)\b", goal_l):
+            output_channels = ["email"]
+        elif re.search(r"\b(outlook|smtp|gmail)\b", goal_l) and re.search(r"\b(mail|email|digest)\b", goal_l):
+            output_channels = ["email"]
+    if not output_channels:
+        return graph
+
+    nodes = [dict(n) for n in (graph.get("nodes") or []) if isinstance(n, dict)]
+    edges = [dict(e) for e in (graph.get("edges") or []) if isinstance(e, dict)]
+    notify_channels = {
+        (n.get("data") or {}).get("channel", "").lower()
+        for n in nodes
+        if n.get("type") == "notify"
+    }
+    output_ids = {n["id"] for n in nodes if n.get("type") == "output"}
+    prev = None
+    for e in edges:
+        if e.get("to") in output_ids:
+            prev = e.get("from")
+    if not prev:
+        for n in reversed(nodes):
+            if n.get("type") not in ("output", "trigger"):
+                prev = n.get("id")
+                break
+
+    interactive = {"telegram", "slack", "discord", "whatsapp"}
+    added = False
+    for ch in output_channels:
+        channel = str(ch).lower()
+        if channel in notify_channels:
+            continue
+        nid = f"notify_{channel}"
+        to_addr = "{{chat_id}}"
+        if channel == "whatsapp":
+            to_addr = "{{phone}}"
+        elif channel in ("slack", "discord"):
+            to_addr = ""
+        nodes.append(
+            {
+                "id": nid,
+                "type": "notify",
+                "data": _composer_node_data(
+                    "notify",
+                    channel=channel,
+                    to=to_addr,
+                    subject="NovaFlow — {{subject}}",
+                    message="{{output}}",
+                    credential_id="",
+                ),
+            }
+        )
+        if prev:
+            edges.append({"from": prev, "to": nid})
+        prev = nid
+        notify_channels.add(channel)
+        added = True
+
+    if added and any(str(ch).lower() in interactive for ch in output_channels):
+        nodes = [n for n in nodes if n.get("type") != "output"]
+        edges = [
+            e
+            for e in edges
+            if e.get("to") not in output_ids and e.get("from") not in output_ids
+        ]
+
+    out = dict(graph)
+    out["nodes"] = nodes
+    out["edges"] = edges
+    meta = dict(out.get("meta") or {})
+    meta["node_types"] = [n.get("type") for n in nodes]
+    out["meta"] = meta
+    return out
+
+
+def _unsupported_goal_message(goal: str) -> str | None:
+    g = (goal or "").lower()
+    if re.search(r"\binstagram\b", g) and re.search(r"\breel|post|upload|add\b", g):
+        return (
+            "Instagram posting is not built into NovaFlow yet. "
+            "Use a custom API/HTTP node with Meta credentials, or clarify a manual upload workflow."
+        )
+    if re.search(r"\bgit\b.*\b(push|commit)\b|\bcommit\b.*\bpush\b", g):
+        return (
+            "Local git commit/push requires a runner on your machine. "
+            "Use a GitHub workflow node (PAT) or webhook trigger instead of a fake auto-push graph."
+        )
+    return None
 
 
 def build_executable_graph(
@@ -174,6 +301,61 @@ def build_executable_graph(
     if any(k in goal_l for k in ("schedule", "cron", "daily", "weekly", "every day")):
         schedule_hint = "Configure cadence in Schedules after deploy."
 
+    llm_cfg = (requirements or {}).get("_llm_cfg")
+    unsupported = _unsupported_goal_message(goal)
+    if unsupported:
+        return {
+            "nodes": [],
+            "edges": [],
+            "meta": {
+                "unsupported": True,
+                "message": unsupported,
+                "node_types": [],
+                "required_capabilities": list(required_caps or []),
+            },
+        }
+
+    planner_note: str | None = None
+    if db and workspace_id and llm_cfg:
+        from app.composer.graph_planner import is_llm_graph_compose_enabled, plan_workflow_graph
+
+        if is_llm_graph_compose_enabled(db, workspace_id):
+            planned = plan_workflow_graph(
+                goal,
+                requirements,
+                llm_cfg,
+                required_caps=list(required_caps or []),
+            )
+            if planned and planned.get("nodes"):
+                norm_edges: list[dict[str, Any]] = []
+                for e in planned.get("edges") or []:
+                    if not isinstance(e, dict):
+                        continue
+                    if e.get("from") and e.get("to"):
+                        norm_edges.append({"from": e["from"], "to": e["to"]})
+                    elif e.get("source") and e.get("target"):
+                        norm_edges.append({"from": e["source"], "to": e["target"]})
+                bound_nodes = _bind_vault_credentials(planned["nodes"], db, workspace_id)
+                meta_planned = {
+                    "required_capabilities": list(required_caps or []),
+                    "include_knowledge": include_knowledge,
+                    "node_types": [n.get("type") for n in bound_nodes if isinstance(n, dict)],
+                    "recipe_id": "llm_graph",
+                    "recipe_name": "LLM-planned graph",
+                    "schedule_note": schedule_hint or None,
+                    "planner": "llm_graph",
+                }
+                return _apply_output_channel_deliveries(
+                    {
+                        "nodes": bound_nodes,
+                        "edges": norm_edges,
+                        "meta": meta_planned,
+                    },
+                    requirements,
+                    goal,
+                )
+            planner_note = "LLM planner could not produce a valid graph — using integration template."
+
     llm_prompt = (
         "You are NovaFlow Composer runtime. "
         "Use retrieved context when available. "
@@ -206,13 +388,20 @@ def build_executable_graph(
         return node["id"]
 
     trigger_label = "Start / Goal"
+    trigger_type = str(req_meta.get("trigger") or "").lower()
+    input_channels = list(req_meta.get("input_channels") or [])
     if schedule_hint:
         trigger_label = "Scheduled start"
-    if primary_channel == "youtube":
+    elif trigger_type in ("telegram_chat", "chat") or "telegram" in input_channels:
+        trigger_label = "Telegram message trigger"
+    elif primary_channel == "youtube":
         trigger_label = "YouTube sync trigger"
     elif wants_email_delivery:
         trigger_label = "Email workflow start"
-    prev = add({"id": "trigger", "type": "trigger", "data": {"label": trigger_label, "schedule_note": schedule_hint}})
+    trigger_data = _composer_node_data("trigger", label=trigger_label, schedule_note=schedule_hint)
+    if trigger_type in ("telegram_chat", "chat") or "telegram" in input_channels:
+        trigger_data["source"] = "telegram"
+    prev = add({"id": "trigger", "type": "trigger", "data": trigger_data})
 
     if wants_transform:
         nid = add(
@@ -230,7 +419,7 @@ def build_executable_graph(
             {
                 "id": "retrieve",
                 "type": "retrieve",
-                "data": {"knowledge_id": knowledge_id, "limit": 6},
+                "data": _composer_node_data("retrieve", knowledge_id=knowledge_id, limit=6),
             }
         )
         edges.append({"from": prev, "to": nid})
@@ -247,7 +436,7 @@ def build_executable_graph(
         edges.append({"from": prev, "to": nid})
         prev = nid
     else:
-        llm_id = add({"id": "llm", "type": "llm", "data": {"prompt": llm_prompt}})
+        llm_id = add({"id": "llm", "type": "llm", "data": _composer_node_data("llm", prompt=llm_prompt)})
         edges.append({"from": prev, "to": llm_id})
         prev = llm_id
         if wants_agent:
@@ -266,27 +455,25 @@ def build_executable_graph(
             {
                 "id": "github",
                 "type": "github",
-                "data": {
-                    "action": "create_issue",
-                    "title": "{{output}}",
-                    "body": "{{input}}",
-                },
+                "data": _composer_node_data("github", action="create", title="{{output}}", body="{{input}}"),
             }
         )
         edges.append({"from": prev, "to": nid})
         prev = nid
 
     if "cap_jira" in caps or "jira" in goal_l:
+        jira_data = _composer_node_data(
+            "jira",
+            action="create",
+            project_key=str((requirements or {}).get("jira_project_key") or "OPS"),
+            summary="{{output}}",
+            description="{{input}}",
+        )
         nid = add(
             {
                 "id": "jira",
                 "type": "jira",
-                "data": {
-                    "action": "create",
-                    "project_key": "OPS",
-                    "summary": "{{output}}",
-                    "description": "{{input}}",
-                },
+                "data": jira_data,
             }
         )
         edges.append({"from": prev, "to": nid})
@@ -297,25 +484,63 @@ def build_executable_graph(
             {
                 "id": "linear",
                 "type": "linear",
-                "data": {"title": "{{output}}", "description": "{{input}}"},
+                "data": _composer_node_data("linear", title="{{output}}", description="{{input}}"),
             }
         )
         edges.append({"from": prev, "to": nid})
         prev = nid
 
-    wants_notify = (
-        wants_email_delivery
-        and (
-            "cap_smtp" in caps
-            or "cap_outlook" in caps
-            or any(k in goal_l for k in ("email", "mail", "send", "friends", "recipients"))
+    integration_req = str((requirements or {}).get("integration") or "").lower()
+    if integration_req == "google_calendar" or (
+        any(k in goal_l for k in ("calendar", "calander", "meeting", "meetings", "appointment"))
+        and "outlook" not in goal_l
+        and "microsoft" not in goal_l
+    ):
+        if not any(n.get("id") == "gcal" for n in nodes):
+            nid = add(
+                {
+                    "id": "gcal",
+                    "type": "http",
+                    "data": {
+                        "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+                        "method": "GET",
+                        "auth": "google",
+                        "label": "Fetch calendar events",
+                    },
+                }
+            )
+            edges.append({"from": prev, "to": nid})
+            prev = nid
+
+    output_channels = list(req_meta.get("output_channels") or [])
+    explicit_delivery = any(
+        k in goal_l
+        for k in (
+            "send",
+            "notify",
+            "email me",
+            "reply",
+            "response",
+            "deliver",
+            "mail to",
         )
-    ) or any(
-        c in caps
-        for c in ("cap_telegram", "cap_slack", "cap_discord", "cap_whatsapp")
-    ) or any(k in goal_l for k in ("telegram", "slack", "discord", "whatsapp")) or (
-        "outlook" in goal_l and primary_channel != "youtube"
     )
+    if not output_channels:
+        if wants_email_delivery and (explicit_delivery or req_meta.get("email_plan")):
+            output_channels = ["email"]
+        elif explicit_delivery and re.search(
+            r"\b(response|reply|notify)\b.*\btelegram\b|\btelegram\b.*\b(response|reply|notify|answer)\b",
+            goal_l,
+        ):
+            output_channels = ["telegram"]
+        elif explicit_delivery and "slack" in goal_l:
+            output_channels = ["slack"]
+        elif explicit_delivery and "discord" in goal_l:
+            output_channels = ["discord"]
+        elif explicit_delivery and "whatsapp" in goal_l:
+            output_channels = ["whatsapp"]
+
+    wants_notify = bool(output_channels)
 
     if wants_human and (wants_notify or wants_http or "cap_github" in caps):
         nid = add(
@@ -329,96 +554,102 @@ def build_executable_graph(
         prev = nid
 
     if wants_notify:
-        channel = "telegram"
-        to_addr = "{{chat_id}}"
-        if "cap_outlook" in caps or "outlook" in goal_l or "microsoft 365" in goal_l:
-            channel = "email"
-            to_addr = "{{email}}"
-        elif wants_email_delivery and (
-            "cap_smtp" in caps
-            or any(k in goal_l for k in ("email", "mail", "gmail", "send"))
-        ):
-            channel = "email"
-            to_addr = "{{email}}"
-        elif "cap_whatsapp" in caps or "whatsapp" in goal_l:
-            channel = "whatsapp"
-            to_addr = "{{phone}}"
-        elif "cap_slack" in caps or "slack" in goal_l:
-            channel = "slack"
-            to_addr = ""
-        elif "cap_discord" in caps or "discord" in goal_l:
-            channel = "discord"
-            to_addr = ""
-
-        # Multi-email requests — use requirements when available
         req = requirements or {}
-        email_topic = (req.get("email_topic") or "").strip()
-        email_count = req.get("email_count")
-        if email_count is None and wants_email_delivery and ("5" in goal_l or "five" in goal_l):
-            email_count = 5
-        if email_count is None and wants_email_delivery and (
-            "multiple" in goal_l or "friends" in goal_l or "different subjects" in goal_l
-        ):
-            email_count = 5
-        recipients = list(req.get("recipients") or [])
+        email_plan = req.get("email_plan") or {}
+        recipients = list(req.get("recipients") or email_plan.get("recipients") or [])
         if req.get("email_recipient") and req.get("email_recipient") not in recipients:
             recipients.append(req.get("email_recipient"))
-        if recipients:
-            to_addr = recipients[0]
-        elif req.get("recipients_label") == "friends":
-            to_addr = "{{friend_email}}"
 
-        multi_email = wants_email_delivery and channel == "email" and (
-            email_count or email_topic or "5" in goal_l or "five" in goal_l
-            or "multiple" in goal_l or "friends" in goal_l
-        )
-        if multi_email:
-            n_emails = int(email_count or 5)
-            topic_label = email_topic or "Update"
-            default_subjects = [
-                f"{topic_label} — warm wishes",
-                f"{topic_label} — celebration plans",
-                f"{topic_label} — gift ideas",
-                f"{topic_label} — family gathering",
-                f"{topic_label} — festive check-in",
-            ]
-            for idx in range(1, n_emails + 1):
-                subj = default_subjects[idx - 1] if idx <= len(default_subjects) else f"{topic_label} — message {idx}"
-                body_topic = email_topic or subj
-                recipient = recipients[idx - 1] if idx <= len(recipients) else to_addr
-                email_nid = add(
+        for out_ch in output_channels:
+            channel = out_ch.lower()
+            if channel == "email":
+                email_topic = (req.get("email_topic") or "").strip()
+                email_count = req.get("email_count") or email_plan.get("count")
+                mode = email_plan.get("mode") or "same_recipient"
+                if email_count is None and ("5" in goal_l or "five" in goal_l):
+                    email_count = 5
+                multi_email = bool(email_count and int(email_count) > 1) or bool(email_plan.get("topics"))
+                if multi_email:
+                    n_emails = int(email_count or len(email_plan.get("topics") or []) or 5)
+                    topic_label = email_topic or "Update"
+                    default_subjects = list(email_plan.get("topics") or []) or [
+                        f"{topic_label} — warm wishes",
+                        f"{topic_label} — celebration plans",
+                        f"{topic_label} — gift ideas",
+                        f"{topic_label} — family gathering",
+                        f"{topic_label} — festive check-in",
+                    ]
+                    to_addr = recipients[0] if recipients else "{{email}}"
+                    if req.get("recipients_label") == "friends":
+                        to_addr = "{{friend_email}}"
+                    for idx in range(1, n_emails + 1):
+                        subj = (
+                            default_subjects[idx - 1]
+                            if idx <= len(default_subjects)
+                            else f"{topic_label} — message {idx}"
+                        )
+                        body_topic = email_topic or subj
+                        recipient = (
+                            recipients[idx - 1]
+                            if mode == "per_recipient" and idx <= len(recipients)
+                            else to_addr
+                        )
+                        email_nid = add(
+                            {
+                                "id": f"email_{idx}",
+                                "type": "notify",
+                                "data": {
+                                    "channel": "email",
+                                    "to": recipient,
+                                    "subject": subj,
+                                    "message": (
+                                        f"Hi!\n\nThis is email #{idx} about {body_topic}.\n\n"
+                                        "Best regards,\nNovaFlow AI"
+                                    ),
+                                },
+                            }
+                        )
+                        edges.append({"from": prev, "to": email_nid})
+                        prev = email_nid
+                else:
+                    to_addr = recipients[0] if recipients else "{{email}}"
+                    nid = add(
+                        {
+                            "id": "notify_email",
+                            "type": "notify",
+                            "data": {
+                                "channel": "email",
+                                "to": to_addr,
+                                "subject": email_topic or "NovaFlow — {{subject}}",
+                                "message": "{{output}}",
+                                "credential_id": "",
+                            },
+                        }
+                    )
+                    edges.append({"from": prev, "to": nid})
+                    prev = nid
+            else:
+                ch = channel
+                to_addr = "{{chat_id}}"
+                if ch == "whatsapp":
+                    to_addr = "{{phone}}"
+                elif ch in ("slack", "discord"):
+                    to_addr = ""
+                nid = add(
                     {
-                        "id": f"email_{idx}",
+                        "id": f"notify_{ch}",
                         "type": "notify",
                         "data": {
-                            "channel": "email",
-                            "to": recipient,
-                            "subject": subj,
-                            "message": (
-                                f"Hi!\n\nThis is email #{idx} about {body_topic}.\n\n"
-                                "Best regards,\nNovaFlow AI"
-                            ),
+                            "channel": ch,
+                            "to": to_addr,
+                            "subject": "NovaFlow — {{subject}}",
+                            "message": "{{output}}",
+                            "credential_id": "",
                         },
                     }
                 )
-                edges.append({"from": prev, "to": email_nid})
-                prev = email_nid
-        else:
-            nid = add(
-                {
-                    "id": "notify",
-                    "type": "notify",
-                    "data": {
-                        "channel": channel,
-                        "to": to_addr,
-                        "subject": "NovaFlow — {{subject}}",
-                        "message": "{{output}}",
-                        "credential_id": "",
-                    },
-                }
-            )
-            edges.append({"from": prev, "to": nid})
-            prev = nid
+                edges.append({"from": prev, "to": nid})
+                prev = nid
 
     # Commerce / Google / YouTube API connectors — place API fetch before LLM when primary
     api_connectors = (
@@ -549,16 +780,22 @@ def build_executable_graph(
         "recipe_name": (recipe or {}).get("name"),
         "schedule_note": schedule_hint or None,
     }
+    if planner_note:
+        meta_out["planner_note"] = planner_note
     if inputs:
         meta_out["inputs"] = inputs
 
     nodes = _bind_vault_credentials(nodes, db, workspace_id)
 
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "meta": meta_out,
-    }
+    return _apply_output_channel_deliveries(
+        {
+            "nodes": nodes,
+            "edges": edges,
+            "meta": meta_out,
+        },
+        requirements,
+        goal,
+    )
 
 
 def heal_executable_graph(
@@ -636,6 +873,41 @@ def heal_executable_graph(
     return {"nodes": nodes, "edges": edges, "meta": meta}, fixes
 
 
+def _ensure_workspace_knowledge_id(
+    db: Session,
+    workspace_id: int,
+    user_id: int,
+    goal: str,
+    existing_id: int | None = None,
+) -> int | None:
+    if existing_id:
+        kb = db.get(KnowledgeBase, int(existing_id))
+        if kb and kb.workspace_id == workspace_id:
+            return kb.id
+    goal_l = (goal or "").lower()
+    if not any(k in goal_l for k in ("knowledge", "docs", "rag", "document", "support")):
+        return None
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.workspace_id == workspace_id)
+        .order_by(KnowledgeBase.id)
+        .first()
+    )
+    if kb:
+        return kb.id
+    kb = KnowledgeBase(
+        name="Workflow knowledge",
+        description="Auto-created for knowledge-backed workflows.",
+        user_id=user_id,
+        workspace_id=workspace_id,
+        type=0,
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    return kb.id
+
+
 def preview_graph_for_solution(
     db: Session,
     solution_id: str,
@@ -677,6 +949,14 @@ def assemble_executable_workflow(
     graph_json = preview_graph_for_solution(db, solution_id, knowledge_id=knowledge_id)
     nodes = list(graph_json.get("nodes") or [])
     edges = list(graph_json.get("edges") or [])
+    goal = _goal_text(db, solution)
+    has_retrieve = any(
+        isinstance(n, dict) and n.get("type") == "retrieve" for n in nodes
+    )
+    if has_retrieve and not knowledge_id:
+        knowledge_id = _ensure_workspace_knowledge_id(
+            db, workspace_id, user_id, goal, existing_id=knowledge_id
+        )
     if knowledge_id:
         for node in nodes:
             if isinstance(node, dict) and node.get("type") == "retrieve":

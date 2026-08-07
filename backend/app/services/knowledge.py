@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import re
 from pathlib import Path
 
@@ -13,6 +14,173 @@ from app.services.vector_store import delete_by_file, milvus_enabled, search_vec
 
 
 def _embedding_ready(db: Session | None) -> bool:
+    """True when Settings vault or env has an API key usable for embeddings."""
+    from app.services.workspace_settings import get_chat_config
+
+    cfg = get_chat_config(db)
+    if not (cfg.get("api_key") or "").strip():
+        return False
+    # Anthropic cannot embed with the OpenAI embeddings endpoint
+    if cfg.get("provider_type") == "anthropic":
+        return False
+    return True
+
+
+def _llm_answer_enabled(db: Session | None) -> bool:
+    flag = os.environ.get("KNOWLEDGE_LLM_ANSWER", "").strip().lower()
+    if flag in ("0", "false", "no"):
+        return False
+    from app.services.workspace_settings import get_chat_config
+
+    cfg = get_chat_config(db)
+    if not (cfg.get("api_key") or "").strip():
+        return False
+    provider = (cfg.get("provider_type") or "").strip().lower()
+    return provider not in ("none", "")
+
+
+def _parse_file_meta(record: KnowledgeFile) -> dict:
+    raw = getattr(record, "metadata_json", None) or "{}"
+    try:
+        return json.loads(raw) if raw else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _set_file_meta(record: KnowledgeFile, patch: dict) -> None:
+    meta = _parse_file_meta(record)
+    meta.update(patch)
+    record.metadata_json = json.dumps(meta)
+
+
+def mask_sensitive_text(text: str) -> str:
+    from app.knowledge_os.security import PII_PATTERNS
+
+    out = text or ""
+    for pattern in PII_PATTERNS.values():
+        out = pattern.sub(lambda m: "█" * min(len(m.group(0)), 12), out)
+    return out
+
+
+def build_extractive_digest(hits: list[dict], query: str = "") -> str:
+    if not hits:
+        return ""
+    q_tokens = set(_tokenize(query))
+    lines: list[str] = []
+    for i, hit in enumerate(hits, 1):
+        src = hit.get("file_name") or "document"
+        text = (hit.get("text") or "").strip()
+        snippet = text[:500]
+        if q_tokens and text:
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            best = snippet
+            best_score = -1
+            for sent in sentences:
+                st = set(_tokenize(sent))
+                overlap = len(q_tokens & st)
+                if overlap > best_score:
+                    best_score = overlap
+                    best = sent
+            snippet = best[:500]
+        snippet = snippet + ("…" if len(text) > len(snippet) else "")
+        lines.append(f"[{i}] {src}: {snippet}")
+    return "\n\n".join(lines)
+
+
+def build_citations(hits: list[dict], mask: bool = False) -> list[dict]:
+    citations = []
+    for i, hit in enumerate(hits, 1):
+        src = hit.get("file_name") or "document"
+        text = (hit.get("text") or "").strip()[:1000]
+        preview = text[:240] + ("…" if len(text) > 240 else "")
+        if mask:
+            preview = mask_sensitive_text(preview)
+        citations.append(
+            {
+                "n": i,
+                "file_name": src,
+                "score": hit.get("score"),
+                "method": hit.get("method"),
+                "preview": preview,
+            }
+        )
+    return citations
+
+
+def kb_file_stats(db: Session, knowledge_ids: list[int]) -> dict[int, dict]:
+    if not knowledge_ids:
+        return {}
+    from sqlalchemy import func
+
+    rows = (
+        db.query(KnowledgeFile.knowledge_id, KnowledgeFile.status, func.count(KnowledgeFile.id))
+        .filter(KnowledgeFile.knowledge_id.in_(knowledge_ids))
+        .group_by(KnowledgeFile.knowledge_id, KnowledgeFile.status)
+        .all()
+    )
+    stats: dict[int, dict] = {}
+    for kid, status, cnt in rows:
+        bucket = stats.setdefault(kid, {"total": 0, "ready": 0, "indexing": 0})
+        bucket["total"] += int(cnt)
+        if status == 2:
+            bucket["ready"] += int(cnt)
+        elif status in (1, 4, 5):
+            bucket["indexing"] += int(cnt)
+    return stats
+
+
+def kb_status_from_stats(stats: dict | None) -> tuple[str, int]:
+    ready = int((stats or {}).get("ready") or 0)
+    indexing = int((stats or {}).get("indexing") or 0)
+    if ready > 0 and indexing == 0:
+        return "ready", 1
+    if indexing > 0:
+        return "indexing", 0
+    return "empty", 0
+
+
+def should_mask_kb_content(kb: KnowledgeBase | None) -> bool:
+    from app.knowledge_os.security import classification_rank
+
+    level = (getattr(kb, "classification", None) or "internal").lower()
+    return classification_rank(level) >= classification_rank("confidential")
+
+
+def retrieve_knowledge(
+    db: Session,
+    knowledge_id: int,
+    query: str,
+    limit: int = 5,
+) -> dict:
+    hits = search_chunks_semantic(db, knowledge_id, query, limit)
+    method = hits[0].get("method") if hits else "none"
+    kb = db.get(KnowledgeBase, knowledge_id)
+    mask = should_mask_kb_content(kb)
+    digest = build_extractive_digest(hits, query)
+    if mask:
+        digest = mask_sensitive_text(digest)
+    for hit in hits:
+        if mask:
+            hit["text"] = mask_sensitive_text(hit.get("text") or "")
+    return {
+        "data": hits,
+        "total": len(hits),
+        "method": method,
+        "extractive_digest": digest,
+        "citations": build_citations(hits, mask=mask),
+        "embedding_available": _embedding_ready(db),
+        "llm_answer_available": _llm_answer_enabled(db),
+    }
+
+
+def delete_knowledge_file(db: Session, record: KnowledgeFile) -> None:
+    delete_by_file(record.id)
+    db.query(KnowledgeChunk).filter(KnowledgeChunk.file_id == record.id).delete()
+    path = UPLOAD_DIR / record.file_path
+    if path.exists():
+        path.unlink()
+    db.delete(record)
+    db.commit()
     """True when Settings vault or env has an API key usable for embeddings."""
     from app.services.workspace_settings import get_chat_config
 
@@ -154,6 +322,18 @@ def process_file_record(db: Session, record: KnowledgeFile, chunk_size: int = 10
         if not path.exists():
             raise FileNotFoundError(f"Uploaded file missing on disk: {record.file_path}")
         text = extract_text(path, db)
+        kb = db.get(KnowledgeBase, record.knowledge_id)
+        kb_class = (getattr(kb, "classification", None) or "internal") if kb else "internal"
+        from app.knowledge_os.security import scan_document_content
+
+        scan = scan_document_content(text[:50000], classification=kb_class)
+        _set_file_meta(
+            record,
+            {
+                "pii_count": scan.get("pii_count", 0),
+                "pii_findings": scan.get("pii_findings", [])[:5],
+            },
+        )
         pieces = chunk_text(text, chunk_size, chunk_overlap)
         delete_by_file(record.id)
         db.query(KnowledgeChunk).filter(KnowledgeChunk.file_id == record.id).delete()

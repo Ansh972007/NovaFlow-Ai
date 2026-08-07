@@ -67,6 +67,7 @@ class KnowledgeCreate(BaseModel):
     description: str = ""
     model: Optional[str] = None
     type: int = 0
+    classification: Optional[str] = "internal"
 
 
 class ProcessFiles(BaseModel):

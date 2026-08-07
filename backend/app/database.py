@@ -139,6 +139,7 @@ class KnowledgeBase(Base):
     description = Column(String(500), default="")
     model = Column(String(120), default="text-embedding-3-small")
     type = Column(Integer, default=0)
+    classification = Column(String(16), default="internal")
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True, index=True)
     create_time = Column(DateTime, default=datetime.utcnow)
@@ -156,6 +157,8 @@ class KnowledgeFile(Base):
     file_path = Column(String(500), nullable=False)
     status = Column(Integer, default=5)  # 5 queued, 1 processing, 2 ready, 3 failed
     error_message = Column(Text, default="")
+    classification = Column(String(16), default="internal")
+    metadata_json = Column(Text, default="{}")
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     knowledge = relationship("KnowledgeBase", back_populates="files")

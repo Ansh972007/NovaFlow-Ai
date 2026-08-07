@@ -171,6 +171,46 @@ def workflow_info(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(g
     return ok(data)
 
 
+@router.post("/workflow/info/{workflow_id}/test")
+def test_workflow_sandbox(
+    workflow_id: str,
+    body: dict = Body(default={}),
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    w = ctx.fetch(Workflow, workflow_id)
+    if not w:
+        return fail(404, "Workflow not found")
+    try:
+        graph = json.loads(w.graph_json or "{}")
+    except json.JSONDecodeError:
+        graph = {"nodes": [], "edges": []}
+    if body.get("graph"):
+        graph = body["graph"]
+    from app.sandbox.enterprise_suite import run_enterprise_suite
+
+    report = run_enterprise_suite(
+        graph,
+        field=body.get("field") or "generic",
+        db=db,
+        workspace_id=ctx.workspace_id,
+        live_credential_probe=bool(body.get("live_credential_probe", True)),
+    )
+    ctx.audit(
+        "workflow.test",
+        resource_type="workflow",
+        resource_id=w.id,
+        detail={"status": report.get("status")},
+    )
+    return ok(
+        {
+            "workflow_id": w.id,
+            "workflow_name": w.name,
+            "report": report,
+        }
+    )
+
+
 @router.post("/workflow")
 def create_workflow(body: WorkflowCreate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
     tpl = TEMPLATES.get(body.template_id) or TEMPLATES["rag"]

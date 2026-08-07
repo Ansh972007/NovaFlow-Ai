@@ -20,12 +20,21 @@ _WORK_VERBS = re.compile(
 )
 
 _QA_HINT = re.compile(
-    r"^\s*(what\s+is|what\s+are|who\s+is|how\s+does|how\s+do\s+i|explain|define|why\s+is|"
-    r"tell\s+me\s+about|can\s+you\s+explain)\b",
+    r"(?:^|\b)(what\s+is|what\s+are|who\s+is|how\s+does|how\s+do\s+i|explain|define|why\s+is|"
+    r"tell\s+me\s+about|can\s+you\s+explain|difference\s+between|can\s+you\s+tell\s+me)",
     re.I,
 )
 
-_PENDING_ACTIONS = frozenset(
+
+def is_qa_message(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t.endswith("?"):
+        return True
+    return bool(_QA_HINT.search(t))
+
+PENDING_ACTIONS = frozenset(
     {
         "approve",
         "test",
@@ -38,6 +47,7 @@ _PENDING_ACTIONS = frozenset(
         "credential",
     }
 )
+_PENDING_ACTIONS = PENDING_ACTIONS
 
 
 def has_work_signal(text: str) -> bool:
@@ -121,7 +131,19 @@ def universal_route(
     if last_field and re.search(r"\b(same|similar|another|also|again)\b", t, re.I) and len(t.split()) <= 12:
         work = True
 
-    if work and not _QA_HINT.match(t):
+    explicit_workflow = bool(
+        re.search(
+            r"\b(build|create|make|compose)\b.*\b(workflow|bot|automation|agent)\b|"
+            r"\bbuild a workflow\b|\bmake a workflow\b|\bworkflow for\b",
+            t,
+            re.I,
+        )
+    )
+
+    if work and is_qa_message(t) and not explicit_workflow:
+        work = False
+
+    if work and not is_qa_message(t):
         return {
             "route": "work_compose",
             "intent_hint": "compose",

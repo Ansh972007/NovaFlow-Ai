@@ -10,6 +10,7 @@ import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
 import ChatSidebar from "@/components/chat/ChatSidebar";
 import ChatMessages from "@/components/chat/ChatMessages";
 import ChatInput from "@/components/chat/ChatInput";
+import ChatPlanningSelector from "@/components/chat/ChatPlanningSelector";
 import { useAssistantChat } from "@/hooks/useAssistantChat";
 import { getOnlineApps, getAssistants, getAssistantInfo, FLOW_TYPE } from "@/lib/api/apps";
 import { getUserInfo } from "@/lib/api/auth";
@@ -43,7 +44,7 @@ export default function ChatPageClient() {
 
   const chatKey = `${selectedApp?.id || "none"}-${sessionId || "none"}`;
 
-  const { messages, streaming, error, sendMessage, stop, regenerate, setError, ensureConversation } =
+  const { messages, streaming, error, connectionStatus, planningLabel, sendMessage, stop, regenerate, setError, ensureConversation } =
     useAssistantChat({
     app: selectedApp,
     sessionId,
@@ -256,7 +257,21 @@ export default function ChatPageClient() {
 
   function exportTranscript() {
     if (!messages?.length) return;
-    const lines = messages.map((m) => `**${m.role === "user" ? "You" : "Assistant"}:** ${m.content || ""}`);
+    const lines = messages.map((m) => {
+      const role = m.role === "user" ? "You" : "Assistant";
+      const parts = [String(m.content || "").trim()];
+      const events = m.aiosEvents?.length ? m.aiosEvents : m.event ? [m.event] : [];
+      for (const ev of events) {
+        if (!ev?.type) continue;
+        const d = ev.data || {};
+        const summary = d.message || d.title || ev.type;
+        parts.push(`[${ev.type}] ${summary}`);
+      }
+      if (m.receipt?.rag_hits?.length) {
+        parts.push(`[RAG] ${m.receipt.rag_hits.length} citation(s)`);
+      }
+      return `**${role}:** ${parts.filter(Boolean).join("\n")}`;
+    });
     const md = `# ${headerTitle}\n\n${lines.join("\n\n")}\n`;
     const blob = new Blob([md], { type: "text/markdown" });
     const a = document.createElement("a");
@@ -334,6 +349,10 @@ export default function ChatPageClient() {
                         Live
                       </span>
                     )}
+                    <ChatPlanningSelector
+                      label={planningLabel || "Planning model"}
+                      onSelectModel={(phrase) => sendMessage(phrase)}
+                    />
                   </div>
                   <p className="mt-0.5 truncate text-xs text-neutral-500">
                     {messages.length ? `${messages.length} messages` : "Start a new build session"}
@@ -399,6 +418,11 @@ export default function ChatPageClient() {
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col">
+                {connectionStatus === "reconnecting" && (
+                  <p className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs text-amber-900">
+                    Reconnecting to chat…
+                  </p>
+                )}
                 <ChatMessages
                   messages={messages}
                   streaming={streaming}

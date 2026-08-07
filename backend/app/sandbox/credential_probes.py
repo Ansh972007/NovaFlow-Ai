@@ -167,13 +167,16 @@ def check_credential_probe(
             "missing_credentials": missing_credentials,
         }
     try:
-        probes = asyncio.run(run_graph_credential_probes(db, workspace_id, graph))
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            probes = loop.run_until_complete(run_graph_credential_probes(db, workspace_id, graph))
-        finally:
-            loop.close()
+        from app.runtime.async_bridge import run_coro_sync
+
+        probes = run_coro_sync(run_graph_credential_probes(db, workspace_id, graph))
+    except Exception as exc:
+        return {
+            "id": "credential_probe",
+            "name": "Credential probe",
+            "status": "failed",
+            "message": str(exc)[:200],
+        }
     if not probes:
         return {
             "id": "credential_probe",

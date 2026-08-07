@@ -18,6 +18,7 @@ export default function CreateApiNodeModal({ open, onClose, onSaved }) {
   const [displayName, setDisplayName] = useState("");
   const [slug, setSlug] = useState("");
   const [headersJson, setHeadersJson] = useState("{}");
+  const [inputFields, setInputFields] = useState([{ key: "", label: "", default: "", required: false }]);
   const [credentials, setCredentials] = useState([]);
   const [probeResult, setProbeResult] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -85,7 +86,16 @@ export default function CreateApiNodeModal({ open, onClose, onSaved }) {
           credential_id: credentialId || null,
           headers,
         },
-        input_schema: { fields: [] },
+        input_schema: {
+          fields: inputFields
+            .filter((f) => f.key?.trim())
+            .map((f) => ({
+              key: f.key.trim(),
+              label: f.label?.trim() || f.key.trim(),
+              default: f.default || "",
+              required: !!f.required,
+            })),
+        },
         output_mapping: { path: "", template: "{{json}}" },
         ports: { in: 1, out: 1 },
         icon: "api",
@@ -198,6 +208,64 @@ export default function CreateApiNodeModal({ open, onClose, onSaved }) {
             ))}
           </select>
         </label>
+
+        <div className="mt-4">
+          <p className="text-xs font-semibold text-neutral-600">Input parameters</p>
+          <p className="mt-1 text-[11px] text-neutral-400">Fields shown when this node is used in a workflow.</p>
+          {inputFields.map((field, idx) => (
+            <div key={idx} className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-black/5 bg-neutral-50/80 p-2">
+              <input
+                value={field.key}
+                onChange={(e) => {
+                  const next = [...inputFields];
+                  next[idx] = { ...next[idx], key: e.target.value };
+                  setInputFields(next);
+                }}
+                placeholder="key"
+                className="rounded-lg border border-black/10 px-2 py-1.5 text-xs"
+              />
+              <input
+                value={field.label}
+                onChange={(e) => {
+                  const next = [...inputFields];
+                  next[idx] = { ...next[idx], label: e.target.value };
+                  setInputFields(next);
+                }}
+                placeholder="Label"
+                className="rounded-lg border border-black/10 px-2 py-1.5 text-xs"
+              />
+              <input
+                value={field.default}
+                onChange={(e) => {
+                  const next = [...inputFields];
+                  next[idx] = { ...next[idx], default: e.target.value };
+                  setInputFields(next);
+                }}
+                placeholder="Default"
+                className="rounded-lg border border-black/10 px-2 py-1.5 text-xs"
+              />
+              <label className="flex items-center gap-2 text-xs text-neutral-600">
+                <input
+                  type="checkbox"
+                  checked={!!field.required}
+                  onChange={(e) => {
+                    const next = [...inputFields];
+                    next[idx] = { ...next[idx], required: e.target.checked };
+                    setInputFields(next);
+                  }}
+                />
+                Required
+              </label>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setInputFields([...inputFields, { key: "", label: "", default: "", required: false }])}
+            className="mt-2 text-xs font-semibold text-violet-700 hover:text-violet-900"
+          >
+            + Add field
+          </button>
+        </div>
 
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         {probeResult && (

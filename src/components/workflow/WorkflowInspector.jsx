@@ -6,51 +6,9 @@ import { NODE_META } from "./WorkflowCanvas";
 import WorkflowTelegramPanel from "./WorkflowTelegramPanel";
 import WorkflowSlackPanel from "./WorkflowSlackPanel";
 import { getWorkflowRun } from "@/lib/api/workflows";
-import { listCredentials } from "@/lib/api/credentials";
+import NodeSchemaFields from "./NodeSchemaFields";
 
 const ease = [0.16, 1, 0.3, 1];
-
-function NotifyCredentialSelect({ selected, onUpdateNode, readOnly }) {
-  const [opts, setOpts] = useState([]);
-  useEffect(() => {
-    listCredentials()
-      .then((rows) => setOpts(Array.isArray(rows) ? rows : []))
-      .catch(() => setOpts([]));
-  }, []);
-  const channel = selected.data?.channel || "telegram";
-  const filtered = opts.filter((e) => {
-    if (channel === "telegram") return e.category === "telegram";
-    if (channel === "email") return e.category === "email";
-    if (channel === "slack") return e.category === "slack";
-    if (channel === "discord") return e.category === "discord";
-    return true;
-  });
-  return (
-    <label className="mt-4 block">
-      <span className="text-xs font-semibold text-neutral-600">Credential (vault)</span>
-      <select
-        value={selected.data?.credential_id || ""}
-        onChange={(e) => onUpdateNode(selected.id, { data: { credential_id: e.target.value } })}
-        disabled={readOnly}
-        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-      >
-        <option value="">Default for this channel</option>
-        {filtered.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.label} ({e.kind}){e.is_default ? " · default" : ""}
-          </option>
-        ))}
-      </select>
-      <p className="mt-1 text-[11px] text-neutral-400">
-        Manage named accounts in{" "}
-        <a href="/credentials" className="underline">
-          Credentials
-        </a>
-        .
-      </p>
-    </label>
-  );
-}
 
 export default function WorkflowInspector({
   tab,
@@ -102,6 +60,9 @@ export default function WorkflowInspector({
   workflowId = "",
   hasNotifyNode = false,
   customNodeDefs = [],
+  builtinSchemas = [],
+  dynamicComponents = [],
+  workflowList = [],
 }) {
   const [connectTarget, setConnectTarget] = useState("");
   const [connectSource, setConnectSource] = useState("");
@@ -125,6 +86,17 @@ export default function WorkflowInspector({
       .then((row) => setApiDefDetail(row?.definition || null))
       .catch(() => setApiDefDetail(null));
   }, [selected, customNodeDefs]);
+
+  const activeBuiltinSchema = selected
+    ? builtinSchemas.find((s) => s.type === selected.type)
+    : null;
+  const activeDynamicSchema = selected?.type === "component_node"
+    ? dynamicComponents.find(
+        (c) =>
+          c.name === selected.data?.component_name ||
+          c.label === selected.data?.component_name
+      )
+    : null;
 
   async function loadRunDetail(runId) {
     setRunDetailBusy(true);
@@ -353,646 +325,95 @@ export default function WorkflowInspector({
                     )}
                   </div>
 
-                  {selected.type === "retrieve" && (
-                    <label className="mt-6 block">
-                      <span className="text-xs font-semibold text-neutral-600">Knowledge base</span>
-                      <select
-                        value={selected.data?.knowledge_id ?? ""}
-                        onChange={(e) =>
-                          onUpdateNode(selected.id, {
-                            data: { knowledge_id: e.target.value ? Number(e.target.value) : null },
-                          })
+{activeBuiltinSchema?.fields?.length > 0 && selected.type !== "api_node" && selected.type !== "component_node" && (
+                    <div className="mt-6">
+                      <NodeSchemaFields
+                        key={selected.id}
+                        fields={activeBuiltinSchema.fields}
+                        data={selected.data || {}}
+                        nodeType={selected.type}
+                        knowledgeBases={knowledgeBases}
+                        workflows={workflowList}
+                        customNodeDefs={customNodeDefs}
+                        currentWorkflowId={workflowId}
+                        readOnly={readOnly}
+                        onUpdate={(patch) => onUpdateNode(selected.id, { data: patch })}
+                      />
+                    </div>
+                  )}
+
+                  {selected.type === "component_node" && (
+                    <div className="mt-6">
+                      <NodeSchemaFields
+                        key={selected.id}
+                        fields={
+                          activeDynamicSchema?.fields || [
+                            { key: "component_name", label: "Component", required: true },
+                            { key: "set_output", label: "Set workflow output", field_type: "checkbox", default: true },
+                          ]
                         }
-                        disabled={readOnly}
-                        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-neutral-900/10"
-                      >
-                        <option value="">Select library…</option>
-                        {knowledgeBases.map((kb) => (
-                          <option key={kb.id} value={kb.id}>
-                            {kb.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-
-                  {selected.type === "retrieve" && (
-                    <label className="mt-4 block">
-                      <span className="text-xs font-semibold text-neutral-600">Chunk limit</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={selected.data?.limit ?? 5}
-                        onChange={(e) =>
-                          onUpdateNode(selected.id, {
-                            data: { limit: Number(e.target.value) || 5 },
-                          })
-                        }
-                        disabled={readOnly}
-                        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                        data={selected.data || {}}
+                        nodeType="component_node"
+                        knowledgeBases={knowledgeBases}
+                        workflows={workflowList}
+                        readOnly={readOnly}
+                        onUpdate={(patch) => onUpdateNode(selected.id, { data: patch })}
                       />
-                    </label>
-                  )}
-
-                  {selected.type === "llm" && (
-                    <label className="mt-6 block">
-                      <span className="text-xs font-semibold text-neutral-600">System prompt</span>
-                      <textarea
-                        value={selected.data?.prompt || ""}
-                        onChange={(e) => onUpdateNode(selected.id, { data: { prompt: e.target.value } })}
-                        disabled={readOnly}
-                        rows={8}
-                        className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-neutral-900/10"
-                        placeholder="Instructions for the LLM step…"
-                      />
-                    </label>
-                  )}
-
-                  {(selected.type === "trigger" || selected.type === "output") && (
-                    <label className="mt-6 block">
-                      <span className="text-xs font-semibold text-neutral-600">Label</span>
-                      <input
-                        value={selected.data?.label || ""}
-                        onChange={(e) => onUpdateNode(selected.id, { data: { label: e.target.value } })}
-                        disabled={readOnly}
-                        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        placeholder={selected.type === "trigger" ? "User input" : "Response"}
-                      />
-                    </label>
-                  )}
-
-                  {selected.type === "transform" && (
-                    <label className="mt-6 block">
-                      <span className="text-xs font-semibold text-neutral-600">Template</span>
-                      <p className="mt-1 text-[11px] text-neutral-400">
-                        Use {"{{input}}"}, {"{{retrieved}}"}, {"{{output}}"}, {"{{http}}"}, {"{{chat_id}}"}
-                      </p>
-                      <textarea
-                        value={selected.data?.template || ""}
-                        onChange={(e) => onUpdateNode(selected.id, { data: { template: e.target.value } })}
-                        disabled={readOnly}
-                        rows={6}
-                        className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm leading-relaxed"
-                        placeholder="{{input}}"
-                      />
-                    </label>
-                  )}
-
-                  {selected.type === "condition" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Keyword (contains)</span>
-                        <input
-                          value={selected.data?.keyword || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { keyword: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          placeholder="billing"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Text when matched</span>
-                        <textarea
-                          value={selected.data?.then_text || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { then_text: e.target.value } })}
-                          disabled={readOnly}
-                          rows={3}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Text when not matched</span>
-                        <textarea
-                          value={selected.data?.else_text || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { else_text: e.target.value } })}
-                          disabled={readOnly}
-                          rows={3}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                    </>
-                  )}
-
-                  {selected.type === "http" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">URL</span>
-                        <input
-                          value={selected.data?.url || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { url: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          placeholder="https://api.example.com/data?q={{input}}"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Method</span>
-                        <select
-                          value={selected.data?.method || "GET"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { method: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        >
-                          <option value="GET">GET</option>
-                          <option value="POST">POST</option>
-                        </select>
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Auth</span>
-                        <select
-                          value={selected.data?.auth || "custom"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { auth: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        >
-                          <option value="custom">Custom API (vault)</option>
-                          <option value="youtube">YouTube</option>
-                          <option value="google">Google</option>
-                          <option value="shopify">Shopify</option>
-                          <option value="outlook">Outlook</option>
-                        </select>
-                      </label>
-                      <NotifyCredentialSelect selected={selected} onUpdateNode={onUpdateNode} readOnly={readOnly} />
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">POST body (optional)</span>
-                        <textarea
-                          value={selected.data?.body || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { body: e.target.value } })}
-                          disabled={readOnly}
-                          rows={4}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                    </>
+                    </div>
                   )}
 
                   {selected.type === "api_node" && (
                     <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Library node</span>
-                        <select
-                          value={selected.data?.node_def_id || ""}
-                          onChange={(e) => {
-                            const def = customNodeDefs.find((d) => d.id === e.target.value);
-                            onUpdateNode(selected.id, {
-                              data: {
-                                node_def_id: e.target.value,
-                                label: def?.display_name || def?.slug || "",
-                              },
-                            });
-                          }}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        >
-                          <option value="">Select saved API node</option>
-                          {customNodeDefs.map((def) => (
-                            <option key={def.id} value={def.id}>
-                              {def.display_name || def.slug}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <div className="mt-6">
+                        <NodeSchemaFields
+                          key={selected.id}
+                          fields={
+                            activeBuiltinSchema?.fields || [
+                              { key: "node_def_id", label: "Library node", field_type: "node_def", required: true },
+                              { key: "credential_id", label: "Credential override", field_type: "credential", vault_category: "custom", vault_kind: "custom" },
+                              { key: "set_output", label: "Set workflow output", field_type: "checkbox", default: true },
+                            ]
+                          }
+                          data={selected.data || {}}
+                          nodeType="api_node"
+                          customNodeDefs={customNodeDefs}
+                          readOnly={readOnly}
+                          onUpdate={(patch) => onUpdateNode(selected.id, { data: patch })}
+                        />
+                      </div>
                       {apiDefDetail?.http?.url && (
                         <p className="mt-2 text-[11px] text-neutral-500">
                           Endpoint: {apiDefDetail.http.url} · {apiDefDetail.http.method || "GET"}
                         </p>
                       )}
-                      {(apiDefDetail?.input_schema?.fields || []).map((field) => (
-                        <label key={field.key} className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">{field.label || field.key}</span>
-                          <input
-                            value={selected.data?.[field.key] ?? field.default ?? ""}
-                            onChange={(e) =>
-                              onUpdateNode(selected.id, { data: { [field.key]: e.target.value } })
-                            }
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
+                      {(apiDefDetail?.input_schema?.fields || []).length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs font-semibold text-neutral-600">API parameters</p>
+                          <NodeSchemaFields
+                            fields={(apiDefDetail.input_schema.fields || []).map((field) => ({
+                              key: field.key,
+                              label: field.label || field.key,
+                              field_type:
+                                field.type === "number"
+                                  ? "number"
+                                  : field.type === "boolean"
+                                    ? "checkbox"
+                                    : field.type === "textarea"
+                                      ? "textarea"
+                                      : "text",
+                              required: field.required,
+                              default: field.default,
+                              placeholder: field.placeholder,
+                            }))}
+                            data={selected.data || {}}
+                            nodeType="api_node"
+                            readOnly={readOnly}
+                            onUpdate={(patch) => onUpdateNode(selected.id, { data: patch })}
                           />
-                        </label>
-                      ))}
-                      <label className="mt-4 flex items-center gap-2 text-sm text-neutral-600">
-                        <input
-                          type="checkbox"
-                          checked={!!selected.data?.set_output}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { set_output: e.target.checked } })}
-                          disabled={readOnly}
-                        />
-                        Set workflow output from API response
-                      </label>
-                    </>
-                  )}
-
-                  {selected.type === "notify" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Channel</span>
-                        <select
-                          value={selected.data?.channel || "telegram"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { channel: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        >
-                          <option value="telegram">Telegram</option>
-                          <option value="email">Email</option>
-                          <option value="slack">Slack</option>
-                          <option value="discord">Discord</option>
-                          <option value="webhook">Webhook</option>
-                        </select>
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">To / URL / Chat ID</span>
-                        <input
-                          value={selected.data?.to || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { to: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          placeholder={
-                            selected.data?.channel === "slack"
-                              ? "Optional override webhook — blank uses Settings"
-                              : "{{chat_id}} or team@example.com"
-                          }
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">
-                          {selected.data?.channel === "slack" ? "Subject (bold prefix)" : "Subject (email)"}
-                        </span>
-                        <input
-                          value={selected.data?.subject || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { subject: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Message</span>
-                        <textarea
-                          value={selected.data?.message || "{{output}}"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { message: e.target.value } })}
-                          disabled={readOnly}
-                          rows={4}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <NotifyCredentialSelect selected={selected} onUpdateNode={onUpdateNode} readOnly={readOnly} />
-                      {selected.data?.channel === "telegram" && (
-                        <label className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">Bot token (optional)</span>
-                          <input
-                            value={selected.data?.bot_token || ""}
-                            onChange={(e) => onUpdateNode(selected.id, { data: { bot_token: e.target.value } })}
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                            placeholder="Uses Credentials vault default if empty"
-                          />
-                        </label>
+                        </div>
                       )}
                     </>
                   )}
-
-                  {selected.type === "jira" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Action</span>
-                        <select
-                          value={selected.data?.action || "create"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { action: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        >
-                          <option value="create">Create issue</option>
-                          <option value="update">Update issue</option>
-                        </select>
-                      </label>
-                      {(selected.data?.action || "create") === "create" ? (
-                        <>
-                          <label className="mt-4 block">
-                            <span className="text-xs font-semibold text-neutral-600">Project key</span>
-                            <input
-                              value={selected.data?.project_key || ""}
-                              onChange={(e) => onUpdateNode(selected.id, { data: { project_key: e.target.value } })}
-                              disabled={readOnly}
-                              className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                              placeholder="NF"
-                            />
-                          </label>
-                          <label className="mt-4 block">
-                            <span className="text-xs font-semibold text-neutral-600">Issue type</span>
-                            <input
-                              value={selected.data?.issue_type || "Task"}
-                              onChange={(e) => onUpdateNode(selected.id, { data: { issue_type: e.target.value } })}
-                              disabled={readOnly}
-                              className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                              placeholder="Task"
-                            />
-                          </label>
-                        </>
-                      ) : (
-                        <label className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">Issue key</span>
-                          <input
-                            value={selected.data?.issue_key || ""}
-                            onChange={(e) => onUpdateNode(selected.id, { data: { issue_key: e.target.value } })}
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                            placeholder="NF-123 or {{jira_key}}"
-                          />
-                        </label>
-                      )}
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Summary</span>
-                        <input
-                          value={selected.data?.summary || "{{output}}"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { summary: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Description</span>
-                        <textarea
-                          value={selected.data?.description || "{{input}}"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { description: e.target.value } })}
-                          disabled={readOnly}
-                          rows={4}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <p className="mt-3 text-[11px] text-neutral-500">
-                        Uses Jira credentials from Credentials vault.
-                      </p>
-                    </>
-                  )}
-
-                  {selected.type === "github" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Action</span>
-                        <select
-                          value={selected.data?.action || "create"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { action: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        >
-                          <option value="create">Create issue</option>
-                          <option value="update">Update issue</option>
-                        </select>
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Repo (owner/name)</span>
-                        <input
-                          value={selected.data?.repo || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { repo: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          placeholder="Blank = Settings default"
-                        />
-                      </label>
-                      {(selected.data?.action || "create") === "update" && (
-                        <label className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">Issue number</span>
-                          <input
-                            value={selected.data?.issue_number || ""}
-                            onChange={(e) => onUpdateNode(selected.id, { data: { issue_number: e.target.value } })}
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                            placeholder="42 or {{github_issue}}"
-                          />
-                        </label>
-                      )}
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Title</span>
-                        <input
-                          value={selected.data?.title || "{{output}}"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { title: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Body</span>
-                        <textarea
-                          value={selected.data?.body || "{{input}}"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { body: e.target.value } })}
-                          disabled={readOnly}
-                          rows={4}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      {(selected.data?.action || "create") === "create" && (
-                        <label className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">Labels (comma-separated)</span>
-                          <input
-                            value={selected.data?.labels || ""}
-                            onChange={(e) => onUpdateNode(selected.id, { data: { labels: e.target.value } })}
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                            placeholder="bug, triage"
-                          />
-                        </label>
-                      )}
-                      <p className="mt-3 text-[11px] text-neutral-500">
-                        Uses GitHub PAT from Settings → Integrations.
-                      </p>
-                    </>
-                  )}
-
-                  {selected.type === "linear" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Action</span>
-                        <select
-                          value={selected.data?.action || "create"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { action: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        >
-                          <option value="create">Create issue</option>
-                          <option value="update">Update issue</option>
-                        </select>
-                      </label>
-                      {(selected.data?.action || "create") === "create" ? (
-                        <label className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">Team ID</span>
-                          <input
-                            value={selected.data?.team_id || ""}
-                            onChange={(e) => onUpdateNode(selected.id, { data: { team_id: e.target.value } })}
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                            placeholder="Blank = Settings default"
-                          />
-                        </label>
-                      ) : (
-                        <label className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">Issue ID</span>
-                          <input
-                            value={selected.data?.issue_id || ""}
-                            onChange={(e) => onUpdateNode(selected.id, { data: { issue_id: e.target.value } })}
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                            placeholder="Linear UUID or {{linear_issue}}"
-                          />
-                        </label>
-                      )}
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Title</span>
-                        <input
-                          value={selected.data?.title || "{{output}}"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { title: e.target.value } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Description</span>
-                        <textarea
-                          value={selected.data?.description || "{{input}}"}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { description: e.target.value } })}
-                          disabled={readOnly}
-                          rows={4}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <p className="mt-3 text-[11px] text-neutral-500">
-                        Uses Linear API key from Settings → Integrations.
-                      </p>
-                    </>
-                  )}
-
-                  {selected.type === "loop" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Max items</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={selected.data?.max || 5}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { max: Number(e.target.value) } })}
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">Per-item prompt</span>
-                        <textarea
-                          value={selected.data?.prompt || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { prompt: e.target.value } })}
-                          disabled={readOnly}
-                          rows={3}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          placeholder="Process: {{item}}"
-                        />
-                      </label>
-                    </>
-                  )}
-
-                  {selected.type === "parallel" && (
-                    <label className="mt-6 block">
-                      <span className="text-xs font-semibold text-neutral-600">Branches (comma-separated)</span>
-                      <input
-                        value={(selected.data?.branches || []).join(", ")}
-                        onChange={(e) =>
-                          onUpdateNode(selected.id, {
-                            data: { branches: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) },
-                          })
-                        }
-                        disabled={readOnly}
-                        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        placeholder="Summary, Key points, Actions"
-                      />
-                    </label>
-                  )}
-
-                  {selected.type === "human" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Review message</span>
-                        <textarea
-                          value={selected.data?.message || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { message: e.target.value } })}
-                          disabled={readOnly}
-                          rows={3}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      <label className="mt-4 flex items-center gap-2 text-sm text-neutral-600">
-                        <input
-                          type="checkbox"
-                          checked={!!selected.data?.require_approval}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { require_approval: e.target.checked } })}
-                          disabled={readOnly}
-                        />
-                        Require approval (pauses run)
-                      </label>
-                    </>
-                  )}
-
-                  {selected.type === "agent" && (
-                    <>
-                      <label className="mt-6 block">
-                        <span className="text-xs font-semibold text-neutral-600">Tools (comma-separated)</span>
-                        <input
-                          value={(selected.data?.tools || []).join(", ")}
-                          onChange={(e) =>
-                            onUpdateNode(selected.id, {
-                              data: { tools: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) },
-                            })
-                          }
-                          disabled={readOnly}
-                          className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          placeholder="summarize, calculator, kb_search"
-                        />
-                      </label>
-                      <label className="mt-4 block">
-                        <span className="text-xs font-semibold text-neutral-600">System prompt</span>
-                        <textarea
-                          value={selected.data?.prompt || ""}
-                          onChange={(e) => onUpdateNode(selected.id, { data: { prompt: e.target.value } })}
-                          disabled={readOnly}
-                          rows={3}
-                          className="mt-2 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                        />
-                      </label>
-                      {(selected.data?.tools || []).includes("kb_search") && (
-                        <label className="mt-4 block">
-                          <span className="text-xs font-semibold text-neutral-600">Knowledge base (kb_search)</span>
-                          <select
-                            value={selected.data?.knowledge_id ?? ""}
-                            onChange={(e) =>
-                              onUpdateNode(selected.id, {
-                                data: { knowledge_id: e.target.value ? Number(e.target.value) : null },
-                              })
-                            }
-                            disabled={readOnly}
-                            className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
-                          >
-                            <option value="">Select knowledge base</option>
-                            {knowledgeBases.map((kb) => (
-                              <option key={kb.id} value={kb.id}>
-                                {kb.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                    </>
-                  )}
-
-                  {selected.type === "subgraph" && (
-                    <label className="mt-6 block">
-                      <span className="text-xs font-semibold text-neutral-600">Workflow ID to run</span>
-                      <input
-                        value={selected.data?.workflow_id || ""}
-                        onChange={(e) => onUpdateNode(selected.id, { data: { workflow_id: e.target.value || null } })}
-                        disabled={readOnly}
-                        className="mt-2 w-full rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm font-mono"
-                        placeholder="Paste published workflow id"
-                      />
-                    </label>
-                  )}
-
                   {!readOnly && onConnect && otherNodes.length > 0 && (
                     <div className="mt-6 rounded-xl border border-black/[0.06] bg-white/50 p-3">
                       <p className="text-xs font-semibold text-neutral-600">Connections</p>

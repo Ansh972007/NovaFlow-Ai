@@ -199,6 +199,58 @@ def analyze_solution_gaps(
     return list(dict.fromkeys(missing))
 
 
+_NODE_NOTIFY_CAPS: dict[str, str] = {
+    "telegram": "cap_telegram",
+    "email": "cap_smtp",
+    "slack": "cap_slack",
+    "discord": "cap_discord",
+    "whatsapp": "cap_whatsapp",
+}
+
+_NODE_TYPE_CAPS: dict[str, list[str]] = {
+    "jira": ["cap_jira"],
+    "github": ["cap_github"],
+    "linear": ["cap_linear"],
+    "http": ["cap_http"],
+    "api_node": ["cap_http"],
+}
+
+
+def caps_from_graph(graph: dict[str, Any], base_caps: list[str] | None = None) -> list[str]:
+    caps = list(base_caps or [])
+    for node in graph.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        ntype = str(node.get("type") or "").lower()
+        data = node.get("data") or {}
+        if ntype == "notify":
+            ch = str(data.get("channel") or "telegram").lower()
+            cap = _NODE_NOTIFY_CAPS.get(ch)
+            if cap:
+                caps.append(cap)
+        else:
+            if ntype == "http":
+                auth = str(data.get("auth") or "").lower()
+                url = str(data.get("url") or "").lower()
+                if auth == "youtube" or "youtube.googleapis.com" in url:
+                    caps.append("cap_youtube")
+                else:
+                    caps.append("cap_http")
+            else:
+                caps.extend(_NODE_TYPE_CAPS.get(ntype, []))
+    return list(dict.fromkeys(caps))
+
+
+def analyze_graph_credential_gaps(
+    db: Session,
+    workspace_id: int,
+    graph: dict[str, Any],
+    required_capabilities: list[str],
+) -> list[str]:
+    merged_caps = caps_from_graph(graph if isinstance(graph, dict) else {}, required_capabilities)
+    return analyze_solution_gaps(db, workspace_id, merged_caps)
+
+
 def credential_slots_for_missing(missing_labels: list[str]) -> list[dict[str, str]]:
     """Friendly checklist rows for UI from missing label list."""
     from app.composer.chat_channels import friendly_missing_name

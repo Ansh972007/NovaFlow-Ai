@@ -26,8 +26,14 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
 ADMIN_USER = os.getenv("NOVAFLOW_ADMIN_USER", "admin")
-# No weak default — first boot requires a strong NOVAFLOW_ADMIN_PASSWORD when users table is empty.
-ADMIN_PASSWORD = os.getenv("NOVAFLOW_ADMIN_PASSWORD", "")
+_dev_default_admin_password = "NovaFlowLocalDevAdmin1"
+_raw_admin_password = (os.getenv("NOVAFLOW_ADMIN_PASSWORD") or "").strip()
+if _raw_admin_password:
+    ADMIN_PASSWORD = _raw_admin_password
+elif NOVAFLOW_ENV in ("production", "prod"):
+    ADMIN_PASSWORD = ""
+else:
+    ADMIN_PASSWORD = _dev_default_admin_password
 
 DEMO_SEED = os.getenv("NOVAFLOW_DEMO_SEED", "").lower() in {"1", "true", "yes"}
 ALLOW_PUBLIC_REGISTER = os.getenv("ALLOW_PUBLIC_REGISTER", "0").lower() in {"1", "true", "yes"}

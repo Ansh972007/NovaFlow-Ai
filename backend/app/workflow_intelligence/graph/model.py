@@ -6,26 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-KNOWN_NODE_TYPES = frozenset(
-    {
-        "trigger",
-        "retrieve",
-        "transform",
-        "condition",
-        "http",
-        "notify",
-        "jira",
-        "github",
-        "linear",
-        "llm",
-        "output",
-        "loop",
-        "parallel",
-        "human",
-        "agent",
-        "api_node",
-    }
-)
+from app.workflow_intelligence.node_registry import get_known_node_types
+
+KNOWN_NODE_TYPES = get_known_node_types()
 
 
 @dataclass

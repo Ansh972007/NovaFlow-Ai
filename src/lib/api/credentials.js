@@ -4,6 +4,10 @@ export function getCredentialsCatalog() {
   return client.get("/credentials/catalog");
 }
 
+export function getOAuthSetup() {
+  return client.get("/credentials/oauth-setup");
+}
+
 export function getCredentialsOverview() {
   return client.get("/credentials/overview");
 }

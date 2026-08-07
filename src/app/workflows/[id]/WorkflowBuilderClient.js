@@ -29,22 +29,48 @@ import {
   runWorkflowWs,
   setWorkflowStatus,
   updateWorkflow,
+  getWorkflowsPage,
+  validateWorkflowGraph,
 } from "@/lib/api/workflows";
 import {
   downloadWorkflowDiffJson,
   downloadWorkflowDiffMarkdown,
 } from "@/lib/workflow/diffExport";
 import CreateApiNodeModal from "@/components/workflow/CreateApiNodeModal";
+import OpenApiImportModal from "@/components/workflow/OpenApiImportModal";
+import { useWorkspaceAccess } from "@/lib/auth/workspaceAccess";
 import { listNodeLibrary } from "@/lib/api/nodes";
 
 const ease = [0.16, 1, 0.3, 1];
+const ease = [0.16, 1, 0.3, 1];
+
+function mergeNodeDataWithSchema(type, data, builtinSchemas) {
+  const schema = builtinSchemas.find((s) => s.type === type);
+  const defaults = schema?.defaults || ADD_NODE_DEFAULTS[type] || {};
+  return { ...defaults, ...(data || {}) };
+}
+
+function mergeGraphNodesWithSchemas(nodes, builtinSchemas) {
+  return (nodes || []).map((n) => ({
+    ...n,
+    data: mergeNodeDataWithSchema(n.type, n.data, builtinSchemas),
+  }));
+}
+
 const CURSOR_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];
 
 const ADD_NODE_DEFAULTS = {
   transform: { template: "{{input}}" },
   condition: { keyword: "", then_text: "{{input}}", else_text: "" },
-  http: { url: "", method: "GET", body: "", auth: "custom", credential_id: "" },
-  notify: { channel: "telegram", to: "{{chat_id}}", subject: "NovaFlow", message: "{{output}}", credential_id: "" },
+  http: { label: "HTTP request", url: "", method: "GET", body: "", headers: "", auth: "custom", credential_id: "", set_output: true },
+  notify: {
+    channel: "telegram",
+    to: "{{chat_id}}",
+    subject: "NovaFlow",
+    message: "{{output}}",
+    credential_id: "",
+    from: "",
+  },
   jira: {
     action: "create",
     project_key: "NF",
@@ -71,12 +97,15 @@ const ADD_NODE_DEFAULTS = {
     description: "{{input}}",
     set_output: true,
   },
-  retrieve: { knowledge_id: null, limit: 6 },
+  retrieve: { knowledge_id: null, query: "{{input}}", limit: 6 },
   llm: {
+    label: "LLM",
+    user_prompt: "{{input}}",
     prompt:
       "Answer clearly. Prefer structure: direct answer, then short supporting bullets. If context is missing, say what is unknown.",
+    temperature: 0.7,
   },
-  output: { label: "Output" },
+  output: { label: "Output", format: "text" },
   loop: {
     max: 5,
     prompt: "For this item, return one compact line: RESULT: <outcome> | WHY: <short reason>\nItem: {{item}}",
@@ -101,6 +130,8 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runningNodeId, setRunningNodeId] = useState(null);
+  const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [inspectorTab, setInspectorTab] = useState("configure");
@@ -133,7 +164,42 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [pendingReview, setPendingReview] = useState(null);
   const [recentRuns, setRecentRuns] = useState([]);
   const [customNodeDefs, setCustomNodeDefs] = useState([]);
+  const [builtinSchemas, setBuiltinSchemas] = useState([]);
+  const [dynamicComponents, setDynamicComponents] = useState([]);
+  const [workflowList, setWorkflowList] = useState([]);
   const [apiNodeModalOpen, setApiNodeModalOpen] = useState(false);
+  const [openApiModalOpen, setOpenApiModalOpen] = useState(false);
+  const { readOnly: workspaceReadOnly } = useWorkspaceAccess();
+
+  const schemasMergedRef = useRef(false);
+
+  useEffect(() => {
+    if (!builtinSchemas.length || schemasMergedRef.current) return;
+    schemasMergedRef.current = true;
+    setGraph((g) => {
+      const nodes = mergeGraphNodesWithSchemas(g.nodes, builtinSchemas);
+      const changed = nodes.some((n, i) => n.data !== g.nodes?.[i]?.data);
+      if (!changed) return g;
+      return { ...g, nodes };
+    });
+  }, [builtinSchemas]);
+
+  useEffect(() => {
+    if (!selectedId || workspaceReadOnly || !builtinSchemas.length) return;
+    setGraph((g) => {
+      const node = g.nodes?.find((n) => n.id === selectedId);
+      if (!node) return g;
+      const merged = mergeNodeDataWithSchema(node.type, node.data, builtinSchemas);
+      const needsMerge = Object.keys(merged).some(
+        (k) => node.data?.[k] === undefined && merged[k] !== undefined && merged[k] !== ""
+      );
+      if (!needsMerge) return g;
+      return {
+        ...g,
+        nodes: g.nodes.map((n) => (n.id === selectedId ? { ...n, data: merged } : n)),
+      };
+    });
+  }, [selectedId, builtinSchemas, workspaceReadOnly]);
 
   const selected = useMemo(
     () => graph.nodes?.find((n) => n.id === selectedId) || null,
@@ -164,6 +230,9 @@ export default function WorkflowBuilderClient({ workflowId }) {
       setGraph(info?.graph || { nodes: [], edges: [] });
       setRecentRuns(info?.recent_runs || []);
       if (info?.graph?.nodes?.[0]) setSelectedId(info.graph.nodes[0].id);
+      if (info?.graph?.nodes?.length && typeof window !== "undefined" && window.innerWidth < 1024) {
+        setMobileRailOpen(true);
+      }
     } catch (err) {
       const msg = err?.message || "Workflow not found";
       if (msg === "Workflow not found") {
@@ -193,8 +262,19 @@ export default function WorkflowBuilderClient({ workflowId }) {
     try {
       const lib = await listNodeLibrary({ include_drafts: false });
       setCustomNodeDefs(lib?.custom || []);
+      setBuiltinSchemas(lib?.builtin || []);
+      setDynamicComponents(lib?.dynamic || []);
     } catch {
       setCustomNodeDefs([]);
+      setBuiltinSchemas([]);
+      setDynamicComponents([]);
+    }
+
+    try {
+      const wfPage = await getWorkflowsPage({ limit: 100 });
+      setWorkflowList(wfPage?.data || wfPage?.items || []);
+    } catch {
+      setWorkflowList([]);
     } finally {
       setLoading(false);
     }
@@ -243,7 +323,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
   }, [user, status, loadSchedules]);
 
   useEffect(() => {
-    if (!user || user.role === "viewer") return undefined;
+    if (!user || workspaceReadOnly) return undefined;
     const syncPresence = () => {
       touchWorkflowPresence(workflowId, {
         cursor_x: cursorThrottleRef.currentX || 0,
@@ -297,7 +377,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
   }
 
   function addApiNode(def) {
-    if (user?.role === "viewer" || !def?.id) return;
+    if (workspaceReadOnly || !def?.id) return;
     nodeSeqRef.current += 1;
     const slug = def.slug || "api";
     const id = `api_${slug}_${nodeSeqRef.current}`;
@@ -331,17 +411,43 @@ export default function WorkflowBuilderClient({ workflowId }) {
     addApiNode(def);
   }
 
+  function addComponentNode(comp) {
+    if (workspaceReadOnly || !comp?.name) return;
+    nodeSeqRef.current += 1;
+    const id = `component_${comp.name}_${nodeSeqRef.current}`;
+    const maxX = Math.max(60, ...(graph.nodes || []).map((n) => n.x || 0));
+    const newNode = {
+      id,
+      type: "component_node",
+      x: maxX + 200,
+      y: 120 + ((graph.nodes?.length || 0) % 4) * 80,
+      data: {
+        ...(comp.defaults || {}),
+        component_name: comp.name,
+        set_output: true,
+      },
+    };
+    setGraph((prev) => ({
+      ...prev,
+      nodes: [...(prev.nodes || []), newNode],
+    }));
+    setSelectedId(id);
+    setInspectorTab("configure");
+    setSaved(false);
+  }
+
   function addNode(type) {
-    if (user?.role === "viewer") return;
+    if (workspaceReadOnly) return;
     nodeSeqRef.current += 1;
     const id = `${type}_${nodeSeqRef.current}_${graph.nodes?.length || 0}`;
     const maxX = Math.max(60, ...(graph.nodes || []).map((n) => n.x || 0));
+    const schemaDefaults = builtinSchemas.find((s) => s.type === type)?.defaults;
     const newNode = {
       id,
       type,
       x: maxX + 200,
       y: 120 + ((graph.nodes?.length || 0) % 4) * 80,
-      data: { ...(ADD_NODE_DEFAULTS[type] || {}) },
+      data: { ...(schemaDefaults || ADD_NODE_DEFAULTS[type] || {}) },
     };
     setGraph((prev) => ({
       ...prev,
@@ -371,7 +477,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
   }
 
   function deleteNode(nodeId) {
-    if (user?.role === "viewer") return;
+    if (workspaceReadOnly) return;
     const remaining = (graph.nodes || []).filter((n) => n.id !== nodeId);
     setGraph((prev) => ({
       ...prev,
@@ -515,12 +621,26 @@ export default function WorkflowBuilderClient({ workflowId }) {
   async function handleRun() {
     if (!runInput.trim() || readOnly) return;
     setRunning(true);
+    setRunningNodeId(null);
     setRunResult({ output: "", steps: [] });
     setError("");
     setInspectorTab("test");
     const steps = [];
     let streamOutput = "";
     try {
+      const validation = await validateWorkflowGraph({ workflow_id: workflowId, graph });
+      const issues = validation?.validation?.issues || [];
+      const errors = issues.filter((i) => i.severity === "error");
+      if (errors.length) {
+        setError(
+          `Fix validation errors before run: ${errors
+            .slice(0, 3)
+            .map((i) => i.message || i.code)
+            .join("; ")}`,
+        );
+        setRunning(false);
+        return;
+      }
       await updateWorkflow({
         id: workflowId,
         name: name.trim(),
@@ -534,6 +654,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
         },
         onStep: (data) => {
           if (data.phase === "done" && data.step) {
+            setRunningNodeId(null);
             const idx = steps.findIndex((s) => s.node_id === data.step.node_id);
             if (idx >= 0) steps[idx] = data.step;
             else steps.push(data.step);
@@ -542,6 +663,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
               steps: [...steps],
             });
           } else if (data.phase === "start" && data.step) {
+            setRunningNodeId(data.step.node_id);
             setRunResult((prev) => ({
               output: prev?.output || streamOutput,
               steps: [...steps, { ...data.step, status: "running" }],
@@ -571,6 +693,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
       setError(err.message || "Run failed");
     } finally {
       setRunning(false);
+      setRunningNodeId(null);
     }
   }
 
@@ -605,7 +728,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
     );
   }
 
-  const readOnly = user.role === "viewer";
+  const readOnly = workspaceReadOnly || user.role === "viewer";
 
   return (
     <div className="workflow-studio relative flex h-screen flex-col overflow-hidden">
@@ -659,6 +782,14 @@ export default function WorkflowBuilderClient({ workflowId }) {
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={() => setMobileRailOpen((v) => !v)}
+            className="workspace-btn-ghost !px-2.5 !py-1.5 text-xs lg:hidden"
+            aria-label="Toggle pipeline"
+          >
+            Pipeline
+          </button>
           {saved && (
             <motion.span
               initial={{ opacity: 0, scale: 0.9 }}
@@ -743,7 +874,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
       )}
 
       <div className="relative z-10 flex min-h-0 flex-1">
-        <aside className="workflow-studio-rail hidden w-[240px] shrink-0 flex-col border-r border-white/60 lg:flex">
+        <aside className={`workflow-studio-rail w-[240px] shrink-0 flex-col border-r border-white/60 ${mobileRailOpen ? "flex" : "hidden"} lg:flex`}>
           <div className="border-b border-black/[0.04] p-4">
             <p className="workspace-section-label">Pipeline</p>
               <p className="mt-1 text-xs text-neutral-500">
@@ -785,7 +916,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
                             style={{ animationDuration: "8s" }}
                           />
                         )}
-                        {running && (
+                        {running && runningNodeId === node.id && (
                           <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white animate-pulse" />
                         )}
                       </span>
@@ -821,17 +952,36 @@ export default function WorkflowBuilderClient({ workflowId }) {
             <div className="shrink-0 border-t border-black/[0.04] p-3">
               <p className="workspace-section-label mb-2">Add node</p>
               <div className="flex flex-wrap gap-1.5">
-                {["loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "notify", "jira", "github", "linear", "retrieve", "llm", "output"].map((type) => (
+                {(builtinSchemas.length > 0
+                  ? builtinSchemas.map((s) => s.type)
+                  : ["trigger", "loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "notify", "jira", "github", "linear", "retrieve", "llm", "output"]).map((type) => (
                   <button
                     key={type}
                     type="button"
                     onClick={() => addNode(type)}
                     className="rounded-lg bg-white/70 px-2.5 py-1.5 text-[10px] font-semibold capitalize text-neutral-600 ring-1 ring-black/[0.06] hover:bg-white"
                   >
-                    + {type}
+                    + {builtinSchemas.find((s) => s.type === type)?.label || type}
                   </button>
                 ))}
               </div>
+              {dynamicComponents.length > 0 && (
+                <div className="mt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">AI components</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {dynamicComponents.map((comp) => (
+                      <button
+                        key={comp.name}
+                        type="button"
+                        onClick={() => addComponentNode(comp)}
+                        className="rounded-lg bg-sky-50 px-2.5 py-1.5 text-[10px] font-semibold text-sky-800 ring-1 ring-sky-200 hover:bg-sky-100"
+                      >
+                        + {comp.label || comp.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {customNodeDefs.length > 0 && (
                 <div className="mt-3">
                   <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">My API nodes</p>
@@ -855,6 +1005,13 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 className="mt-3 w-full rounded-lg border border-dashed border-violet-300 bg-violet-50/50 px-2 py-2 text-[10px] font-semibold text-violet-700 hover:bg-violet-50"
               >
                 + Create API node
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpenApiModalOpen(true)}
+                className="mt-2 w-full rounded-lg border border-dashed border-sky-300 bg-sky-50/50 px-2 py-2 text-[10px] font-semibold text-sky-700 hover:bg-sky-50"
+              >
+                Import OpenAPI spec
               </button>
             </div>
           )}
@@ -881,25 +1038,50 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 overlay={versionDiff.overlay}
               />
             ) : (
-              <WorkflowCanvas
-                key={workflowId}
-                graph={graph}
-                onChange={
-                  readOnly
-                    ? undefined
-                    : (g) => {
-                        setGraph(g);
-                        setSaved(false);
-                      }
-                }
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                flowing={running}
-                readOnly={readOnly}
-                diffOverlay={diffOverlayActive && versionDiff?.overlay ? versionDiff.overlay : null}
-                remoteCursors={presenceViewers}
-                onCursorMove={readOnly ? undefined : handleCursorMove}
-              />
+              <div className="relative h-full">
+                <WorkflowCanvas
+                  key={workflowId}
+                  graph={graph}
+                  onChange={
+                    readOnly
+                      ? undefined
+                      : (g) => {
+                          setGraph(g);
+                          setSaved(false);
+                        }
+                  }
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  flowing={running}
+                  readOnly={readOnly}
+                  diffOverlay={diffOverlayActive && versionDiff?.overlay ? versionDiff.overlay : null}
+                  remoteCursors={presenceViewers}
+                  onCursorMove={readOnly ? undefined : handleCursorMove}
+                />
+                {selected && !readOnly ? (
+                  <div
+                    className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 gap-2 rounded-full bg-white/95 px-3 py-2 shadow-lg ring-1 ring-black/10"
+                    role="toolbar"
+                    aria-label="Node actions"
+                  >
+                    <button
+                      type="button"
+                      className="pointer-events-auto rounded-full bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white"
+                      onClick={handleRun}
+                      disabled={running}
+                    >
+                      Run workflow
+                    </button>
+                    <button
+                      type="button"
+                      className="pointer-events-auto rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 ring-1 ring-red-200"
+                      onClick={() => deleteNode(selected.id)}
+                    >
+                      Delete node
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             )}
           </motion.div>
         </main>
@@ -958,12 +1140,24 @@ export default function WorkflowBuilderClient({ workflowId }) {
           workflowId={workflowId}
           hasNotifyNode={hasNotifyNode}
           customNodeDefs={customNodeDefs}
+          builtinSchemas={builtinSchemas}
+          dynamicComponents={dynamicComponents}
+          workflowList={workflowList}
         />
       </div>
       <CreateApiNodeModal
         open={apiNodeModalOpen}
         onClose={() => setApiNodeModalOpen(false)}
         onSaved={handleApiNodeSaved}
+      />
+      <OpenApiImportModal
+        open={openApiModalOpen}
+        onClose={() => setOpenApiModalOpen(false)}
+        onImported={() => {
+          listNodeLibrary().then((lib) => {
+            setCustomNodeDefs(lib?.custom || []);
+          });
+        }}
       />
     </div>
   );

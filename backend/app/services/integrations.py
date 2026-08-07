@@ -59,6 +59,7 @@ async def send_email_notification(
     workspace_id: int | None = None,
     smtp_override: dict | None = None,
     credential_id: str | None = None,
+    from_addr_override: str | None = None,
 ) -> dict:
     if db and workspace_id and not smtp_override and not credential_id:
         from app.database import WorkspaceIntegration
@@ -66,7 +67,14 @@ async def send_email_notification(
 
         row = db.get(WorkspaceIntegration, workspace_id)
         if row and (row.gmail_auth_mode or "").lower() == "oauth" and row.gmail_oauth_refresh_token_enc:
-            return await send_gmail_api_message(db, workspace_id, to_addr, subject, body)
+            return await send_gmail_api_message(
+                db,
+                workspace_id,
+                to_addr,
+                subject,
+                body,
+                from_addr=from_addr_override,
+            )
 
     smtp = smtp_override or (
         resolve_smtp_config(db, workspace_id, credential_id=credential_id) if db else {}
@@ -87,6 +95,10 @@ async def send_email_notification(
                 "password": smtp.get("password") or platform.get("password"),
                 "from_addr": smtp.get("from_addr") or platform.get("from_addr"),
             }
+
+    if from_addr_override and smtp:
+        smtp = dict(smtp)
+        smtp["from_addr"] = from_addr_override.strip()
 
     return await asyncio.to_thread(_send_email_sync, smtp, to_addr, subject, body)
 
@@ -248,11 +260,18 @@ async def send_notification(
     db: Session | None = None,
     workspace_id: int | None = None,
     credential_id: str | None = None,
+    from_addr: str | None = None,
 ) -> dict:
     ch = (channel or "telegram").strip().lower()
     if ch == "email":
         return await send_email_notification(
-            to_addr, subject, body, db=db, workspace_id=workspace_id, credential_id=credential_id
+            to_addr,
+            subject,
+            body,
+            db=db,
+            workspace_id=workspace_id,
+            credential_id=credential_id,
+            from_addr_override=from_addr,
         )
     if ch == "webhook":
         return await send_webhook_notification(to_addr, subject, body)

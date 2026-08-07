@@ -6,12 +6,15 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { WorkspaceStatCard, WorkspaceSkeletonGrid } from "@/components/workspace/WorkspaceTabs";
 import { KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
+import { useWorkspaceAccess } from "@/lib/auth/workspaceAccess";
 import {
   createKnowledge,
   getEmbeddingModels,
+  KB_STATUS_LABELS,
   listKnowledge,
 } from "@/lib/api/knowledge";
 
@@ -19,6 +22,7 @@ const ease = [0.16, 1, 0.3, 1];
 
 export default function KnowledgeListClient() {
   const router = useRouter();
+  const { readOnly: workspaceReadOnly } = useWorkspaceAccess();
   const [user, setUser] = useState(null);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -30,20 +34,25 @@ export default function KnowledgeListClient() {
   const [models, setModels] = useState([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [searchName, setSearchName] = useState("");
+  const [classification, setClassification] = useState("internal");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (nameFilter = searchName) => {
     setLoading(true);
+    setLoadError("");
     try {
-      const res = await listKnowledge({ pageSize: 50 });
+      const res = await listKnowledge({ pageSize: 50, name: nameFilter.trim() });
       setItems(res?.data || []);
       setTotal(res?.total || 0);
-    } catch {
+    } catch (err) {
       setItems([]);
       setTotal(0);
+      setLoadError(err.message || "Failed to load knowledge libraries");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [searchName]);
 
   useEffect(() => {
     getUserInfo()
@@ -74,6 +83,7 @@ export default function KnowledgeListClient() {
         description: description.trim(),
         model: model || undefined,
         type: 0,
+        classification,
       });
       setShowCreate(false);
       setName("");
@@ -100,17 +110,42 @@ export default function KnowledgeListClient() {
             description="Upload PDFs and docs to ground your AI assistants with accurate, retrieval-powered answers."
             badge={<span className="workspace-badge-live">RAG ready</span>}
             actions={
-              <button type="button" onClick={() => setShowCreate(true)} className="btn-primary shrink-0">
-                + New library
-              </button>
+              !workspaceReadOnly ? (
+                <button type="button" onClick={() => setShowCreate(true)} className="btn-primary shrink-0">
+                  + New library
+                </button>
+              ) : null
             }
           >
             <div className="grid gap-3 sm:grid-cols-3">
               <WorkspaceStatCard label="Libraries" value={loading ? "…" : String(total)} hint="Document collections" />
-              <WorkspaceStatCard label="Published" value={loading ? "…" : String(items.filter((k) => k.state === 1).length)} hint="Ready for RAG" />
+              <WorkspaceStatCard
+                label="Ready"
+                value={loading ? "…" : String(items.filter((k) => k.status === "ready").length)}
+                hint="Indexed for retrieval"
+              />
               <WorkspaceStatCard label="Status" value={loading ? "…" : total ? "Active" : "Empty"} hint="Upload docs to get started" />
             </div>
           </WorkspaceHero>
+
+          {loadError && (
+            <WorkspaceAlert type="error" className="mt-6">
+              {loadError}
+            </WorkspaceAlert>
+          )}
+
+          {!loading && total > 0 && (
+            <div className="mt-8">
+              <input
+                type="search"
+                value={searchName}
+                onChange={(e) => setSearchName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && load(searchName)}
+                placeholder="Search libraries by name…"
+                className="input-field w-full max-w-md"
+              />
+            </div>
+          )}
 
           <motion.section
             initial={{ opacity: 0, y: 16 }}
@@ -135,13 +170,17 @@ export default function KnowledgeListClient() {
                 <p className="mx-auto mt-2 max-w-sm text-sm text-neutral-500">
                   Create a library, upload documents, and connect it to your assistants for RAG chat.
                 </p>
-                <button type="button" onClick={() => setShowCreate(true)} className="btn-primary mt-8">
-                  Create your first library
-                </button>
+                {!workspaceReadOnly && (
+                  <button type="button" onClick={() => setShowCreate(true)} className="btn-primary mt-8">
+                    Create your first library
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {items.map((kb, i) => (
+                {items.map((kb, i) => {
+                  const statusMeta = KB_STATUS_LABELS[kb.status] || KB_STATUS_LABELS.empty;
+                  return (
                   <motion.div
                     key={kb.id}
                     initial={{ opacity: 0, y: 14 }}
@@ -153,15 +192,18 @@ export default function KnowledgeListClient() {
                         <div className="workspace-icon-tile h-11 w-11 transition-transform duration-300 group-hover:scale-105">
                           <KnowledgeIcon className="h-5 w-5" />
                         </div>
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${
-                            kb.state === 1
-                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60"
-                              : "bg-neutral-100 text-neutral-500 ring-1 ring-neutral-200/60"
-                          }`}
-                        >
-                          {kb.state === 1 ? "Published" : "Draft"}
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${statusMeta.color}`}
+                          >
+                            {statusMeta.label}
+                          </span>
+                          {kb.classification && kb.classification !== "internal" && (
+                            <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200/60">
+                              {kb.classification}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <h2 className="mt-5 text-lg font-semibold tracking-tight group-hover:text-neutral-900">
                         {kb.name}
@@ -171,7 +213,7 @@ export default function KnowledgeListClient() {
                       </p>
                       <p className="mt-5 flex items-center justify-between text-[11px] text-neutral-400">
                         <span>
-                          Updated {kb.update_time ? new Date(kb.update_time).toLocaleDateString() : "—"}
+                          {kb.ready_count || 0} ready · {kb.file_count || 0} docs
                         </span>
                         <span className="font-semibold text-neutral-700 opacity-0 transition-opacity group-hover:opacity-100">
                           Open →
@@ -179,7 +221,8 @@ export default function KnowledgeListClient() {
                       </p>
                     </Link>
                   </motion.div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </motion.section>
@@ -224,6 +267,19 @@ export default function KnowledgeListClient() {
                   rows={2}
                   placeholder="Optional"
                 />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium">Classification</label>
+                <select
+                  value={classification}
+                  onChange={(e) => setClassification(e.target.value)}
+                  className="input-field w-full"
+                >
+                  <option value="public">Public</option>
+                  <option value="internal">Internal</option>
+                  <option value="confidential">Confidential</option>
+                  <option value="restricted">Restricted</option>
+                </select>
               </div>
               {models.length > 0 && (
                 <div>

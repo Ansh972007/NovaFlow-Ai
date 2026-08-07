@@ -194,7 +194,11 @@ export default function ChatMessages({
                 ? "Sandbox test report"
                 : t === "aios_node_factory"
                   ? "API node factory"
-                  : t === "aios_sandbox"
+                  : t === "aios_openapi_import"
+                    ? "OpenAPI import"
+                    : t === "aios_navigate"
+                      ? "Navigate"
+                      : t === "aios_sandbox"
                   ? "Enterprise test suite"
                   : t === "aios_deploy"
                   ? "Deployed"
@@ -238,7 +242,9 @@ export default function ChatMessages({
                                                         ? "Share"
                                                         : t === "aios_meta"
                                                           ? "Conversation meta"
-                                                          : t === "aios_audit"
+                                                          : t === "aios_requirements_brief"
+                                                            ? "Requirements brief"
+                                                            : t === "aios_audit"
                                                             ? "Audit trail"
                                                             : t === "aios_vault"
                                                               ? "Credential vault"
@@ -385,10 +391,75 @@ export default function ChatMessages({
                 {data.suggested.method || "GET"} {data.suggested.url}
               </p>
             )}
+            {data.probe_result && (
+              <p className="text-[10px] text-violet-800">
+                Probe: {data.probe_result.ok ? "OK" : "failed"}
+                {data.probe_result.status_code != null ? ` (HTTP ${data.probe_result.status_code})` : ""}
+              </p>
+            )}
+            {data.test_result && (
+              <p className="text-[10px] text-violet-800">
+                Test: {data.test_result.ok ? "passed" : "failed"}
+                {data.test_result.error ? ` — ${data.test_result.error}` : ""}
+              </p>
+            )}
+            {data.node_def?.display_name && (
+              <p className="text-[10px] font-semibold text-violet-900">
+                Node: {data.node_def.display_name}
+                {data.node_def.status ? ` (${data.node_def.status})` : ""}
+              </p>
+            )}
             <div className="flex flex-wrap gap-1.5">
-              <a href="/workflows" className={actionBtn}>
+              {(data.chips || ["Probe API", "Save node", "Test node", "Publish node", "Use in workflow"]).map(
+                (chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    className={
+                      String(chip).toLowerCase().includes("publish") || String(chip).toLowerCase().includes("use in")
+                        ? primaryBtn
+                        : actionBtn
+                    }
+                    onClick={() => onSuggest?.(chip)}
+                  >
+                    {chip}
+                  </button>
+                )
+              )}
+              <a
+                href={data.workflow_id ? `/workflows/${data.workflow_id}` : "/workflows"}
+                className={actionBtn}
+              >
                 Open workflow builder
               </a>
+            </div>
+          </div>
+        )}
+        {t === "aios_openapi_import" && (
+          <div className="mt-1 space-y-1.5 rounded-xl border border-sky-200 bg-sky-50/80 p-3 text-xs text-sky-900">
+            <p className="font-semibold">{data.title || "OpenAPI import"}</p>
+            <p>{data.message}</p>
+            {(data.created || []).length > 0 && (
+              <ul className="max-h-28 list-none space-y-0.5 overflow-y-auto text-[10px]">
+                {data.created.map((row) => (
+                  <li key={row.id}>{row.display_name || row.slug}</li>
+                ))}
+              </ul>
+            )}
+            <ForgeChips chips={data.chips} actionBtn={actionBtn} primaryBtn={primaryBtn} onSuggest={onSuggest} />
+          </div>
+        )}
+        {t === "aios_navigate" && (
+          <div className="mt-1 space-y-1.5 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-800">
+            <p className="font-semibold">{data.title || "Open in NovaFlow"}</p>
+            <p>{data.message}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {data.href && (
+                <a href={data.href} className={primaryBtn}>
+                  Open {data.title || "page"}
+                </a>
+              )}
+              <ForgeChips chips={data.chips} actionBtn={actionBtn} onSuggest={onSuggest} />
             </div>
           </div>
         )}
@@ -490,8 +561,42 @@ export default function ChatMessages({
                 <li key={i}>{s}</li>
               ))}
             </ul>
+            {(data.can_build || []).length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-indigo-900">Can build</p>
+                <ul className="list-disc pl-4 text-[10px] text-neutral-600">
+                  {data.can_build.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {(data.needs_credentials || []).length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-amber-900">Needs credentials</p>
+                <ul className="list-disc pl-4 text-[10px] text-neutral-600">
+                  {data.needs_credentials.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {(data.workflow_types || []).length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {data.workflow_types.map((wt) => (
+                  <button
+                    key={wt.id || wt.label}
+                    type="button"
+                    className={actionBtn}
+                    onClick={() => onSuggest?.(wt.chip || wt.label)}
+                  >
+                    {wt.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {(data.cannot || []).length > 0 && (
-              <p className="text-[10px] text-amber-800">Boundary: {(data.cannot || []).join(" ")}</p>
+              <p className="text-[10px] text-amber-800">Cannot: {(data.cannot || []).join(" · ")}</p>
             )}
             <div className="flex flex-wrap gap-1.5 pt-1">
               {(data.chips || []).map((chip) => (
@@ -546,6 +651,16 @@ export default function ChatMessages({
           <div className="mt-1 rounded-lg border border-red-200 bg-red-50 p-2 text-[11px] text-red-900">
             <p className="font-semibold">Action failed</p>
             <p>{data.message || data.detail || "Unknown error"}</p>
+            {data.detail && data.message && data.detail !== data.message && (
+              <p className="mt-1 text-[10px] whitespace-pre-wrap">{data.detail}</p>
+            )}
+            {Array.isArray(data.blockers) && data.blockers.length > 0 && (
+              <ul className="mt-1 max-h-24 list-disc space-y-0.5 overflow-y-auto pl-4 text-[10px]">
+                {data.blockers.slice(0, 6).map((b, i) => (
+                  <li key={i}>{b.message || b.code || JSON.stringify(b)}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         {t === "aios_run_status" && (
@@ -555,6 +670,18 @@ export default function ChatMessages({
               {data.workflow_name ? ` · ${data.workflow_name}` : ""}
             </p>
             {data.message && <p className="text-neutral-600">{data.message}</p>}
+            {data.parallel && Array.isArray(data.results) && (
+              <ul className="max-h-32 list-none space-y-1 overflow-y-auto text-[10px] text-neutral-600">
+                {data.results.map((r, i) => (
+                  <li key={i}>
+                    <span className="font-semibold">{r.workflow_name || r.workflow_id}</span>
+                    {" — "}
+                    {r.status}
+                    {r.output ? `: ${String(r.output).slice(0, 120)}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
             {data.output && (
               <p className="max-h-24 overflow-y-auto whitespace-pre-wrap text-[10px] text-neutral-600">
                 {String(data.output).slice(0, 400)}
@@ -766,6 +893,19 @@ export default function ChatMessages({
         {t === "aios_meta" && (
           <div className="mt-1 space-y-1.5">
             <p>{data.message || data.title || "Updated."}</p>
+            {data.planning_label && (
+              <p className="text-[10px] text-neutral-600">
+                Planning model: {data.planning_label}
+                {data.planning_source ? ` (${data.planning_source})` : ""}
+              </p>
+            )}
+            {(data.providers || []).length > 0 && (
+              <ul className="max-h-28 list-disc space-y-0.5 overflow-y-auto pl-4 text-[10px] text-neutral-600">
+                {data.providers.slice(0, 8).map((p) => (
+                  <li key={p.id || p.label}>{p.label || p.id}</li>
+                ))}
+              </ul>
+            )}
             {data.summary && (
               <p className="max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] text-neutral-600">
                 {data.summary}
@@ -780,6 +920,40 @@ export default function ChatMessages({
                 ))}
               </div>
             )}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {(data.chips || []).map((chip) => (
+                <button key={chip} type="button" className={actionBtn} onClick={() => onSuggest?.(chip)}>
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {t === "aios_requirements_brief" && (
+          <div className="mt-1 space-y-1.5">
+            <p>{data.message || "Review requirements before building."}</p>
+            {data.planning_label && (
+              <p className="text-[10px] text-neutral-600">
+                LLM: {data.planning_label}
+                {data.planning_source ? ` (${data.planning_source})` : ""}
+              </p>
+            )}
+            {(data.fields || []).length > 0 && (
+              <ul className="text-[10px] text-neutral-600 space-y-0.5">
+                {data.fields.map((row, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{row.label}:</span> {row.value}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {(data.chips || ["Yes build this"]).map((chip) => (
+                <button key={chip} type="button" className={primaryBtn} onClick={() => onSuggest?.(chip)}>
+                  {chip}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {t === "aios_audit" && (
@@ -943,26 +1117,24 @@ export default function ChatMessages({
           </div>
         )}
         {t === "aios_policy" && (
-          <div className="mt-1 space-y-1.5">
-            <p className={data.status === "denied" ? "text-amber-900" : ""}>
-              {data.message || data.title || "Policy"}
-            </p>
-            {(data.policies || []).length > 0 && (
-              <ul className="max-h-28 list-disc space-y-0.5 overflow-y-auto pl-4 text-[10px] text-neutral-600">
-                {data.policies.map((p, i) => (
-                  <li key={i}>
-                    {p.rule_key} ({p.severity})
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="mt-1 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px]">
+            <p className="font-semibold text-amber-900">Policy blocked</p>
+            <p>{data.message || "This action is blocked by workspace policy."}</p>
+            {data.remediation && <p className="text-amber-800">{data.remediation}</p>}
             <div className="flex flex-wrap gap-1.5 pt-1">
-              {(data.chips || []).map((chip) => (
+              {(data.chips || ["Workspace health", "Compliance report"]).map((chip) => (
                 <button key={chip} type="button" className={actionBtn} onClick={() => onSuggest?.(chip)}>
                   {chip}
                 </button>
               ))}
             </div>
+          </div>
+        )}
+        {t === "aios_run_step" && (
+          <div className="mt-1 rounded border border-neutral-200 bg-white px-2 py-1 text-[10px] text-neutral-700">
+            <span className="font-medium">{data.phase || "step"}</span>
+            {data.step?.node_id && ` · ${data.step.node_id}`}
+            {data.step?.status && ` — ${data.step.status}`}
           </div>
         )}
         {t === "aios_powerhouse" && (
@@ -1795,6 +1967,13 @@ export default function ChatMessages({
                   Open docs
                 </a>
               )}
+            </div>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {(data.chips || ["Run now", "Schedule", "Run test"]).map((chip) => (
+                <button key={chip} type="button" className={primaryBtn} onClick={() => onSuggest?.(chip)}>
+                  {chip}
+                </button>
+              ))}
             </div>
           </div>
         )}

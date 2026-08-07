@@ -9,25 +9,63 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.config import EMBEDDING_MODELS
+from app.config import EMBEDDING_MODELS, UPLOAD_DIR
 from app.database import KnowledgeBase, KnowledgeFile, get_db
 from app.deps import get_workspace_ctx, require_workspace_editor
 from app.schemas import KnowledgeCreate, KnowledgeUrlIngest, ProcessFiles, fail, ok
-from app.services.knowledge import kb_upload_dir, process_file_record, search_chunks, search_chunks_semantic
+from app.services.knowledge import (
+    _embedding_ready,
+    _llm_answer_enabled,
+    _parse_file_meta,
+    build_citations,
+    build_extractive_digest,
+    delete_knowledge_file,
+    kb_file_stats,
+    kb_status_from_stats,
+    kb_upload_dir,
+    mask_sensitive_text,
+    process_file_record,
+    retrieve_knowledge,
+    search_chunks,
+    search_chunks_semantic,
+    should_mask_kb_content,
+)
 from app.services.doc_parse import is_supported_suffix, UNSUPPORTED_OFFICE
 
 router = APIRouter(tags=["Knowledge"])
 
+_VALID_CLASSIFICATIONS = {"public", "internal", "confidential", "restricted", "secret"}
 
-def kb_dict(kb: KnowledgeBase) -> dict:
+
+def kb_dict(kb: KnowledgeBase, stats: dict | None = None) -> dict:
+    status_label, state = kb_status_from_stats(stats)
+    classification = (getattr(kb, "classification", None) or "internal").lower()
     return {
         "id": kb.id,
         "name": kb.name,
         "description": kb.description or "",
         "model": kb.model,
         "type": kb.type,
+        "classification": classification,
         "create_time": kb.create_time.isoformat() if kb.create_time else None,
         "update_time": kb.update_time.isoformat() if kb.update_time else None,
+        "file_count": int((stats or {}).get("total") or 0),
+        "ready_count": int((stats or {}).get("ready") or 0),
+        "status": status_label,
+        "state": state,
+    }
+
+
+def file_dict(f: KnowledgeFile) -> dict:
+    meta = _parse_file_meta(f)
+    return {
+        "id": f.id,
+        "file_name": f.file_name,
+        "file_path": f.file_path,
+        "status": f.status,
+        "error_message": getattr(f, "error_message", "") or "",
+        "pii_count": int(meta.get("pii_count") or 0),
+        "update_time": f.update_time.isoformat() if f.update_time else None,
     }
 
 
@@ -44,7 +82,8 @@ def list_knowledge(
         q = q.filter(KnowledgeBase.name.contains(name))
     total = q.count()
     rows = q.order_by(KnowledgeBase.update_time.desc()).offset((page_num - 1) * page_size).limit(page_size).all()
-    return ok({"data": [kb_dict(k) for k in rows], "total": total})
+    stats_map = kb_file_stats(db, [k.id for k in rows])
+    return ok({"data": [kb_dict(k, stats_map.get(k.id)) for k in rows], "total": total})
 
 
 @router.get("/knowledge/embedding_param")
@@ -54,11 +93,15 @@ def embedding_param():
 
 @router.post("/knowledge/create")
 def create_knowledge(body: KnowledgeCreate, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+    classification = (body.classification or "internal").strip().lower()
+    if classification not in _VALID_CLASSIFICATIONS:
+        classification = "internal"
     kb = KnowledgeBase(
         name=body.name.strip(),
         description=body.description or "",
         model=body.model or EMBEDDING_MODELS[0],
         type=body.type,
+        classification=classification,
     )
     ctx.attach(kb)
     db.add(kb)
@@ -80,26 +123,15 @@ def file_list(
     kb = ctx.fetch(KnowledgeBase, knowledge_id)
     if not kb:
         return fail(404, "Knowledge base not found")
+    base_q = db.query(KnowledgeFile).filter(KnowledgeFile.knowledge_id == knowledge_id)
+    total = base_q.count()
     rows = (
-        db.query(KnowledgeFile)
-        .filter(KnowledgeFile.knowledge_id == knowledge_id)
-        .order_by(KnowledgeFile.update_time.desc())
+        base_q.order_by(KnowledgeFile.update_time.desc())
         .offset((page_num - 1) * page_size)
         .limit(page_size)
         .all()
     )
-    data = [
-        {
-            "id": f.id,
-            "file_name": f.file_name,
-            "file_path": f.file_path,
-            "status": f.status,
-            "error_message": getattr(f, "error_message", "") or "",
-            "update_time": f.update_time.isoformat() if f.update_time else None,
-        }
-        for f in rows
-    ]
-    return ok({"data": data, "writeable": ctx.role != "viewer", "total": len(data)})
+    return ok({"data": [file_dict(f) for f in rows], "writeable": ctx.role != "viewer", "total": total})
 
 
 @router.post("/knowledge/upload/{knowledge_id}")
@@ -144,7 +176,35 @@ async def upload_file(
     db.add(record)
     db.commit()
     db.refresh(record)
+    ctx.audit(
+        "knowledge.file.uploaded",
+        resource_type="knowledge_file",
+        resource_id=str(record.id),
+        detail={"knowledge_id": knowledge_id, "file_name": meta["safe_name"]},
+    )
     return ok({"file_path": rel, "file_name": meta["safe_name"], "id": record.id})
+
+
+@router.delete("/knowledge/file/{file_id}")
+def delete_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    record = db.get(KnowledgeFile, file_id)
+    if not record:
+        return fail(404, "File not found")
+    kb = ctx.fetch(KnowledgeBase, record.knowledge_id)
+    if not kb:
+        return fail(404, "File not found")
+    delete_knowledge_file(db, record)
+    ctx.audit(
+        "knowledge.file.deleted",
+        resource_type="knowledge_file",
+        resource_id=str(file_id),
+        detail={"knowledge_id": kb.id, "file_name": record.file_name},
+    )
+    return ok({"deleted": True, "id": file_id})
 
 
 @router.post("/knowledge/process")
@@ -152,7 +212,7 @@ def process_files(body: ProcessFiles, background_tasks: BackgroundTasks, db: Ses
     kb = ctx.fetch(KnowledgeBase, body.knowledge_id)
     if not kb:
         return fail(404, "Knowledge base not found")
-        
+
     record_ids = []
     for item in body.file_list:
         fp = item.get("file_path")
@@ -163,11 +223,12 @@ def process_files(body: ProcessFiles, background_tasks: BackgroundTasks, db: Ses
         )
         if record:
             record_ids.append(record.id)
-            
+
     if record_ids:
         from app.services.knowledge import process_file_records_bg
+
         background_tasks.add_task(process_file_records_bg, record_ids, body.chunk_size, body.chunk_overlap)
-        
+
     return ok(None)
 
 
@@ -201,10 +262,56 @@ def semantic_search(
         return fail(404, "Knowledge base not found")
     query = (q or "").strip()
     if not query:
-        return ok({"data": [], "total": 0, "method": "none"})
+        return ok(
+            {
+                "data": [],
+                "total": 0,
+                "method": "none",
+                "embedding_available": _embedding_ready(db),
+                "llm_answer_available": _llm_answer_enabled(db),
+            }
+        )
     hits = search_chunks_semantic(db, knowledge_id, query, limit)
     method = hits[0].get("method") if hits else "none"
-    return ok({"data": hits, "total": len(hits), "method": method})
+    mask = should_mask_kb_content(kb)
+    if mask:
+        for hit in hits:
+            hit["text"] = mask_sensitive_text(hit.get("text") or "")
+    return ok(
+        {
+            "data": hits,
+            "total": len(hits),
+            "method": method,
+            "embedding_available": _embedding_ready(db),
+            "llm_answer_available": _llm_answer_enabled(db),
+        }
+    )
+
+
+@router.post("/knowledge/retrieve")
+def knowledge_retrieve(
+    body: dict,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    knowledge_id = body.get("knowledge_id") or body.get("id")
+    query = (body.get("q") or body.get("question") or body.get("query") or "").strip()
+    limit = min(max(int(body.get("limit") or 5), 1), 10)
+    if not knowledge_id:
+        return fail(400, "knowledge_id required")
+    if not query:
+        return fail(400, "question required")
+
+    kb = ctx.fetch(KnowledgeBase, int(knowledge_id))
+    if not kb:
+        return fail(404, "Knowledge base not found")
+
+    result = retrieve_knowledge(db, int(knowledge_id), query, limit)
+    if not result["data"]:
+        result["extractive_digest"] = (
+            "No matching passages found in this library. Try different keywords or upload more documents."
+        )
+    return ok(result)
 
 
 @router.post("/knowledge/answer")
@@ -231,6 +338,11 @@ async def knowledge_answer(
 
     hits = search_chunks_semantic(db, int(knowledge_id), query, limit)
     method = hits[0].get("method") if hits else "none"
+    mask = should_mask_kb_content(kb)
+    if mask:
+        for hit in hits:
+            hit["text"] = mask_sensitive_text(hit.get("text") or "")
+
     if not hits:
         return ok(
             {
@@ -239,20 +351,28 @@ async def knowledge_answer(
                 "total": 0,
                 "method": method,
                 "citations": [],
+                "embedding_available": _embedding_ready(db),
+                "llm_answer_available": _llm_answer_enabled(db),
+                "extractive": True,
             }
         )
 
-    citations = []
-    for i, hit in enumerate(hits, 1):
-        src = hit.get("file_name") or "document"
-        text = (hit.get("text") or "").strip()[:1000]
-        citations.append(
+    citations = build_citations(hits, mask=mask)
+    digest = build_extractive_digest(hits, query)
+    if mask:
+        digest = mask_sensitive_text(digest)
+
+    if not _llm_answer_enabled(db):
+        return ok(
             {
-                "n": i,
-                "file_name": src,
-                "score": hit.get("score"),
-                "method": hit.get("method"),
-                "preview": text[:240] + ("…" if len(text) > 240 else ""),
+                "answer": digest,
+                "data": hits,
+                "total": len(hits),
+                "method": method,
+                "citations": citations,
+                "embedding_available": _embedding_ready(db),
+                "llm_answer_available": False,
+                "extractive": True,
             }
         )
 
@@ -271,8 +391,19 @@ async def knowledge_answer(
             limit=limit,
         )
         answer = result.content
-    except Exception as exc:
-        return fail(500, f"Answer generation failed: {exc}")
+    except Exception:
+        return ok(
+            {
+                "answer": digest,
+                "data": hits,
+                "total": len(hits),
+                "method": method,
+                "citations": citations,
+                "embedding_available": _embedding_ready(db),
+                "llm_answer_available": False,
+                "extractive": True,
+            }
+        )
 
     return ok(
         {
@@ -282,6 +413,9 @@ async def knowledge_answer(
             "method": method,
             "citations": citations,
             "metrics": result.metrics.to_dict(),
+            "embedding_available": _embedding_ready(db),
+            "llm_answer_available": True,
+            "extractive": False,
         }
     )
 
@@ -297,8 +431,9 @@ def retry_file(body: dict, background_tasks: BackgroundTasks, db: Session = Depe
     kb = ctx.fetch(KnowledgeBase, record.knowledge_id)
     if not kb:
         return fail(404, "File not found")
-        
+
     from app.services.knowledge import process_file_records_bg
+
     background_tasks.add_task(
         process_file_records_bg,
         [record.id],
@@ -379,8 +514,22 @@ async def ingest_url(
     db.commit()
     db.refresh(record)
     from app.services.knowledge import process_file_records_bg
+
     background_tasks.add_task(process_file_records_bg, [record.id], body.chunk_size, body.chunk_overlap)
     return ok({"id": record.id, "file_name": safe_name, "file_path": rel, "url": url})
+
+
+@router.get("/knowledge/{knowledge_id}")
+def get_knowledge(
+    knowledge_id: int,
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
+        return fail(404, "Knowledge base not found")
+    stats_map = kb_file_stats(db, [kb.id])
+    return ok(kb_dict(kb, stats_map.get(kb.id)))
 
 
 class ChunkInitBody(BaseModel):
@@ -400,10 +549,10 @@ def init_chunked_upload(
     kb = ctx.fetch(KnowledgeBase, knowledge_id)
     if not kb:
         return fail(404, "Knowledge base not found")
-        
+
     from app.security.files import validate_upload_metadata, FileSecurityError
+
     try:
-        # Validate metadata first. We don't have the head bytes yet, so validate size/ext.
         meta = validate_upload_metadata(
             filename=body.file_name,
             size=body.file_size,
@@ -413,26 +562,112 @@ def init_chunked_upload(
     except FileSecurityError as exc:
         return fail(400, str(exc))
 
-    import uuid
     from app.security.files import safe_subdir, safe_upload_id
 
     upload_id = safe_upload_id(uuid.uuid4().hex)
     temp_dir = safe_subdir(UPLOAD_DIR, "temp", upload_id)
     temp_dir.mkdir(parents=True, exist_ok=True)
-    
+
     import json
+
     meta_path = temp_dir / "meta.json"
-    meta_path.write_text(json.dumps({
-        "knowledge_id": knowledge_id,
-        "file_name": body.file_name,
-        "file_size": body.file_size,
-        "chunk_size": body.chunk_size,
-        "total_chunks": body.total_chunks,
-        "safe_name": meta["safe_name"],
-        "storage_name": meta["storage_name"],
-    }))
-    
+    meta_path.write_text(
+        json.dumps(
+            {
+                "knowledge_id": knowledge_id,
+                "file_name": body.file_name,
+                "file_size": body.file_size,
+                "chunk_size": body.chunk_size,
+                "total_chunks": body.total_chunks,
+                "safe_name": meta["safe_name"],
+                "storage_name": meta["storage_name"],
+            }
+        )
+    )
+
     return ok({"upload_id": upload_id, "uploaded_chunks": []})
+
+
+@router.post("/knowledge/upload-chunk/complete/{upload_id}")
+def complete_chunked_upload(
+    upload_id: str,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    from app.security.files import FileSecurityError, safe_subdir, safe_upload_id
+
+    try:
+        uid = safe_upload_id(upload_id)
+        temp_dir = safe_subdir(UPLOAD_DIR, "temp", uid)
+    except FileSecurityError as exc:
+        return fail(400, str(exc))
+    if not temp_dir.exists():
+        return fail(404, "Upload session not found")
+
+    import json
+
+    meta_path = temp_dir / "meta.json"
+    if not meta_path.exists():
+        return fail(400, "Upload session metadata missing")
+
+    meta = json.loads(meta_path.read_text())
+    knowledge_id = meta["knowledge_id"]
+    total_chunks = meta["total_chunks"]
+    safe_name = meta["safe_name"]
+    storage_name = meta["storage_name"]
+
+    kb = ctx.fetch(KnowledgeBase, knowledge_id)
+    if not kb:
+        return fail(404, "Knowledge base not found")
+
+    for idx in range(total_chunks):
+        if not (temp_dir / f"chunk_{idx}").exists():
+            return fail(400, f"Missing chunk index {idx}")
+
+    dest_dir = kb_upload_dir(knowledge_id)
+    dest = dest_dir / storage_name
+
+    try:
+        with open(dest, "wb") as outfile:
+            for idx in range(total_chunks):
+                chunk_file = temp_dir / f"chunk_{idx}"
+                with open(chunk_file, "rb") as infile:
+                    outfile.write(infile.read())
+    except Exception as exc:
+        if dest.exists():
+            dest.unlink()
+        return fail(500, f"Merge failed: {exc}")
+
+    from app.security.files import validate_upload_metadata, FileSecurityError
+
+    try:
+        with open(dest, "rb") as infile:
+            head = infile.read(16)
+        validate_upload_metadata(
+            filename=meta["file_name"],
+            size=meta["file_size"],
+            head=head,
+            bypass_max_size=True,
+        )
+    except FileSecurityError as exc:
+        if dest.exists():
+            dest.unlink()
+        return fail(400, f"Security check failed: {exc}")
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+    rel = f"{knowledge_id}/{dest.name}"
+    record = KnowledgeFile(
+        knowledge_id=knowledge_id,
+        file_name=safe_name,
+        file_path=rel,
+        status=5,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+
+    return ok({"file_path": rel, "file_name": safe_name, "id": record.id})
 
 
 @router.post("/knowledge/upload-chunk/{upload_id}/{chunk_index}")
@@ -457,87 +692,3 @@ async def upload_chunk(
     chunk_path.write_bytes(content)
 
     return ok({"chunk_index": chunk_index, "uploaded": True})
-
-
-@router.post("/knowledge/upload-chunk/complete/{upload_id}")
-def complete_chunked_upload(
-    upload_id: str,
-    db: Session = Depends(get_db),
-    ctx=Depends(require_workspace_editor),
-):
-    from app.security.files import FileSecurityError, safe_subdir, safe_upload_id
-
-    try:
-        uid = safe_upload_id(upload_id)
-        temp_dir = safe_subdir(UPLOAD_DIR, "temp", uid)
-    except FileSecurityError as exc:
-        return fail(400, str(exc))
-    if not temp_dir.exists():
-        return fail(404, "Upload session not found")
-
-    import json
-    meta_path = temp_dir / "meta.json"
-    if not meta_path.exists():
-        return fail(400, "Upload session metadata missing")
-        
-    meta = json.loads(meta_path.read_text())
-    knowledge_id = meta["knowledge_id"]
-    total_chunks = meta["total_chunks"]
-    safe_name = meta["safe_name"]
-    storage_name = meta["storage_name"]
-    
-    kb = ctx.fetch(KnowledgeBase, knowledge_id)
-    if not kb:
-        return fail(404, "Knowledge base not found")
-        
-    # Check if all chunks exist
-    for idx in range(total_chunks):
-        if not (temp_dir / f"chunk_{idx}").exists():
-            return fail(400, f"Missing chunk index {idx}")
-            
-    # Merge chunks
-    dest_dir = kb_upload_dir(knowledge_id)
-    dest = dest_dir / storage_name
-    
-    try:
-        with open(dest, "wb") as outfile:
-            for idx in range(total_chunks):
-                chunk_file = temp_dir / f"chunk_{idx}"
-                with open(chunk_file, "rb") as infile:
-                    outfile.write(infile.read())
-    except Exception as exc:
-        if dest.exists():
-            dest.unlink()
-        return fail(500, f"Merge failed: {exc}")
-        
-    # Final header magic-byte validation using head of final file
-    from app.security.files import validate_upload_metadata, FileSecurityError
-    try:
-        with open(dest, "rb") as infile:
-            head = infile.read(16)
-        validate_upload_metadata(
-            filename=meta["file_name"],
-            size=meta["file_size"],
-            head=head,
-            bypass_max_size=True,
-        )
-    except FileSecurityError as exc:
-        if dest.exists():
-            dest.unlink()
-        return fail(400, f"Security check failed: {exc}")
-        
-    import shutil
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    
-    rel = f"{knowledge_id}/{dest.name}"
-    record = KnowledgeFile(
-        knowledge_id=knowledge_id,
-        file_name=safe_name,
-        file_path=rel,
-        status=5,
-    )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    
-    return ok({"file_path": rel, "file_name": safe_name, "id": record.id})

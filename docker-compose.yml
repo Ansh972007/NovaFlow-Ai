@@ -1,6 +1,13 @@
-# NovaFlow full stack — web + API + data services
-# Usage: docker compose up -d --build
-# Web http://localhost:3000 · API http://localhost:3001 · set NOVAFLOW_ADMIN_PASSWORD
+# NovaFlow full stack — web + API + Milvus
+#
+# Recommended (16 GB RAM — builds Next on host, not inside Docker):
+#   .\scripts\full-stack-up.ps1
+#
+# Cursor-safe (no Milvus, less RAM):
+#   .\scripts\cursor-stack-build.ps1
+#
+# Web http://localhost:3000 · API http://localhost:3001
+# Login: admin / NovaFlowLocalDevAdmin1
 
 name: novaflow
 
@@ -9,24 +16,19 @@ include:
 
 services:
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:3001}
-        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-NovaFlow AI}
-        NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED: ${NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED:-true}
     image: novaflow-web:local
+    pull_policy: never
     container_name: novaflow-web
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:3001}
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:3001
       API_INTERNAL_URL: http://api:3001
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED: "true"
+    mem_limit: 512m
     depends_on:
       api:
         condition: service_healthy

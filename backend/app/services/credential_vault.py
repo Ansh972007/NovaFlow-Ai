@@ -54,13 +54,22 @@ CATALOG: list[dict[str, Any]] = [
     {
         "category": "email",
         "kind": "gmail_oauth",
-        "label": "Gmail OAuth",
+        "label": "Gmail send (OAuth)",
+        "setup": "guided",
+        "oauth": True,
+        "redirect_path": "/api/v1/integrations/gmail/oauth/callback",
+        "scopes": [
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "openid",
+        ],
         "fields": [
             {"key": "gmail_oauth_email", "label": "Connected email", "secret": False, "required": False},
-            {"key": "refresh_token", "label": "Refresh token", "secret": True, "required": False},
-            {"key": "access_token", "label": "Access token", "secret": True, "required": False},
         ],
-        "oauth": True,
+        "advanced_fields": [
+            {"key": "refresh_token", "label": "Refresh token (advanced)", "secret": True, "required": False},
+            {"key": "access_token", "label": "Access token (advanced)", "secret": True, "required": False},
+        ],
     },
     {
         "category": "telegram",
@@ -153,7 +162,14 @@ CATALOG: list[dict[str, Any]] = [
     {
         "category": "google",
         "kind": "google_oauth",
-        "label": "Google OAuth / APIs",
+        "label": "Google APIs (Calendar, Sheets, YouTube)",
+        "setup": "manual",
+        "oauth": True,
+        "scopes": [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/youtube.readonly",
+        ],
         "fields": [
             {"key": "client_id", "label": "Client ID", "secret": False, "required": True},
             {"key": "client_secret", "label": "Client secret", "secret": True, "required": True},
@@ -208,6 +224,72 @@ CATALOG: list[dict[str, Any]] = [
 
 def get_catalog() -> list[dict[str, Any]]:
     return CATALOG
+
+
+def get_oauth_setup_info() -> dict[str, Any]:
+    """Redirect URIs and console instructions for Google OAuth setup."""
+    from app.config import GOOGLE_CLIENT_ID, OAUTH_REDIRECT_BASE
+    from app.services.gmail_jira import GMAIL_SCOPES, gmail_redirect_uri, gmail_oauth_enabled
+    from app.services.oauth import redirect_uri as login_redirect_uri
+
+    base = (OAUTH_REDIRECT_BASE or "").rstrip("/")
+    return {
+        "google": {
+            "platform_configured": bool(GOOGLE_CLIENT_ID),
+            "gmail_oauth_enabled": gmail_oauth_enabled(),
+            "console_url": "https://console.cloud.google.com/apis/credentials",
+            "redirect_uris": [
+                {
+                    "id": "login",
+                    "label": "Login (SSO)",
+                    "uri": login_redirect_uri("google"),
+                    "purpose": "User sign-in with Google",
+                },
+                {
+                    "id": "gmail_send",
+                    "label": "Gmail send (workflows)",
+                    "uri": gmail_redirect_uri(),
+                    "purpose": "Send email from workflows via Gmail API",
+                },
+            ],
+            "scopes": {
+                "login": ["openid", "email", "profile"],
+                "gmail_send": [s for s in GMAIL_SCOPES.split(" ") if s],
+                "google_apis": [
+                    "https://www.googleapis.com/auth/calendar",
+                    "https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/youtube.readonly",
+                ],
+            },
+            "instructions": (
+                "In Google Cloud Console → APIs & Services → Credentials → your OAuth client, "
+                "add **both** Authorized redirect URIs below. For Gmail send, enable Gmail API and "
+                "use Client ID + Client secret for Google APIs credentials, or Connect with Google "
+                "for guided Gmail send."
+            ),
+            "oauth_redirect_base": base,
+        },
+    }
+
+
+def validate_credential_fields(category: str, kind: str, fields: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Reject placeholder/hint values before vault save."""
+    from app.composer.chat_channels import filter_real_credential_items, is_placeholder_credential_value
+
+    clean = dict(fields or {})
+    rejected: list[str] = []
+    for key, val in list(clean.items()):
+        if isinstance(val, str) and is_placeholder_credential_value(category, key, val):
+            rejected.append(f"{key} looks like example/hint text")
+            clean.pop(key, None)
+    if not clean:
+        return {}, rejected or ["No valid credential fields — paste real secrets, not examples"]
+    items, more = filter_real_credential_items(
+        [{"category": category, "kind": kind, "label": "default", "fields": clean}]
+    )
+    if not items:
+        return {}, rejected + more
+    return items[0].get("fields") or {}, rejected + more
 
 
 def _encrypt_fields(fields: dict[str, Any]) -> str:
@@ -322,6 +404,11 @@ def create_entry(
     category = (category or "custom").strip()[:32]
     kind = (kind or "custom").strip()[:64]
 
+    fields, rejected = validate_credential_fields(category, kind, fields)
+    if rejected:
+        raise ValueError("; ".join(rejected[:4]))
+    if not fields:
+        raise ValueError("No valid credential fields — paste real secrets, not examples")
     existing = (
         db.query(CredentialVaultEntry)
         .filter(
@@ -375,15 +462,22 @@ def update_entry(
 ) -> CredentialVaultEntry:
     current = _decrypt_fields(row.fields_enc or "")
     if fields:
+        merged = dict(current)
         for k, v in fields.items():
             if v is None or v == "":
                 # skip empty secret updates (keep existing)
-                if k in SECRET_FIELD_KEYS and current.get(k):
+                if k in SECRET_FIELD_KEYS and merged.get(k):
                     continue
                 if v == "" and k not in SECRET_FIELD_KEYS:
-                    current[k] = v
+                    merged[k] = v
                 continue
-            current[k] = v
+            merged[k] = v
+        validated, rejected = validate_credential_fields(row.category, row.kind, merged)
+        if rejected:
+            raise ValueError("; ".join(rejected[:4]))
+        if not validated:
+            raise ValueError("No valid credential fields — paste real secrets, not examples")
+        current = validated
         row.fields_enc = _encrypt_fields(current)
         row.public_meta_json = json.dumps(_public_meta(current))
     if label is not None:

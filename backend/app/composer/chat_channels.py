@@ -429,6 +429,79 @@ def _slot(
     )
 
 
+_PLACEHOLDER_EMAILS = frozenset({"you@gmail.com", "user@example.com", "test@example.com", "me@gmail.com"})
+_PLACEHOLDER_SUBSTRINGS = ("xxxx", "paste:", "123456:abc", "shpat_…", "aiza…", "ghp_…", "lin_api_…")
+
+
+def is_placeholder_credential_value(category: str, field: str, value: str) -> bool:
+    val = (value or "").strip()
+    if not val or len(val) < 4:
+        return True
+    low = val.lower()
+    if low.startswith("paste:"):
+        return True
+    if field in ("smtp_user", "smtp_from", "email") and low in _PLACEHOLDER_EMAILS:
+        return True
+    if "@example." in low:
+        return True
+    if field == "smtp_password" and re.fullmatch(r"(x{4}(\s+x{4}){3}|x{16})", low.replace(" ", "")):
+        return True
+    if category == "telegram" and re.match(r"^123456:abc", low):
+        return True
+    for sub in _PLACEHOLDER_SUBSTRINGS:
+        if sub in low:
+            return True
+    return False
+
+
+def is_placeholder_credential_item(item: dict[str, Any]) -> bool:
+    fields = item.get("fields") or {}
+    cat = str(item.get("category") or "")
+    for field, val in fields.items():
+        if isinstance(val, str) and is_placeholder_credential_value(cat, field, val):
+            return True
+    return False
+
+
+_SECRET_CREDENTIAL_FIELDS = frozenset(
+    {
+        "smtp_password",
+        "smtp_pass",
+        "password",
+        "api_key",
+        "bot_token",
+        "token",
+        "access_token",
+        "webhook_url",
+        "client_secret",
+        "app_password",
+    }
+)
+
+
+def filter_real_credential_items(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Drop hint/placeholder field values; return (accepted items, rejected reasons)."""
+    ok: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    for item in items:
+        fields = dict(item.get("fields") or {})
+        cat = str(item.get("category") or "")
+        clean_fields: dict[str, Any] = {}
+        for field, val in fields.items():
+            if isinstance(val, str) and is_placeholder_credential_value(cat, field, val):
+                rejected.append(f"{field} looked like a hint")
+                continue
+            clean_fields[field] = val
+        if not clean_fields:
+            rejected.append("example hint text — paste your real secret")
+            continue
+        if not any(field in _SECRET_CREDENTIAL_FIELDS for field in clean_fields):
+            rejected.append("example hint text — paste your real secret")
+            continue
+        ok.append({**item, "fields": clean_fields})
+    return ok, rejected
+
+
 def extract_channel_credentials(text: str) -> list[dict[str, Any]]:
     """Parse NL / labeled secrets for any registered channel into vault upsert items."""
     t = (text or "").strip()

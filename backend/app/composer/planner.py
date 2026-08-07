@@ -14,7 +14,12 @@ def parse_goal_intent(goal: str) -> list[str]:
     return infer_capabilities_from_goal(goal)
 
 
-def infer_capabilities_from_goal(goal: str, *, force_workflow: bool = False) -> list[str]:
+def infer_capabilities_from_goal(
+    goal: str,
+    *,
+    force_workflow: bool = False,
+    llm_cfg: dict | None = None,
+) -> list[str]:
     """Heuristic (+ optional LLM) capability inference for any field goal."""
     goal_lower = (goal or "").lower()
     required: list[str] = []
@@ -64,6 +69,11 @@ def infer_capabilities_from_goal(goal: str, *, force_workflow: bool = False) -> 
         )
     ):
         required.append("cap_outlook")
+    if any(k in goal_lower for k in ("calendar", "calander", "meeting", "meetings", "appointment")):
+        if "outlook" in goal_lower or "microsoft" in goal_lower:
+            required.append("cap_outlook")
+        else:
+            required.append("cap_google")
     if any(k in goal_lower for k in ("calendar", "calendar event")) and "google" in goal_lower:
         required.append("cap_google")
     if any(k in goal_lower for k in ("calendar", "calendar event")) and (
@@ -101,7 +111,7 @@ def infer_capabilities_from_goal(goal: str, *, force_workflow: bool = False) -> 
     required = list(dict.fromkeys(required))
     if not required and (force_workflow or goal_lower.strip()):
         # Optional short LLM JSON when heuristics empty
-        llm_caps = _llm_infer_caps(goal)
+        llm_caps = _llm_infer_caps(goal, llm_cfg)
         if llm_caps:
             required = llm_caps
         else:
@@ -113,24 +123,18 @@ def infer_capabilities_from_goal(goal: str, *, force_workflow: bool = False) -> 
     return list(dict.fromkeys(required))
 
 
-def _llm_infer_caps(goal: str) -> list[str]:
+def _llm_infer_caps(goal: str, llm_cfg: dict | None = None) -> list[str]:
     """Best-effort LLM capability list; never raises. Skips when no LLM helper."""
     try:
         import json
         import re
 
-        # Prefer a tiny local heuristic expansion over hard LLM dependency in tests
-        _ = goal
-        fn = None
-        try:
-            from app.services import llm as llm_mod
+        from app.services.llm import complete_text
 
-            fn = getattr(llm_mod, "chat_completion", None) or getattr(llm_mod, "complete_text", None)
-        except Exception:
-            fn = None
-        if not callable(fn):
+        cfg = llm_cfg or {}
+        if not cfg.get("api_key"):
             return []
-        raw = fn(
+        raw = complete_text(
             system=(
                 "Return a JSON array of capability ids only from: "
                 "cap_workflow, cap_knowledge, cap_telegram, cap_slack, cap_discord, "
@@ -139,9 +143,8 @@ def _llm_infer_caps(goal: str) -> list[str]:
                 "Always include cap_workflow for automation goals."
             ),
             user=f"Goal: {(goal or '')[:800]}",
+            cfg=cfg,
         )
-        if isinstance(raw, dict):
-            raw = raw.get("content") or raw.get("text") or ""
         match = re.search(r"\[[\s\S]*\]", str(raw or ""))
         if not match:
             return []

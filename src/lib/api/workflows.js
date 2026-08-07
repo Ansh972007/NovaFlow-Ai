@@ -73,6 +73,18 @@ export async function runWorkflow(workflowId, input) {
   return client.post("/workflow/run", { workflow_id: workflowId, input });
 }
 
+export async function testWorkflowSandbox(workflowId, payload = {}) {
+  return client.post(`/workflow/info/${workflowId}/test`, payload);
+}
+
+export async function validateWorkflowGraph(payload) {
+  return client.post("/workflow/intelligence/validate", payload);
+}
+
+export async function importOpenApiNodes(spec, { limit = 12 } = {}) {
+  return client.post("/nodes/library/import-openapi", { spec, limit });
+}
+
 export async function resumeWorkflow(pendingRunId, { approved = true, note = "" } = {}) {
   return client.post("/workflow/resume", {
     pending_run_id: pendingRunId,

@@ -19,8 +19,14 @@ from app.services.api_node_runtime import (
     normalize_slug,
 )
 
+from app.workflow_intelligence.node_registry import (
+    get_builtin_palette_with_schemas,
+    list_dynamic_components,
+)
+
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,78}[a-z0-9]$|^[a-z0-9]{1,2}$")
 
+# Legacy alias — prefer get_builtin_palette_with_schemas()
 BUILTIN_PALETTE: list[dict[str, str]] = [
     {"type": "trigger", "label": "Trigger", "category": "builtin"},
     {"type": "retrieve", "label": "Retrieve", "category": "builtin"},
@@ -84,7 +90,11 @@ def list_library(
         q = q.filter(NodeDefinition.status == "published")
     rows = q.order_by(NodeDefinition.updated_at.desc()).all()
     custom = [node_def_dict(r, include_definition=False) for r in rows]
-    return {"builtin": BUILTIN_PALETTE, "custom": custom}
+    return {
+        "builtin": get_builtin_palette_with_schemas(),
+        "custom": custom,
+        "dynamic": list_dynamic_components(),
+    }
 
 
 def get_definition(db: Session, workspace_id: int, def_id: str) -> NodeDefinition | None:

@@ -42,6 +42,41 @@ export async function listWorkspaces() {
   return client.get("/workspaces");
 }
 
+const WORKSPACE_ROLE_RANK = {
+  guest: 0,
+  viewer: 10,
+  analyst: 20,
+  editor: 30,
+  developer: 40,
+  manager: 50,
+  admin: 60,
+  owner: 70,
+};
+
+export function workspaceRoleRank(role) {
+  const key = String(role || "editor").toLowerCase();
+  return WORKSPACE_ROLE_RANK[key] ?? WORKSPACE_ROLE_RANK.editor;
+}
+
+export function isWorkspaceReadOnly(role) {
+  return workspaceRoleRank(role) < WORKSPACE_ROLE_RANK.editor;
+}
+
+export function workspaceCanEdit(role) {
+  return workspaceRoleRank(role) >= WORKSPACE_ROLE_RANK.editor;
+}
+
+export function workspaceCanRun(role) {
+  return workspaceRoleRank(role) >= WORKSPACE_ROLE_RANK.editor;
+}
+
+export async function getActiveWorkspaceRole() {
+  const data = await listWorkspaces();
+  const id = getActiveWorkspaceId() || data?.current_id;
+  const item = (data?.items || []).find((w) => String(w.id) === String(id));
+  return item?.role || "editor";
+}
+
 export async function createWorkspace(name, options = {}) {
   return client.post("/workspaces", {
     name,

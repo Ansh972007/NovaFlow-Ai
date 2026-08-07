@@ -20,8 +20,6 @@ from app.security.ai_guard import detect_prompt_injection, sanitize_user_prompt
 from app.security.rbac import Permission
 from app.services.workflow_manager import WorkflowManager
 from app.services.intent_classifier import IntentClassifier, ResponseRouter, IntentType
-from app.services.global_chat_handler import GlobalChatHandler
-from app.services.workflow_orchestrator import WorkflowOrchestrator
 
 
 @dataclass

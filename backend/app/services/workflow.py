@@ -904,6 +904,10 @@ async def _fetch_http(
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         if method == "POST":
             resp = await client.post(url, content=body or None, headers=req_headers or None)
+        elif method == "PUT":
+            resp = await client.put(url, content=body or None, headers=req_headers or None)
+        elif method == "DELETE":
+            resp = await client.delete(url, headers=req_headers or None)
         else:
             resp = await client.get(url, headers=req_headers or None)
         resp.raise_for_status()
@@ -1305,12 +1309,13 @@ async def _execute_graph(
         elif ntype == "retrieve":
             kid = data.get("knowledge_id")
             limit = int(data.get("limit") or 5)
+            query_text = _apply_template(data.get("query") or "{{input}}", context).strip() or context["input"]
             hits = []
             if kid:
                 kb = db.get(KnowledgeBase, kid)
                 if kb and (not workspace_id or kb.workspace_id == workspace_id):
                     retrieved, hit_count = await workflow_retrieve(
-                        rt_ctx, int(kid), context["input"], limit=limit
+                        rt_ctx, int(kid), query_text, limit=limit
                     )
                     context["retrieved"] = retrieved or (
                         "(no knowledge matches — answer carefully and state that no documents were found)"
@@ -1349,6 +1354,15 @@ async def _execute_graph(
             body = _apply_template(data.get("body") or "", context)
             auth_kind = (data.get("auth") or "").strip() or None
             credential_id = (data.get("credential_id") or "").strip() or None
+            req_headers: dict[str, str] = {}
+            raw_headers = (data.get("headers") or "").strip()
+            if raw_headers:
+                try:
+                    parsed = json.loads(_apply_template(raw_headers, context))
+                    if isinstance(parsed, dict):
+                        req_headers = {str(k): str(v) for k, v in parsed.items()}
+                except json.JSONDecodeError:
+                    pass
             if not url:
                 step["output"] = "(no url)"
                 step["status"] = "error"
@@ -1362,6 +1376,7 @@ async def _execute_graph(
                         workspace_id=workspace_id,
                         auth_kind=auth_kind,
                         credential_id=credential_id,
+                        headers=req_headers or None,
                     )
                     context["http"] = result
                     if data.get("set_output", True):
@@ -1388,6 +1403,7 @@ async def _execute_graph(
             body_text = _format_notify_body(channel, subject, body_text)
             bot_token = (data.get("bot_token") or "").strip()
             credential_id = (data.get("credential_id") or "").strip() or None
+            from_addr = _apply_template(data.get("from") or "", context).strip() or None
             prior_output = context.get("output") or body_text
             result = await send_notification(
                 channel,
@@ -1398,6 +1414,7 @@ async def _execute_graph(
                 db=db,
                 workspace_id=workspace_id,
                 credential_id=credential_id,
+                from_addr=from_addr,
             )
             detail = result.get("detail") or ("sent" if result.get("ok") else "failed")
             if result.get("ok"):
@@ -1415,6 +1432,7 @@ async def _execute_graph(
             action = (data.get("action") or "create").strip().lower()
             project_key = _apply_template(data.get("project_key") or "", context).strip()
             issue_type = _apply_template(data.get("issue_type") or "Task", context).strip() or "Task"
+            priority = _apply_template(data.get("priority") or "", context).strip() or None
             issue_key = _apply_template(data.get("issue_key") or "", context).strip()
             summary = _apply_template(data.get("summary") or "{{output}}", context).strip()
             description = _apply_template(data.get("description") or "{{input}}", context).strip()
@@ -1423,6 +1441,7 @@ async def _execute_graph(
                 summary = titled
                 if body_from_llm and description == (context.get("input") or ""):
                     description = body_from_llm
+            cred_id = str(data.get("credential_id") or "").strip() or None
             try:
                 if action == "update":
                     if not issue_key:
@@ -1433,6 +1452,7 @@ async def _execute_graph(
                         issue_key=issue_key,
                         summary=summary,
                         description=description,
+                        credential_id=cred_id,
                     )
                     key = result.get("key") or issue_key
                 else:
@@ -1445,6 +1465,8 @@ async def _execute_graph(
                         summary=summary or "NovaFlow issue",
                         description=description,
                         issue_type=issue_type,
+                        priority=priority,
+                        credential_id=cred_id,
                     )
                     key = result.get("key") or ""
                 context["jira"] = result
@@ -1472,6 +1494,7 @@ async def _execute_graph(
             issue_number = _apply_template(data.get("issue_number") or "", context).strip()
             labels_raw = _apply_template(data.get("labels") or "", context).strip()
             labels = [x.strip() for x in labels_raw.replace(";", ",").split(",") if x.strip()] if labels_raw else []
+            gh_cred = str(data.get("credential_id") or "").strip() or None
             try:
                 if action == "update":
                     if not issue_number:
@@ -1483,6 +1506,7 @@ async def _execute_graph(
                         issue_number=issue_number,
                         title=title,
                         body=body_md,
+                        credential_id=gh_cred,
                     )
                 else:
                     result = await github_create_issue(
@@ -1492,6 +1516,7 @@ async def _execute_graph(
                         title=title or "NovaFlow issue",
                         body=body_md,
                         labels=labels or None,
+                        credential_id=gh_cred,
                     )
                 num = result.get("number")
                 html_url = result.get("html_url") or ""
@@ -1521,6 +1546,7 @@ async def _execute_graph(
                 if body_from_llm and description == (context.get("input") or ""):
                     description = body_from_llm
             issue_id = _apply_template(data.get("issue_id") or "", context).strip()
+            lin_cred = str(data.get("credential_id") or "").strip() or None
             try:
                 if action == "update":
                     if not issue_id:
@@ -1531,6 +1557,7 @@ async def _execute_graph(
                         issue_id=issue_id,
                         title=title,
                         description=description,
+                        credential_id=lin_cred,
                     )
                 else:
                     result = await linear_create_issue(
@@ -1539,6 +1566,7 @@ async def _execute_graph(
                         title=title or "NovaFlow issue",
                         description=description,
                         team_id=team_id,
+                        credential_id=lin_cred,
                     )
                 ident = result.get("identifier") or result.get("id") or ""
                 url = result.get("url") or ""
@@ -1557,7 +1585,9 @@ async def _execute_graph(
                 step["status"] = "error"
         elif ntype == "llm":
             prompt = (data.get("prompt") or DEFAULT_LLM_PROMPT).strip() or DEFAULT_LLM_PROMPT
-            user_msg = context.get("transform") or context["input"]
+            user_msg = _apply_template(data.get("user_prompt") or "{{input}}", context).strip()
+            if not user_msg:
+                user_msg = context.get("transform") or context["input"]
             if context.get("retrieved"):
                 user_msg = (
                     f"## Question\n{user_msg}\n\n"
@@ -1602,7 +1632,8 @@ async def _execute_graph(
                 )
                 step["status"] = "ok"
         elif ntype == "output":
-            step["output"] = context["output"] or context["input"]
+            context["output"] = context.get("output") or context.get("input") or ""
+            step["output"] = context["output"]
             step["status"] = "ok"
         elif ntype == "loop":
             sep = data.get("separator") or "\n"
@@ -1725,6 +1756,30 @@ async def _execute_graph(
                 step["output"] = (context["output"] or "")[:500]
                 step["sub_steps"] = len(sub_steps)
                 step["status"] = "ok"
+        elif ntype == "component_node":
+            try:
+                from app.services.dynamic_component_runtime import execute_dynamic_component
+
+                comp_name = str(data.get("component_name") or "").strip()
+                result = await execute_dynamic_component(
+                    db,
+                    workspace_id,
+                    comp_name,
+                    data,
+                    context,
+                    rt_ctx=rt_ctx,
+                )
+                if isinstance(result, dict):
+                    out = str(result.get("output") or "")
+                else:
+                    out = str(result or "")
+                if data.get("set_output", True):
+                    context["output"] = out
+                step["output"] = out[:500] + ("…" if len(out) > 500 else "")
+                step["status"] = "ok"
+            except Exception as exc:
+                step["output"] = str(exc)[:500]
+                step["status"] = "error"
         elif ntype == "api_node":
             try:
                 from app.services.api_node_runtime import execute_api_node_definition

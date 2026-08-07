@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 OPS_INTENTS = frozenset(
     {
         "run_workflow",
+        "run_workflows_parallel",
+        "test_workflow",
         "list_workflows",
         "workflow_status",
         "stop_run",
@@ -92,6 +94,25 @@ OPS_INTENTS = frozenset(
         "csv_import_chat",
         "solution_docs",
         "solution_assert",
+        # API node factory (chat)
+        "node_probe",
+        "node_create",
+        "node_test",
+        "node_publish",
+        "node_attach_to_workflow",
+        "openapi_import",
+        # Navigation
+        "open_marketplace",
+        "open_settings",
+        "open_model_lab",
+        "open_credentials",
+        # Knowledge + LLM planning
+        "store_chat_knowledge",
+        "list_llm_providers",
+        "switch_planning_model",
+        "use_workspace_llm",
+        "requirements_confirm",
+        "create_component",
     }
 )
 
@@ -140,6 +161,22 @@ def audit_chat_action(
         success=success,
         detail=detail or {},
     )
+    if action in ("compose", "deploy", "run_workflow", "approve", "test"):
+        try:
+            conv_id = (detail or {}).get("conversation_id")
+            if conv_id:
+                conv, aios = _load_aios(db, conv_id)
+                if conv and aios.get("last_receipt"):
+                    aios.setdefault("ops_finops", []).append(
+                        {
+                            "action": action,
+                            "est_cost_usd": aios["last_receipt"].get("est_cost_usd"),
+                            "at": aios["last_receipt"].get("at"),
+                        }
+                    )
+                    _save_aios(db, conv, aios)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def classify_ops_intent(text: str) -> str | None:
@@ -149,8 +186,14 @@ def classify_ops_intent(text: str) -> str | None:
     from app.composer.chat_autopilot import classify_autopilot_intent
     from app.composer.chat_forge import classify_forge_intent
     from app.composer.chat_powerhouse import classify_power_intent
+    from app.composer.chat_node_factory import classify_nav_intent, classify_node_factory_intent
 
-    # Autopilot confirm/cancel before generic playbook phrases
+    nf = classify_node_factory_intent(text)
+    if nf:
+        return nf
+    nav = classify_nav_intent(text)
+    if nav:
+        return nav
     auto = classify_autopilot_intent(text)
     if auto:
         return auto
@@ -206,13 +249,38 @@ def classify_ops_intent(text: str) -> str | None:
         return "test_notification"
     if re.search(r"\bcheck (slack|telegram|integrations?)\b|\bintegrations? (health|status)\b", t):
         return "integrations_health"
-    if re.search(r"\blist (my )?workflows\b|\bshow (my )?workflows\b|\bmy workflows\b", t):
+    if re.search(r"\bcreate component\b|\bmake component\b|\bnew component\b|\bbuild component\b", t):
+        return "create_component"
+    if re.search(r"\bstore (this |that )?(data |info |summary )?in knowledge\b|\bsave to knowledge\b|\badd to knowledge\b|\bstore (this |that )?data in knowlage\b", t):
+        return "store_chat_knowledge"
+    if re.search(r"\blist (my )?models\b|\blist (my )?providers\b|\bwhich api keys\b|\bshow providers\b", t):
+        return "list_llm_providers"
+    if re.search(r"\buse workspace (default |model|llm)\b|\buse default provider\b", t):
+        return "use_workspace_llm"
+    if re.search(r"\buse model\b|\bswitch to\b", t) and not re.search(r"\bworkflow\b", t):
+        return "switch_planning_model"
+    if re.search(r"\byes build this\b|\bbuild this plan\b|\bconfirm (this )?plan\b", t):
+        return "requirements_confirm"
+    if re.search(
+        r"\blist (my )?workflows\b|\bshow (my )?workflows\b|\bmy workflows\b|"
+        r"\bshow me my workflow\b|\bshow my workflow\b|\bhow many workflows?\b|\bworkflow count\b|"
+        r"\btotal workflows?\b|\bgive me total workflows?\b|\bhow many workflow\b",
+        t,
+    ):
         return "list_workflows"
     if re.search(r"\b(status of|workflow status|last run|run status)\b", t):
         return "workflow_status"
     if re.search(r"\bstop (this |the )?(run|workflow)\b", t):
         return "stop_run"
-    if re.search(r"\brun (my )?(last )?workflow\b|\brun workflow\b", t):
+    if re.search(r"\btest (my )?(last )?workflow\b|\btest workflow\b|\bsandbox test\b", t):
+        return "test_workflow"
+    if re.search(
+        r"\brun workflows\b|\brun workflow\s+\d+.*\band\b|\bworkflow\s+\d+.*,.*workflow|"
+        r"\brun workflow\s+\d+\s+and\s+\d+",
+        t,
+    ):
+        return "run_workflows_parallel"
+    if re.search(r"\brun (my )?(last )?workflow\b|\brun workflow\b|\brun it\b|\bexecute it\b|\brun this\b", t):
         return "run_workflow"
     if re.search(r"\bindex (my )?attachments?\b|\bindex (these|the) files?\b", t):
         return "index_attachment"
@@ -260,6 +328,12 @@ def _save_aios(db: Session, conv: Conversation | None, aios: dict[str, Any]) -> 
 
 
 def _find_workflow(db: Session, workspace_id: int, text: str, aios: dict) -> Workflow | None:
+    # Prefer workflow from current AIOS session
+    wid = aios.get("workflow_id")
+    if wid:
+        wf = db.get(Workflow, wid)
+        if wf and int(wf.workspace_id or 0) == int(workspace_id):
+            return wf
     # Prefer last deployed from conversation
     deploy = aios.get("deploy") or {}
     wid = deploy.get("workflow_id")
@@ -282,42 +356,108 @@ def _find_workflow(db: Session, workspace_id: int, text: str, aios: dict) -> Wor
     return rows[0]
 
 
+def _parse_workflow_needles(text: str) -> list[str]:
+    """Extract workflow name/id needles for parallel runs (e.g. workflow 1 and 3)."""
+    t = (text or "").lower()
+    needles: list[str] = []
+    for m in re.finditer(r"workflow\s*#?\s*([a-z0-9_\-]+)", t, re.I):
+        val = m.group(1).strip()
+        if val and val not in needles:
+            needles.append(val)
+    if len(needles) >= 2:
+        return needles
+    if " and " in t or "," in t:
+        for m in re.finditer(r"\b(\d+)\b", t):
+            val = m.group(1)
+            if val not in needles:
+                needles.append(val)
+    return needles[:5]
+
+
+def _find_workflows_by_needles(
+    db: Session,
+    workspace_id: int,
+    needles: list[str],
+    aios: dict,
+) -> list[Workflow]:
+    if not needles:
+        wf = _find_workflow(db, workspace_id, "", aios)
+        return [wf] if wf else []
+    q = db.query(Workflow).filter(Workflow.workspace_id == workspace_id, Workflow.status == 1)
+    rows = q.order_by(Workflow.update_time.desc()).limit(50).all()
+    found: list[Workflow] = []
+    for needle in needles:
+        n = needle.lower().strip()
+        for wf in rows:
+            if wf in found:
+                continue
+            if n == str(wf.id).lower() or n in (wf.name or "").lower():
+                found.append(wf)
+                break
+    return found
+
+
 def capabilities_event() -> dict[str, Any]:
     return {
         "type": "aios_capabilities",
         "data": {
             "title": "What Peak Chat can do",
             "skills": [
+                "Universal workflow composer — trigger → process → notify/output for any business field",
+                "25+ recipes + LLM graph planner + generic fallback for novel automations",
+                "Custom SaaS via API Node Factory, OpenAPI import, and HTTP nodes",
                 "Chat Powerhouse — 12 mega tools (diff, versions, eval, cost, debug, KG, collab, kill switch, simulate, SLA, change requests, digests)",
                 "Chat Autopilot — multi-step playbooks with confirm gates (incident / weekly / onboard)",
                 "Chat Forge — 12 tools (drift, A/B, webhooks, projects, publish scan, reuse, model lab, OCR, GitHub issues, CSV, docs, assertions)",
-                "Capture & fulfill enterprise requirements (checklist → compose → approve → deploy)",
-                "Express compose: recipe match → auto enterprise test suite → approve in one turn",
-                "Turn any work request into a workflow (any field: ops, support, sales, HR, finance, content)",
-                "Build & deploy workflows (bots, digests, GitHub, webhooks)",
+                "Requirements brief → confirm → blueprint → approve → sandbox test → deploy → run",
+                "Hybrid LLM: your API key, vault, or workspace default for planning",
                 "Agent OS research plans with human approval",
-                "List / run / check status of workspace workflows",
-                "Upload chat files up to 2 GB (chunked) + background index into Knowledge",
-                "Schedule, pause, and list workflow crons from chat",
-                "Compliance brief, security posture, workspace health (EIAP)",
-                "FinOps cost summary and open recommendations",
-                "Export / share conversations; auto title, tags, summarize",
-                "Audit trail of chat actions",
-                "Vault posture + integrations health / test notify",
-                "Enterprise playbooks (incident, weekly ops, onboard bot)",
-                "Workspace policy gates on run/deploy/schedule",
-                "Enterprise sandbox suite + heal; voice commands (approve, navigate, run)",
+                "List / run / monitor / schedule workspace workflows from chat",
+                "Knowledge: upload, index attachments, store chat notes, RAG in workflows",
+                "Enterprise EIAP: compliance, FinOps, health, audit, export/share",
+            ],
+            "can_build": [
+                "Email / Gmail / Outlook digests and alerts",
+                "Slack, Discord, Telegram, WhatsApp bots and notifications",
+                "GitHub / Jira / Linear triage and issue workflows",
+                "Google Sheets, Calendar, Drive, YouTube, Shopify integrations",
+                "Webhook / HTTP / custom API automations",
+                "Knowledge RAG + LLM processing pipelines",
+                "Multi-agent supervisor workflows",
+                "Scheduled jobs (cron via chat after deploy)",
+            ],
+            "needs_credentials": [
+                "SMTP / Gmail app passwords, Slack/Telegram tokens, API keys",
+                "Google / Microsoft OAuth tokens in Credentials (link from chat)",
+                "Custom API keys via vault or paste-in-chat (real secrets, not hints)",
+            ],
+            "needs_express": [
+                "Say express compose to skip requirements brief and fast-path test",
+                "High-confidence recipe matches can auto-test in one turn",
+            ],
+            "workflow_types": [
+                {"id": "email", "label": "Email workflow", "chip": "Build an email digest workflow"},
+                {"id": "slack", "label": "Slack bot", "chip": "Build a Slack alert workflow"},
+                {"id": "webhook", "label": "Webhook", "chip": "Build a webhook automation workflow"},
+                {"id": "custom_api", "label": "Custom API", "chip": "Build a workflow for a custom API"},
+                {"id": "agent", "label": "Agent", "chip": "Build a multi-agent research workflow"},
+                {"id": "schedule", "label": "Scheduled job", "chip": "Build a daily scheduled workflow"},
+                {"id": "knowledge", "label": "Knowledge RAG", "chip": "Build a workflow that answers from my knowledge base"},
             ],
             "cannot": [
                 "Control your PC shell, desktop, or browser outside NovaFlow",
+                "Run arbitrary code, shell scripts, or arbitrary visual-editor nodes not in the runtime palette",
+                "Complete OAuth provider login inside chat (use Credentials with return-to-chat links)",
+                "Guarantee perfect graphs for every novel request without confirm + sandbox test",
+                "Bypass workspace RBAC or enforce policies (viewer cannot run/deploy)",
             ],
             "chips": [
+                "Build an email digest workflow",
+                "Build a Slack alert workflow",
+                "Build a custom API workflow",
                 "Show powerhouse",
                 "Show forge",
                 "Run incident autopilot",
-                "What can you do?",
-                "Diff my workflow",
-                "Show prompt drift",
             ],
         },
     }
@@ -332,9 +472,18 @@ def list_workflows_event(db: Session, workspace_id: int) -> dict[str, Any]:
         .all()
     )
     items = [{"id": w.id, "name": w.name, "link": f"/workflows/{w.id}"} for w in rows]
+    total = (
+        db.query(Workflow)
+        .filter(Workflow.workspace_id == workspace_id, Workflow.status == 1)
+        .count()
+    )
     return {
         "type": "aios_workflows",
-        "data": {"workflows": items, "count": len(items)},
+        "data": {
+            "workflows": items,
+            "count": total,
+            "message": f"You have **{total}** published workflow(s). Showing latest {len(items)}.",
+        },
     }
 
 
@@ -450,6 +599,155 @@ async def run_workflow_action(
     out_events.append(event)
     summary = f"Ran workflow **{wf.name}** — status: {status}."
     return {"events": out_events, "blocked_normal_reply": True, "summary": summary}
+
+
+async def test_workflow_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    conv, aios = _load_aios(db, conversation_id)
+    wf = _find_workflow(db, workspace_id, text, aios)
+    if not wf:
+        return {
+            "events": [
+                {
+                    "type": "aios_test_report",
+                    "data": {"status": "failed", "message": "No published workflow found to test."},
+                }
+            ],
+            "blocked_normal_reply": True,
+            "summary": "No workflow found to test.",
+        }
+    try:
+        graph = json.loads(wf.graph_json or "{}")
+    except json.JSONDecodeError:
+        graph = {"nodes": [], "edges": []}
+    from app.sandbox.enterprise_suite import run_enterprise_suite
+
+    report = run_enterprise_suite(
+        graph,
+        field="generic",
+        db=db,
+        workspace_id=workspace_id,
+        live_credential_probe=True,
+    )
+    ok = report.get("status") == "success"
+    aios["last_test"] = {
+        "workflow_id": wf.id,
+        "ok": ok,
+        "score": report.get("score"),
+    }
+    _save_aios(db, conv, aios)
+    audit_chat_action(
+        db,
+        action="test_workflow",
+        user_id=user_id,
+        workspace_id=workspace_id,
+        resource_type="workflow",
+        resource_id=wf.id,
+        detail={"ok": ok, "score": report.get("score")},
+    )
+    msg = "Sandbox test passed." if ok else "Sandbox test reported issues — open the workflow builder to fix nodes."
+    return {
+        "events": [
+            {
+                "type": "aios_test_report",
+                "data": {
+                    **report,
+                    "workflow_id": wf.id,
+                    "workflow_name": wf.name,
+                    "message": msg,
+                    "links": {"workflow": f"/workflows/{wf.id}"},
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": f"Test **{wf.name}**: {'passed' if ok else 'issues found'}.",
+    }
+
+
+async def run_workflows_parallel_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    conv, aios = _load_aios(db, conversation_id)
+    needles = _parse_workflow_needles(text)
+    workflows = _find_workflows_by_needles(db, workspace_id, needles, aios)
+    if not workflows:
+        return {
+            "events": [
+                {
+                    "type": "aios_run_status",
+                    "data": {"status": "error", "message": "No matching published workflows found."},
+                }
+            ],
+            "blocked_normal_reply": True,
+            "summary": "No workflows matched for parallel run.",
+        }
+    from app.services.workflow import run_workflow_with_progress
+    from app.services.workflow_run_cancel import clear_run, register_run
+
+    conversation_api_key = aios.get("conversation_api_key")
+    results: list[dict[str, Any]] = []
+    for wf in workflows:
+        cancel_event = register_run(workspace_id, user_id)
+        try:
+            result = await run_workflow_with_progress(
+                db,
+                wf,
+                user_id,
+                aios.get("goal") or "Run from chat",
+                None,
+                workspace_id,
+                conversation_api_key=conversation_api_key,
+                cancel_event=cancel_event,
+            )
+            status = result.get("status") or "completed"
+            results.append(
+                {
+                    "workflow_id": wf.id,
+                    "workflow_name": wf.name,
+                    "status": status,
+                    "output": (result.get("output") or "")[:400],
+                }
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "workflow_id": wf.id,
+                    "workflow_name": wf.name,
+                    "status": "error",
+                    "output": str(exc)[:200],
+                }
+            )
+        finally:
+            clear_run(workspace_id, user_id)
+    aios["parallel_runs"] = results
+    _save_aios(db, conv, aios)
+    summary = "; ".join(f"{r['workflow_name']}: {r['status']}" for r in results)
+    return {
+        "events": [
+            {
+                "type": "aios_run_status",
+                "data": {
+                    "status": "completed",
+                    "parallel": True,
+                    "results": results,
+                    "message": summary,
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": f"Parallel run: {summary}",
+    }
 
 
 async def delete_workflow_action(
@@ -730,6 +1028,248 @@ def index_attachments(
     }
 
 
+def store_chat_knowledge_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    from app.database import KnowledgeChunk
+    from app.services.knowledge import chunk_text
+
+    conv = db.get(Conversation, conversation_id) if conversation_id else None
+    body = (text or "").strip()
+    if conv and len(body) < 80:
+        try:
+            meta = json.loads(conv.meta_json or "{}")
+            turns = meta.get("messages") or meta.get("turns") or []
+            if isinstance(turns, list) and turns:
+                parts = []
+                for turn in turns[-12:]:
+                    if isinstance(turn, dict):
+                        parts.append(f"{turn.get('role', 'user')}: {turn.get('content', '')}")
+                    else:
+                        parts.append(str(turn))
+                body = "\n".join(parts).strip() or body
+        except json.JSONDecodeError:
+            pass
+    if not body:
+        return {
+            "events": [
+                {
+                    "type": "aios_knowledge",
+                    "data": {"status": "error", "message": "Nothing to store — chat first or paste text."},
+                }
+            ],
+            "blocked_normal_reply": True,
+            "summary": "No content to store.",
+        }
+
+    kb = KnowledgeBase(
+        name=f"Chat notes {str(conversation_id or 'session')[:8]}",
+        description="Stored from chat",
+        user_id=user_id,
+        workspace_id=workspace_id,
+        type=0,
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    kf = KnowledgeFile(
+        knowledge_id=kb.id,
+        file_name="chat_notes.txt",
+        file_path="chat://notes",
+        status=5,
+    )
+    db.add(kf)
+    db.commit()
+    db.refresh(kf)
+    pieces = chunk_text(body, 1000, 100)
+    for i, piece in enumerate(pieces):
+        db.add(KnowledgeChunk(knowledge_id=kb.id, file_id=kf.id, chunk_index=i, text=piece))
+    db.commit()
+
+    conv_row, aios = _load_aios(db, conversation_id)
+    aios["knowledge_id"] = kb.id
+    _save_aios(db, conv_row, aios)
+    return {
+        "events": [
+            {
+                "type": "aios_knowledge",
+                "data": {
+                    "status": "stored",
+                    "knowledge_id": kb.id,
+                    "name": kb.name,
+                    "message": f"Stored in knowledge **{kb.name}** ({len(pieces)} chunks).",
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": f"Stored in knowledge **{kb.name}**.",
+    }
+
+
+def list_llm_providers_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+) -> dict[str, Any]:
+    from app.composer.llm_resolve import list_llm_alternatives, resolve_chat_llm_config
+
+    _, aios = _load_aios(db, conversation_id)
+    cfg = resolve_chat_llm_config(db, workspace_id, user_id, aios)
+    alts = cfg.get("available_alternatives") or list_llm_alternatives(db, workspace_id, user_id, aios)
+    msg = f"Active: {cfg.get('planning_label') or cfg.get('provider_name')}"
+    return {
+        "events": [
+            {
+                "type": "aios_meta",
+                "data": {
+                    "message": msg,
+                    "planning_label": cfg.get("planning_label"),
+                    "planning_source": cfg.get("source"),
+                    "providers": alts,
+                    "chips": ["Switch model", "Use workspace default"],
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": msg,
+    }
+
+
+def switch_planning_model_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    from app.composer.llm_resolve import apply_planning_model_switch, resolve_chat_llm_config
+
+    conv, aios = _load_aios(db, conversation_id)
+    if not apply_planning_model_switch(aios, text, db, workspace_id, user_id):
+        return {
+            "events": [{"type": "aios_error", "data": {"message": "Say e.g. use model openai/gpt-4o-mini"}}],
+            "blocked_normal_reply": True,
+            "summary": "Could not parse model.",
+        }
+    _save_aios(db, conv, aios)
+    cfg = resolve_chat_llm_config(db, workspace_id, user_id, aios)
+    return {
+        "events": [
+            {
+                "type": "aios_meta",
+                "data": {
+                    "message": f"Planning: **{cfg.get('planning_label')}**",
+                    "planning_label": cfg.get("planning_label"),
+                    "chips": ["Yes build this", "List providers"],
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": cfg.get("planning_label") or "Model set",
+    }
+
+
+def use_workspace_llm_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+) -> dict[str, Any]:
+    from app.composer.llm_resolve import resolve_chat_llm_config
+
+    conv, aios = _load_aios(db, conversation_id)
+    aios.pop("planning_override", None)
+    aios.pop("planning_model", None)
+    _save_aios(db, conv, aios)
+    cfg = resolve_chat_llm_config(db, workspace_id, user_id, aios)
+    return {
+        "events": [
+            {
+                "type": "aios_meta",
+                "data": {
+                    "message": f"Using **{cfg.get('planning_label')}**",
+                    "planning_label": cfg.get("planning_label"),
+                    "chips": ["List providers", "Switch model"],
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": cfg.get("planning_label") or "Workspace LLM",
+    }
+
+
+async def create_component_action(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    text: str,
+) -> dict[str, Any]:
+    from app.services.dynamic_component_creator import ComponentDiscovery, DynamicComponentCreator
+    from app.services.user_management import UserApiKeyManager
+
+    mgr = UserApiKeyManager(db)
+    api_key = mgr.get_user_api_key(user_id)
+    discovery = ComponentDiscovery()
+    creator = DynamicComponentCreator(discovery, api_key)
+    m = re.search(
+        r"(?:create|make|build|new)\s+component\s+[\"']?([a-zA-Z0-9_\- ]{2,60})",
+        text or "",
+        re.I,
+    )
+    name = (m.group(1).strip().replace(" ", "_") if m else "custom_component")
+    purpose = text or name
+    result = await creator.create_component_if_missing(name, purpose)
+    status = result.get("status") or "error"
+    msg = result.get("message") or f"Component {name}: {status}"
+    return {
+        "events": [
+            {
+                "type": "aios_forge",
+                "data": {
+                    "message": msg,
+                    "component": (result.get("component") or {}).get("name") or name,
+                    "status": status,
+                    "chips": ["Build a workflow for this", "Show forge", "What can you do?"],
+                },
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": msg,
+    }
+
+
+def requirements_confirm_action(db: Session, *, conversation_id: str | None) -> dict[str, Any]:
+    conv, aios = _load_aios(db, conversation_id)
+    aios["requirements_confirmed"] = True
+    pending = aios.get("pending_compose_goal") or ""
+    _save_aios(db, conv, aios)
+    out: dict[str, Any] = {
+        "events": [
+            {
+                "type": "aios_requirements_brief",
+                "data": {"status": "confirmed", "message": "Confirmed — building workflow."},
+            }
+        ],
+        "blocked_normal_reply": True,
+        "summary": "Building workflow.",
+    }
+    if pending:
+        out["recompose_after_confirm"] = True
+        out["recompose_goal"] = pending
+    return out
+
+
 def use_knowledge(
     db: Session,
     *,
@@ -787,12 +1327,18 @@ def use_knowledge(
 
 
 def credentials_needed_event(aios: dict[str, Any]) -> dict[str, Any]:
+    from app.composer.chat_requirements import oauth_assist_url
+
     missing = aios.get("missing_credentials") or []
+    req = aios.get("requirements") or {}
+    oauth_url = oauth_assist_url(req.get("integration"))
     return {
         "type": "aios_credentials_needed",
         "data": {
             "missing": missing or ["No gaps recorded — open Credentials to manage vault entries"],
-            "credentials_url": "/credentials",
+            "credentials_url": oauth_url,
+            "oauth_assist_url": oauth_url,
+            "chips": ["Open credentials", "What credentials?"],
         },
     }
 
@@ -821,7 +1367,7 @@ async def dispatch_ops_action(
     # Workspace enforce policies (PlatformPolicy)
     from app.composer.chat_requirements import check_chat_policy
 
-    if intent in ("run_workflow", "schedule_create", "schedule_pause", "fulfill_requirements", "test_notification", "incident_kill_switch"):
+    if intent in ("run_workflow", "run_workflows_parallel", "test_workflow", "schedule_create", "schedule_pause", "fulfill_requirements", "test_notification", "incident_kill_switch"):
         policy_block = check_chat_policy(db, workspace_id=workspace_id, action=intent)
         if policy_block:
             return policy_block
@@ -852,6 +1398,35 @@ async def dispatch_ops_action(
                 "summary": "Too many chat actions — wait a moment.",
             }
         return await run_workflow_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
+    if intent == "run_workflows_parallel":
+        if not check_compose_rate(workspace_id, user_id):
+            return {
+                "events": [
+                    {
+                        "type": "aios_run_status",
+                        "data": {"status": "error", "message": "Rate limit — try again in a minute."},
+                    }
+                ],
+                "blocked_normal_reply": True,
+                "summary": "Too many chat actions — wait a moment.",
+            }
+        return await run_workflows_parallel_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
+    if intent == "test_workflow":
+        return await test_workflow_action(
             db,
             workspace_id=workspace_id,
             user_id=user_id,
@@ -925,6 +1500,46 @@ async def dispatch_ops_action(
         return index_attachments(
             db, workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id
         )
+
+    if intent == "store_chat_knowledge":
+        return store_chat_knowledge_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
+    if intent == "list_llm_providers":
+        return list_llm_providers_action(
+            db, workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id
+        )
+
+    if intent == "switch_planning_model":
+        return switch_planning_model_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
+    if intent == "use_workspace_llm":
+        return use_workspace_llm_action(
+            db, workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id
+        )
+
+    if intent == "create_component":
+        return await create_component_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            text=user_message,
+        )
+
+    if intent == "requirements_confirm":
+        return requirements_confirm_action(db, conversation_id=conversation_id)
 
     if intent == "use_knowledge":
         return use_knowledge(db, workspace_id=workspace_id, conversation_id=conversation_id, text=user_message)
@@ -1131,5 +1746,25 @@ async def dispatch_ops_action(
             user_message=user_message,
             intent=intent,
         )
+
+    from app.composer.chat_node_factory import (
+        NAV_INTENTS,
+        NODE_FACTORY_INTENTS,
+        dispatch_nav_action,
+        dispatch_node_factory_action,
+    )
+
+    if intent in NODE_FACTORY_INTENTS:
+        return await dispatch_node_factory_action(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=user_message,
+            intent=intent,
+        )
+
+    if intent in NAV_INTENTS:
+        return dispatch_nav_action(intent, user_message)
 
     return None

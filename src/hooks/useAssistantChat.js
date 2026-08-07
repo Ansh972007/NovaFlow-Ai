@@ -21,6 +21,8 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
   const [messages, setMessages] = useState(() => pruneEmptyAssistants(initialMessages));
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState("");
+  const [connectionStatus, setConnectionStatus] = useState("connected");
+  const [planningLabel, setPlanningLabel] = useState("");
   const socketRef = useRef(null);
   const botMsgIdRef = useRef(null);
   const conversationIdRef = useRef("");
@@ -158,10 +160,14 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
         },
         onStreamEnd: (chunk, data) => {
           const receipt = data?.receipt || null;
+          if (receipt?.planning_label) {
+            setPlanningLabel(receipt.planning_label);
+          }
           const endText = String(chunk || "").trim();
           const buffered = pendingAiosEventsRef.current || [];
           const primary = buffered[0] || null;
-          const aiosOnly = Boolean(data?.aios_only || aiosTurnActiveRef.current || primary);
+          const aiosOnlyEnd = Boolean(data?.aios_only);
+          const aiosOnly = Boolean(aiosOnlyEnd || aiosTurnActiveRef.current || primary);
           pendingAiosEventsRef.current = [];
           aiosTurnActiveRef.current = false;
 
@@ -175,6 +181,8 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
             return "";
           };
 
+          const attachAios = buffered.length > 0 || aiosOnlyEnd;
+
           setMessages((prev) => {
             const streamingId = botMsgIdRef.current;
 
@@ -187,8 +195,8 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
                   role: "assistant",
                   content,
                   streaming: false,
-                  event: primary || undefined,
-                  aiosEvents: buffered.length ? buffered : undefined,
+                  event: attachAios ? primary || undefined : undefined,
+                  aiosEvents: attachAios && buffered.length ? buffered : undefined,
                   receipt,
                 },
               ];
@@ -200,8 +208,12 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
                 ...m,
                 content: resolveContent(m.content),
                 streaming: false,
-                event: primary || m.event,
-                aiosEvents: buffered.length ? buffered : m.aiosEvents,
+                event: attachAios ? primary || m.event : undefined,
+                aiosEvents: attachAios
+                  ? buffered.length
+                    ? buffered
+                    : m.aiosEvents
+                  : undefined,
                 receipt: receipt || m.receipt,
               };
             });
@@ -243,6 +255,7 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
         },
         onDisconnect: () => {
           setStreaming(false);
+          setConnectionStatus("reconnecting");
         },
         onConversation: (conversationId) => {
           conversationIdRef.current = conversationId || "";
@@ -266,6 +279,7 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
 
     socketRef.current = socket;
     await socket.connect();
+    setConnectionStatus("connected");
   }, [app, sessionId]);
 
   const lastSessionIdRef = useRef(sessionId);
@@ -407,6 +421,8 @@ export function useAssistantChat({ app, sessionId, initialMessages = [] }) {
     messages,
     streaming,
     error,
+    connectionStatus,
+    planningLabel,
     sendMessage,
     stop,
     regenerate,

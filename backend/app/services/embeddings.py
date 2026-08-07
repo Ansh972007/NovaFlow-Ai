@@ -48,16 +48,9 @@ async def embed_texts(texts: list[str], model: str | None = None) -> list[list[f
 
 
 def embed_texts_sync(texts: list[str], model: str | None = None) -> list[list[float]]:
-    import asyncio
+    from app.runtime.async_bridge import run_coro_sync
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(embed_texts(texts, model))
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(lambda: asyncio.run(embed_texts(texts, model))).result()
+    return run_coro_sync(embed_texts(texts, model))
 
 
 def parse_embedding(raw: str | None) -> list[float] | None:

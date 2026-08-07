@@ -1,8 +1,19 @@
-# NovaFlow Cursor-safe stack (standalone) for 16 GB RAM
-# Start: .\scripts\cursor-stack-up.ps1
-# Web http://localhost:3000  API http://localhost:3001  set NOVAFLOW_ADMIN_PASSWORD
+# NovaFlow Cursor-safe stack (standalone) for ~16 GB RAM — no Milvus
 #
-# No Milvus. No image rebuild. Hard memory caps.
+# FIRST TIME:
+#   .\scripts\cursor-stack-build.ps1
+#
+# BACKEND ONLY (bind mount — no image rebuild):
+#   docker compose -f docker-compose.cursor.yml restart api
+#
+# FRONTEND ONLY:
+#   .\scripts\rebuild-web-safe.ps1
+#
+# START (no rebuild):
+#   .\scripts\cursor-stack-up.ps1
+#
+# Web http://localhost:3000  API http://localhost:3001
+# Default login: admin / NovaFlowLocalDevAdmin1
 
 name: novaflow
 
@@ -53,6 +64,9 @@ services:
       retries: 5
 
   api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     image: novaflow-api:latest
     pull_policy: never
     user: root
@@ -65,27 +79,50 @@ services:
       NOVAFLOW_ENV: development
       DATABASE_URL: mysql+pymysql://novaflow:novaflow@mysql:3306/novaflow
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: ${JWT_SECRET:-novaflow-local-dev-secret-change-before-prod}
+      JWT_SECRET: novaflow-local-dev-secret-change-before-prod
       ACCESS_TOKEN_MINUTES: "15"
       REFRESH_TOKEN_DAYS: "14"
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:3000,http://localhost:3000
       DATA_DIR: /app/data
       NOVAFLOW_DEMO_SEED: "0"
       NOVAFLOW_ADMIN_USER: admin
-      NOVAFLOW_ADMIN_PASSWORD: ${NOVAFLOW_ADMIN_PASSWORD:?Set NOVAFLOW_ADMIN_PASSWORD}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-novaflow85@gmail.com}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-whli jwom rrlu spph}
-      SMTP_FROM: ${SMTP_FROM:-novaflow85@gmail.com}
+      NOVAFLOW_ADMIN_PASSWORD: NovaFlowLocalDevAdmin1
+      SMTP_HOST: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      SMTP_FROM: ""
 
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_API_KEY: ""
+      OPENAI_BASE_URL: https://openrouter.ai/api/v1
+      OPENAI_MODEL: openai/gpt-4o-mini
       MILVUS_URI: ""
       SSRF_ALLOW_PRIVATE: "0"
+
+      UNIVERSAL_CHAT_ENABLED: "1"
+      COMPONENT_DIR: /app/components
+      ENABLE_DYNAMIC_COMPONENT_CREATION: "1"
+      ENABLE_API_REQUIREMENT_GATHERING: "1"
+      ENABLE_LLM_GRAPH_COMPOSE: "1"
+      ENABLE_CONVERSATION_API_KEYS: "1"
+      USER_API_KEY_REQUIRED: "0"
+      DEFAULT_USER_ROLE: admin
+      DEFAULT_USER_PROVIDER: openrouter
+      DEFAULT_USER_MODEL: openai/gpt-4o-mini
+      OPENROUTER_API_KEY: ""
+      GMAIL_ONLY_AUTH: "0"
+      STRICT_SECURITY_MODE: "0"
+      ENFORCE_GMAIL_ONLY: "0"
+      REQUIRE_USER_API_KEYS: "0"
+      ALLOW_PASSWORD_LOGIN: "1"
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      OAUTH_REDIRECT_BASE: http://localhost:3001
+      FRONTEND_URL: http://localhost:3000
     volumes:
+      - ./backend/app:/app/app
       - novaflow_data:/app/data
+      - novaflow_components:/app/components
     mem_limit: 768m
     cpus: "1.0"
     healthcheck:
@@ -114,10 +151,11 @@ services:
     ports:
       - "${WEB_PORT:-3000}:3000"
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:3001}
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:3001
       API_INTERNAL_URL: http://api:3001
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
+      NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED: "true"
     mem_limit: 384m
     cpus: "0.75"
     depends_on:
@@ -127,3 +165,4 @@ services:
 volumes:
   novaflow_mysql:
   novaflow_data:
+  novaflow_components:

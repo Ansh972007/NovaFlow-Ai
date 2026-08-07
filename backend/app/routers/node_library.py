@@ -87,6 +87,45 @@ def api_update_definition(
         return fail(400, str(exc))
 
 
+@router.post("/nodes/library/import-openapi")
+def api_import_openapi(
+    body: dict = Body(...),
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    from app.services.openapi_import import draft_definitions_from_openapi, summarize_openapi
+    from app.services.node_library import create_definition, node_def_dict
+
+    raw = (body.get("spec") or body.get("openapi") or "").strip()
+    if not raw:
+        return fail(400, "spec required")
+    try:
+        summary = summarize_openapi(raw)
+        drafts = draft_definitions_from_openapi(raw)
+    except ValueError as exc:
+        return fail(400, str(exc))
+    limit = min(int(body.get("limit") or 12), 24)
+    created: list[dict] = []
+    for draft in drafts[:limit]:
+        try:
+            row = create_definition(db, ctx.workspace_id, ctx.user.user_id, draft)
+            created.append(node_def_dict(row, include_definition=False))
+        except ValueError:
+            continue
+    ctx.audit(
+        "node_library.openapi_import",
+        detail={"created": len(created), "title": summary.get("title")},
+    )
+    return ok(
+        {
+            "title": summary.get("title"),
+            "operation_count": summary.get("operation_count"),
+            "operations": summary.get("operations") or [],
+            "created": created,
+        }
+    )
+
+
 @router.post("/nodes/library/probe")
 async def api_probe_http(
     body: dict = Body(...),

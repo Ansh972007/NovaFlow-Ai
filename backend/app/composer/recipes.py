@@ -209,7 +209,7 @@ RECIPES: list[dict[str, Any]] = [
         "id": "google_calendar_reminder",
         "name": "Google Calendar Reminder",
         "match": ("google calendar", "gcal", "calendar reminder"),
-        "any_of": ("google calendar", "gcal", "calendar reminder", "calendar event"),
+        "any_of": ("google calendar", "gcal", "calendar reminder", "calendar event", "meeting", "meetings", "calander"),
         "caps": ["cap_google", "cap_workflow"],
         "field": "ops",
         "description": "Fetch or create Google Calendar events",

@@ -142,6 +142,26 @@ export function LinearIcon({ size = 18 }) {
   );
 }
 
+export function ApiNodeIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M4 7h6v6H4zM14 7h6v6h-6zM9 17h6v6H9z" />
+      <path d="M10 10h4M12 8v4" />
+    </svg>
+  );
+}
+
+export function ComponentIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <rect x="3" y="3" width="8" height="8" rx="1.5" />
+      <rect x="13" y="3" width="8" height="8" rx="1.5" />
+      <rect x="3" y="13" width="8" height="8" rx="1.5" />
+      <path d="M17 13v8M13 17h8" />
+    </svg>
+  );
+}
+
 export const NODE_ICONS = {
   trigger: TriggerIcon,
   retrieve: RetrieveIcon,
@@ -159,4 +179,6 @@ export const NODE_ICONS = {
   human: HumanIcon,
   agent: AgentIcon,
   subgraph: HttpIcon,
+  api_node: ApiNodeIcon,
+  component_node: ComponentIcon,
 };

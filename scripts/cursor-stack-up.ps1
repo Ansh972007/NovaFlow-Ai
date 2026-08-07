@@ -86,5 +86,5 @@ Write-Host ""
 Write-Host "OK - NovaFlow Cursor-safe stack is up" -ForegroundColor Green
 Write-Host "  Web:   http://localhost:3000"
 Write-Host "  API:   http://localhost:3001/health"
-Write-Host "  Login: set NOVAFLOW_ADMIN_PASSWORD"
+Write-Host "  Login: admin / NovaFlowLocalDevAdmin1"
 Write-Host "  Mode:  no Milvus, memory-capped, no rebuild"

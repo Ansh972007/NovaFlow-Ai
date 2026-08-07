@@ -135,6 +135,13 @@ const NODE_META = {
     ring: "http",
     port: "bg-indigo-500",
   },
+  component_node: {
+    label: "Component",
+    accent: "workflow-node-agent",
+    iconBg: "from-sky-400/20 to-sky-600/10 text-sky-800",
+    ring: "agent",
+    port: "bg-sky-500",
+  },
 };
 
 function clamp(n, min, max) {

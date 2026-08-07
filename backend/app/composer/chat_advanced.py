@@ -34,6 +34,44 @@ _COMPLEX = re.compile(
     re.I,
 )
 
+_CONVERSATIONAL = re.compile(
+    r"^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|great|good morning|good evening|"
+    r"good afternoon|how are you|what's up|whats up)[!.?\s]*$",
+    re.I,
+)
+
+_REFINE = re.compile(
+    r"\b(refine|update (the )?plan|change (the )?plan|add (a )?node|tweak|adjust|modify)\b",
+    re.I,
+)
+
+_EXPLICIT_WORKFLOW = re.compile(
+    r"\b(build|create|make|compose)\b.*\b(workflow|bot|automation|agent)\b|"
+    r"\bbuild a workflow\b|\bmake a workflow\b|\bworkflow for\b",
+    re.I,
+)
+
+
+def is_conversational_message(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    if _CONVERSATIONAL.match(t):
+        return True
+    if len(t.split()) <= 3 and not re.search(
+        r"\b(workflow|bot|automate|jira|telegram|email|github|calendar)\b", t, re.I
+    ):
+        return True
+    return False
+
+
+def is_refine_message(text: str) -> bool:
+    return bool(_REFINE.search(text or ""))
+
+
+def is_explicit_workflow_request(text: str) -> bool:
+    return bool(_EXPLICIT_WORKFLOW.search(text or ""))
+
 
 def is_vague_goal(text: str) -> bool:
     t = (text or "").strip()

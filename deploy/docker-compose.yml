@@ -54,6 +54,7 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+    image: novaflow-api:latest
     user: root
     container_name: novaflow-api
     restart: unless-stopped
@@ -61,13 +62,12 @@ services:
       - "3001:3001"
     environment:
       NOVAFLOW_PORT: "3001"
-      NOVAFLOW_ENV: ${NOVAFLOW_ENV:-production}
-      NOVAFLOW_ADMIN_PASSWORD: ${NOVAFLOW_ADMIN_PASSWORD:-NovaFlowSecureAdminPassword2024!}
+      NOVAFLOW_ENV: ${NOVAFLOW_ENV:-development}
+      NOVAFLOW_ADMIN_PASSWORD: ${NOVAFLOW_ADMIN_PASSWORD:-NovaFlowLocalDevAdmin1}
       DATABASE_URL: mysql+pymysql://novaflow:novaflow@mysql:3306/novaflow
-      # STRICT SECURITY: Production-grade security enforcement
-      STRICT_SECURITY_MODE: "1"
-      ENFORCE_GMAIL_ONLY: "1"
-      REQUIRE_USER_API_KEYS: "1"
+      STRICT_SECURITY_MODE: ${STRICT_SECURITY_MODE:-0}
+      ENFORCE_GMAIL_ONLY: ${ENFORCE_GMAIL_ONLY:-0}
+      REQUIRE_USER_API_KEYS: ${REQUIRE_USER_API_KEYS:-0}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-NovaFlowSecureJWTSecret2024ProductionGradeSecurity!}
       ACCESS_TOKEN_MINUTES: "15"
@@ -76,13 +76,13 @@ services:
       DATA_DIR: /app/data
       NOVAFLOW_DEMO_SEED: "0"
       NOVAFLOW_ADMIN_USER: admin
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-novaflow85@gmail.com}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-whli jwom rrlu spph}
-      SMTP_FROM: ${SMTP_FROM:-novaflow85@gmail.com}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
 
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-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}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-openai/gpt-4o-mini}
       MILVUS_URI: http://milvus:19530
@@ -93,18 +93,17 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:3001}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      ALLOW_PASSWORD_LOGIN: ${ALLOW_PASSWORD_LOGIN:-0}
+      ALLOW_PASSWORD_LOGIN: ${ALLOW_PASSWORD_LOGIN:-1}
       
       # Universal AI Chat System Configuration
       UNIVERSAL_CHAT_ENABLED: "1"
       COMPONENT_DIR: /app/components
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      USER_API_KEY_REQUIRED: "1"
+      USER_API_KEY_REQUIRED: ${USER_API_KEY_REQUIRED:-0}
       ENABLE_DYNAMIC_COMPONENT_CREATION: "1"
       ENABLE_API_REQUIREMENT_GATHERING: "1"
-      
-      # Gmail-only authentication
-      GMAIL_ONLY_AUTH: "1"
+      ENABLE_LLM_GRAPH_COMPOSE: "1"
+      GMAIL_ONLY_AUTH: ${GMAIL_ONLY_AUTH:-0}
       
       # Ensure global chat uses user-provided API keys
       ENABLE_CONVERSATION_API_KEYS: "1"

@@ -15,13 +15,17 @@ from app.composer.credentials import secure_vault_save
 from app.composer.deployment import deploy_solution_graph
 from app.composer.planner import compile_solution_blueprint
 from app.composer.recipes import is_express_recipe, progress_steps
+from app.runtime.async_bridge import run_sync_from_async
 from app.composer.workflow_composer import preview_graph_for_solution
 from app.composer.chat_advanced import (
     boundary_event,
     clarify_event,
     heal_and_retest,
     is_complex_agent_goal,
+    is_conversational_message,
+    is_explicit_workflow_request,
     is_host_control_request,
+    is_refine_message,
     is_vague_goal,
     resolve_hitl,
     start_agent_os_plan,
@@ -97,13 +101,18 @@ def _keyword_intent(text: str, *, has_pending: bool) -> str:
 
     if re.search(r"\bwhat can you do\b|\bcapabilities\b", t):
         return "capabilities"
-    if re.search(r"\blist (my )?workflows\b|\bshow (my )?workflows\b", t):
+    if re.search(r"\blist (my )?workflows\b|\bshow (my )?workflows\b|\bshow me my workflow\b|\bshow my workflow\b|\bhow many workflows?\b|\bworkflow count\b|\btotal workflows?\b", t):
         return "list_workflows"
     if re.search(r"\b(status of|workflow status|last run|run status|monitor)\b", t):
         return "workflow_status"
     if re.search(r"\bstop (this |the )?(run|workflow)\b", t):
         return "stop_run"
-    if re.search(r"\b(run|execute)\b.*\bworkflow\b|\brun (my )?(last )?workflow\b|\brun workflow\b|\bnow can you run\b|\bexecute workflow\b|\brun the workflow\b", t):
+    if re.search(
+        r"\b(run|execute)\b.*\bworkflow\b|\brun (my )?(last )?workflow\b|\brun workflow\b|"
+        r"\bnow can you run\b|\bexecute workflow\b|\brun the workflow\b|\brun now\b|"
+        r"\brun it\b|\bexecute it\b|\brun this\b",
+        t,
+    ):
         return "run_workflow"
     if re.search(r"\b(build|create|make|compose|generate)\b.*\b(workflow|bot|automation|agent|email|digest|system)\b|\bbuild a workflow\b|\bmake a workflow\b|\bworkflow for this\b|\bbuild a workflow for this\b", t):
         return "compose"
@@ -111,13 +120,15 @@ def _keyword_intent(text: str, *, has_pending: bool) -> str:
         return "compose"
     if re.search(r"\bindex (my )?attachments?\b|\bindex (these|the) files?\b", t):
         return "index_attachment"
+    if re.search(r"\bstore (this |that )?(data |info |summary )?in knowledge\b|\bsave to knowledge\b|\badd to knowledge\b", t):
+        return "store_chat_knowledge"
     if re.search(r"\buse knowledge\b|\buse (the )?knowledge base\b", t):
         return "use_knowledge"
     if re.search(r"\b(list )?missing credentials\b|\bwhat credentials\b", t):
         return "list_credentials_needed"
 
     if re.search(
-        r"\b(approve|confirm|looks good|lgtm|go ahead|yes,? approve|accept (the )?plan|make it|can you make it|now run it|run it|do it|direct access|direct acess)\b",
+        r"\b(approve|confirm|looks good|lgtm|go ahead|yes,? approve|accept (the )?plan|make it|can you make it|do it|direct access|direct acess)\b",
         t,
     ):
         return "approve"
@@ -415,10 +426,10 @@ def _select_primary_event(events: list[dict[str, Any]]) -> dict[str, Any] | None
 
 
 def _ui_events_from(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    primary = _select_primary_event(events)
-    if not primary:
+    if not events:
         return []
-    return [primary]
+    primary = _select_primary_event(events)
+    return [primary] if primary else []
 
 
 def apply_workspace_credentials(
@@ -453,6 +464,10 @@ def apply_workspace_credentials(
     for item in items:
         fields = item.get("fields") or {}
         if not fields:
+            continue
+        from app.composer.chat_channels import is_placeholder_credential_item
+
+        if is_placeholder_credential_item(item):
             continue
         raw_secrets.extend(item.get("raw_secrets") or [str(v) for v in fields.values()])
         row = vault.upsert_from_chat(
@@ -626,6 +641,77 @@ def _attachment_knowledge_id(
     return kb.id
 
 
+def _goal_implies_knowledge(goal: str) -> bool:
+    g = (goal or "").lower()
+    return any(k in g for k in ("knowledge", "docs", "rag", "document"))
+
+
+def _ensure_workflow_knowledge_id(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    conversation_id: str | None,
+    goal: str,
+    existing_id: int | None = None,
+) -> int | None:
+    """Resolve knowledge_id for retrieve nodes — attachments, existing, or auto-create."""
+    if existing_id:
+        kb = db.get(KnowledgeBase, int(existing_id))
+        if kb and kb.workspace_id == workspace_id:
+            return kb.id
+    if conversation_id:
+        attach_id = _attachment_knowledge_id(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        if attach_id:
+            return attach_id
+    if not _goal_implies_knowledge(goal):
+        return None
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.workspace_id == workspace_id)
+        .order_by(KnowledgeBase.id)
+        .first()
+    )
+    if kb:
+        return kb.id
+    kb = KnowledgeBase(
+        name="Workflow knowledge",
+        description="Auto-created for knowledge-backed workflows.",
+        user_id=user_id,
+        workspace_id=workspace_id,
+        type=0,
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    return kb.id
+
+
+def _bind_knowledge_to_preview(preview: dict[str, Any] | None, knowledge_id: int | None) -> dict[str, Any]:
+    if not knowledge_id or not isinstance(preview, dict):
+        return preview or {}
+    out = dict(preview)
+    nodes = []
+    for node in out.get("nodes") or []:
+        if not isinstance(node, dict):
+            nodes.append(node)
+            continue
+        node = dict(node)
+        if node.get("type") == "retrieve":
+            data = dict(node.get("data") or {})
+            if not data.get("knowledge_id"):
+                data["knowledge_id"] = knowledge_id
+            node["data"] = data
+        nodes.append(node)
+    out["nodes"] = nodes
+    return out
+
+
 def _run_sandbox_for_aios(
     db: Session,
     aios: dict[str, Any],
@@ -717,6 +803,89 @@ def _build_cred_chips(
     return cred_chips
 
 
+def _clear_pending_blueprint(aios: dict[str, Any]) -> dict[str, Any]:
+    """Drop stale blueprint state so greetings / Q&A do not replay old plans."""
+    for key in (
+        "compose_phase",
+        "phase",
+        "status",
+        "solution_id",
+        "workflow_id",
+        "approved",
+        "tested",
+        "executable_preview",
+        "blueprint",
+        "graph",
+        "missing_credentials",
+        "next_action",
+        "friendly_title",
+        "recipe_name",
+        "requirements",
+        "goal",
+        "requirements_confirmed",
+        "pending_compose_goal",
+        "planning_override",
+        "planning_model",
+        "planning_label",
+        "planning_source",
+    ):
+        aios.pop(key, None)
+    hints = aios.get("memory_hints") or []
+    if isinstance(hints, list):
+        aios["memory_hints"] = [
+            h for h in hints if not str(h).startswith(("recipe:", "field:", "knowledge:"))
+        ]
+    aios["compose_phase"] = None
+    aios["next_action"] = None
+    return aios
+
+
+def _recompute_compose_gates(
+    db: Session,
+    workspace_id: int,
+    req: dict[str, Any],
+    required_caps: list[str],
+    preview_graph: dict[str, Any],
+) -> tuple[list[dict], list[str], str, str]:
+    from app.composer.gap_analysis import analyze_graph_credential_gaps
+    from app.composer.chat_requirements import missing_workflow_slots
+
+    missing_slots = missing_workflow_slots(req)
+    live_missing = analyze_graph_credential_gaps(db, workspace_id, preview_graph, required_caps)
+    compose_phase = "gather" if missing_slots or live_missing else "await_approve"
+    next_action = "gather" if missing_slots else ("credentials" if live_missing else "approve")
+    return missing_slots, live_missing, compose_phase, next_action
+
+
+def _publish_gate_for_preview(
+    db: Session,
+    workspace_id: int,
+    preview: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not preview or not preview.get("nodes"):
+        return {
+            "ready": False,
+            "blockers": [{"source": "graph", "message": "No executable graph to validate"}],
+        }
+    from app.workflow_intelligence.graph.parser import parse_graph
+    from app.workflow_intelligence.publish_gate import check_publish_ready
+
+    raw = {"nodes": preview.get("nodes") or [], "edges": preview.get("edges") or []}
+    return check_publish_ready(parse_graph(raw), db=db, workspace_id=workspace_id)
+
+
+def _format_publish_blockers(gate: dict[str, Any]) -> str:
+    blockers = gate.get("blockers") or []
+    if not blockers:
+        return "Publish gate blocked this workflow."
+    lines: list[str] = []
+    for b in blockers[:8]:
+        src = b.get("source") or "gate"
+        msg = b.get("message") or b.get("code") or str(b)
+        lines.append(f"{src}: {msg}")
+    return "\n".join(lines)
+
+
 def _refresh_blueprint_from_aios(
     db: Session,
     *,
@@ -745,10 +914,6 @@ def _refresh_blueprint_from_aios(
         aios.get("required_capabilities")
         or infer_capabilities_from_goal(enriched_goal, force_workflow=True)
     )
-    live_missing = analyze_solution_gaps(db, workspace_id, required_caps)
-    missing_slots = missing_workflow_slots(req)
-    compose_phase = "gather" if missing_slots or live_missing else "await_approve"
-    next_action = "gather" if missing_slots else ("credentials" if live_missing else "approve")
     recipe_goal = req.get("raw") or req.get("goal") or enriched_goal
     if req.get("integration"):
         recipe_goal = f"{req.get('integration')} {recipe_goal}"
@@ -762,6 +927,9 @@ def _refresh_blueprint_from_aios(
         requirements=req,
         db=db,
         workspace_id=workspace_id,
+    )
+    missing_slots, live_missing, compose_phase, next_action = _recompute_compose_gates(
+        db, workspace_id, req, required_caps, preview_executable
     )
     blueprint = build_blueprint_preview(
         enriched_goal, req, required_caps, preview_executable, missing_credentials=live_missing
@@ -835,9 +1003,74 @@ def process_chat_goal(
         events.append(boundary_event())
         return _finalize(events, True, redacted_message)
 
+    from app.composer.chat_orchestrator import apply_orchestrator_patch, orchestrate_turn
+
+    orch = orchestrate_turn(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        user_message=text,
+        aios=aios,
+        has_pending=has_pending,
+    )
+    if orch:
+        if orch.get("mode") == "qa" and orch.get("allow_normal_reply"):
+            if has_pending and is_conversational_message(text):
+                aios = _clear_pending_blueprint(aios)
+                meta["aios"] = aios
+                _save_conv_meta(db, conv, meta)
+            return _finalize(events, False, redacted_message)
+        if orch.get("mode") == "ops" and orch.get("ops_intent"):
+            return {
+                "events": [],
+                "blocked_normal_reply": True,
+                "summary": "",
+                "redacted_message": redacted_message,
+                "ops_intent": orch.get("ops_intent"),
+                "needs_ops_dispatch": True,
+            }
+        if orch.get("requirements_patch"):
+            aios = apply_orchestrator_patch(aios, orch.get("requirements_patch") or {})
+            meta["aios"] = aios
+            _save_conv_meta(db, conv, meta)
+        if orch.get("mode") == "agent":
+            meta.setdefault("aios", aios)["mode"] = "agent"
+            _save_conv_meta(db, conv, meta)
+
     # Universal router: ops | work | agent | qa | pending | boundary
     from app.composer.chat_actions import OPS_INTENTS, classify_ops_intent
     from app.composer.chat_router import infer_field, universal_route
+    from app.services.intent_classifier import IntentClassifier, IntentType
+
+    universal_intent = IntentClassifier().classify(text)
+    if universal_intent == IntentType.HYBRID and not classify_ops_intent(text):
+        hybrid_route = universal_route(
+            text,
+            has_pending=has_pending,
+            last_field=aios.get("last_field"),
+        )
+        if (
+            hybrid_route.get("route") not in ("work_compose", "agent", "pending_action", "ops")
+            and not is_vague_goal(text)
+            and not classify_ops_intent(text)
+        ):
+            events.append(
+                {
+                    "type": "aios_suggest",
+                    "data": {
+                        "message": (
+                            "Multi-step request detected — I can compose workflows, run them, "
+                            "and answer questions. Pick a next step."
+                        ),
+                        "chips": [
+                            f"Build a workflow for this: {text[:100]}",
+                            "Run my last workflow",
+                            "What can you do?",
+                        ],
+                    },
+                }
+            )
+            return _finalize(events, True, redacted_message)
 
     route_info = universal_route(
         text,
@@ -862,9 +1095,72 @@ def process_chat_goal(
         events.append(boundary_event())
         return _finalize(events, True, redacted_message)
 
+    # Conversational / QA messages should not hijack pending blueprints into compose
+    from app.composer.chat_router import PENDING_ACTIONS
+
+    pending_cmd = classify_intent(text, has_pending=True)
+    if (
+        has_pending
+        and is_conversational_message(text)
+        and not is_explicit_workflow_request(text)
+        and pending_cmd not in PENDING_ACTIONS
+    ):
+        aios = _clear_pending_blueprint(aios)
+        meta["aios"] = aios
+        _save_conv_meta(db, conv, meta)
+        return _finalize(events, False, redacted_message)
+
     intent = route_info.get("intent_hint") or classify_intent(text, has_pending=has_pending)
-    if intent == "chat" and aios.get("compose_phase") in ("gather", "await_approve", "blueprint"):
-        intent = "refine"
+
+    deployed_wf = aios.get("workflow_id") or (aios.get("deploy") or {}).get("workflow_id")
+    if deployed_wf and aios.get("status") in ("deployed", "done", "tested", "approved"):
+        if re.search(r"\brun it\b|\brun this\b|\bexecute it\b|\brun now\b|\bnow run\b", text, re.I):
+            return {
+                "events": [],
+                "blocked_normal_reply": True,
+                "summary": "",
+                "redacted_message": redacted_message,
+                "ops_intent": "run_workflow",
+                "needs_ops_dispatch": True,
+            }
+    if intent == "approve" and aios.get("status") in ("deployed", "done") and deployed_wf:
+        if re.search(r"\brun it\b|\brun this\b|\bexecute it\b|\brun now\b", text, re.I):
+            intent = "run_workflow"
+
+    if intent == "approve" and aios.get("compose_phase") in ("gather", "blueprint"):
+        soft_approve = re.search(
+            r"\bmake\s+it\b|\bdo it\b|\brun it\b|\bnow run it\b|\bcan you make it\b",
+            text,
+            re.I,
+        )
+        explicit_approve = re.search(
+            r"\bapprove\b|\blgtm\b|\blooks good\b|\bconfirm\b|\bgo ahead\b",
+            text,
+            re.I,
+        )
+        if soft_approve and not explicit_approve:
+            intent = "refine"
+
+    if intent == "chat" and aios.get("compose_phase") in (
+        "gather",
+        "await_approve",
+        "blueprint",
+        "built",
+    ):
+        if is_refine_message(text):
+            intent = "refine"
+        elif is_explicit_workflow_request(text):
+            intent = "compose"
+        elif is_conversational_message(text):
+            aios = _clear_pending_blueprint(aios)
+            meta["aios"] = aios
+            _save_conv_meta(db, conv, meta)
+            return _finalize(events, False, redacted_message)
+        elif route_info.get("route") == "qa":
+            pass
+        else:
+            intent = "refine"
+
     if route_info.get("route") == "work_compose":
         intent = "compose" if intent not in ("refine",) else intent
     if route_info.get("route") == "agent" or (intent == "compose" and is_complex_agent_goal(text)):
@@ -907,88 +1203,112 @@ def process_chat_goal(
         looks_like_secret_message(text) and intent not in ("compose", "refine", "agent_run")
     ):
         if credential_items:
+            from app.composer.chat_channels import filter_real_credential_items
             from app.composer.gap_analysis import analyze_solution_gaps
 
-            cred_res = apply_workspace_credentials(db, workspace_id, credential_items, user_id=user_id)
-            redacted_message = redact_secrets_in_text(text, cred_res.get("raw_secrets") or [])
-            blocked_normal_reply = True
-            
-            # Check if LLM API key was provided and store it for conversation use
-            for item in credential_items:
-                if item.get("category") == "llm" and item.get("kind") == "openai":
-                    api_key = item.get("fields", {}).get("api_key")
-                    if api_key:
-                        # Store API key in conversation context for immediate use
-                        aios["conversation_api_key"] = api_key
-                        # Also save to vault for persistent use
-                        try:
-                            from app.services import credential_vault as vault
-
-                            vault.upsert_from_chat(
-                                db,
-                                workspace_id=workspace_id,
-                                user_id=user_id,
-                                category="llm",
-                                kind="openai",
-                                label="Conversation-provided API key",
-                                fields={"api_key": api_key},
-                            )
-                        except Exception as e:
-                            logger.warning("Failed to save API key to vault: %s", e)
-            
-            caps = aios.get("required_capabilities") or []
-            missing: list[str] = []
-            if caps:
-                missing = analyze_solution_gaps(db, workspace_id, caps)
-                aios["missing_credentials"] = missing
-                if aios.get("approved"):
-                    aios["next_action"] = "test" if not missing else "credentials"
-                else:
-                    aios["next_action"] = "approve" if not missing else "credentials"
-                meta["aios"] = aios
-                _save_conv_meta(db, conv, meta)
-            from app.composer.chat_requirements import missing_workflow_slots
-
-            missing_slots = missing_workflow_slots(dict(aios.get("requirements") or {}))
-            chips = _build_cred_chips(caps, missing, missing_slots)
-            if not missing and aios.get("solution_id"):
-                msg = (
-                    "Saved your login in Credentials. Next: tap **Approve**, then I’ll run the test."
-                    if not aios.get("approved")
-                    else "Saved your login in Credentials. Next: tap **Run test**."
+            credential_items, cred_rejected = filter_real_credential_items(credential_items)
+            if cred_rejected and not credential_items:
+                events.append(
+                    {
+                        "type": "aios_error",
+                        "data": {
+                            "message": (
+                                "Those look like **example hints** — paste your real email "
+                                "and password or app password."
+                            ),
+                            "detail": "; ".join(cred_rejected[:3]),
+                            "chips": ["Open Credentials", "What credentials?"],
+                        },
+                    }
                 )
-            elif not missing:
-                msg = "Saved your credentials in the vault. Ask me to build or continue your automation."
+                return _finalize(events, True, redacted_message)
+
+            if not credential_items:
+                blocked_normal_reply = True
             else:
-                still = ", ".join(str(m).replace("_", " ") for m in missing[:4])
-                msg = f"Saved what you sent. Still need: {still}. Paste them here or open Credentials."
-            events.append(
-                {
-                    "type": "aios_credentials_saved",
-                    "data": {
-                        **cred_res,
-                        "message": msg,
-                        "chips": chips,
-                        "missing": missing,
-                        "next_action": aios.get("next_action") or ("approve" if not missing else "credentials"),
-                    },
-                }
-            )
-            if (
-                caps
-                and (
-                    aios.get("compose_phase") in ("gather", "await_approve", "blueprint")
-                    or aios.get("phase") == "blueprint"
+                cred_res = apply_workspace_credentials(db, workspace_id, credential_items, user_id=user_id)
+                redacted_message = redact_secrets_in_text(text, cred_res.get("raw_secrets") or [])
+                blocked_normal_reply = True
+                reject_note = ""
+                if cred_rejected:
+                    reject_note = " (Skipped hint/example text — paste real secrets.)"
+
+                # Check if LLM API key was provided and store it for conversation use
+                for item in credential_items:
+                    if item.get("category") == "llm" and item.get("kind") == "openai":
+                        api_key = item.get("fields", {}).get("api_key")
+                        if api_key:
+                            aios["conversation_api_key"] = api_key
+                            try:
+                                from app.services import credential_vault as vault
+
+                                vault.upsert_from_chat(
+                                    db,
+                                    workspace_id=workspace_id,
+                                    user_id=user_id,
+                                    category="llm",
+                                    kind="openai",
+                                    label="Conversation-provided API key",
+                                    fields={"api_key": api_key},
+                                )
+                            except Exception as e:
+                                logger.warning("Failed to save API key to vault: %s", e)
+
+                caps = aios.get("required_capabilities") or []
+                missing: list[str] = []
+                if caps:
+                    missing = analyze_solution_gaps(db, workspace_id, caps)
+                    aios["missing_credentials"] = missing
+                    if aios.get("approved"):
+                        aios["next_action"] = "test" if not missing else "credentials"
+                    else:
+                        aios["next_action"] = "approve" if not missing else "credentials"
+                    meta["aios"] = aios
+                    _save_conv_meta(db, conv, meta)
+                from app.composer.chat_requirements import missing_workflow_slots
+
+                missing_slots = missing_workflow_slots(dict(aios.get("requirements") or {}))
+                chips = _build_cred_chips(caps, missing, missing_slots)
+                if not missing and aios.get("solution_id"):
+                    msg = (
+                        "Saved your login in Credentials. Next: tap **Approve**, then I’ll run the test."
+                        if not aios.get("approved")
+                        else "Saved your login in Credentials. Next: tap **Run test**."
+                    )
+                elif not missing:
+                    msg = "Saved your credentials in the vault. Ask me to build or continue your automation."
+                else:
+                    still = ", ".join(str(m).replace("_", " ") for m in missing[:4])
+                    msg = f"Saved what you sent. Still need: {still}. Paste them here or open Credentials."
+                if reject_note:
+                    msg = f"{msg}{reject_note}"
+                events.append(
+                    {
+                        "type": "aios_credentials_saved",
+                        "data": {
+                            **cred_res,
+                            "message": msg,
+                            "chips": chips,
+                            "missing": missing,
+                            "next_action": aios.get("next_action") or ("approve" if not missing else "credentials"),
+                        },
+                    }
                 )
-            ):
-                solution_card = _refresh_blueprint_from_aios(
-                    db,
-                    workspace_id=workspace_id,
-                    conv=conv,
-                    meta=meta,
-                    aios=aios,
-                )
-                events.append({"type": "aios_solution", "data": solution_card})
+                if (
+                    caps
+                    and (
+                        aios.get("compose_phase") in ("gather", "await_approve", "blueprint")
+                        or aios.get("phase") == "blueprint"
+                    )
+                ):
+                    solution_card = _refresh_blueprint_from_aios(
+                        db,
+                        workspace_id=workspace_id,
+                        conv=conv,
+                        meta=meta,
+                        aios=aios,
+                    )
+                    events.append({"type": "aios_solution", "data": solution_card})
             # One card only — do not also emit credentials_needed / progress
         elif intent == "credential" or looks_like_secret_message(text):
             from app.composer.gap_analysis import analyze_solution_gaps
@@ -1205,7 +1525,7 @@ def process_chat_goal(
             events.append(_emit_progress(aios if aios else meta["aios"]))
         return _finalize(events, True, redacted_message)
 
-    if intent in ("compose", "refine"):
+    if intent in ("compose", "refine") and route_info.get("route") != "qa":
         if is_vague_goal(text) and intent == "compose":
             events.append(clarify_event(text))
             return _finalize(events, True, redacted_message)
@@ -1229,9 +1549,12 @@ def process_chat_goal(
 
         goal = text
         fresh_hint = _parse_req_early(text, last_field=aios.get("last_field"), db=db)
-        if intent == "compose" and fresh_hint.get("integration"):
+        if intent in ("compose", "refine") and fresh_hint.get("integration"):
             prev_int = (aios.get("requirements") or {}).get("integration")
-            if prev_int and fresh_hint.get("integration") != prev_int and aios.get("solution_id"):
+            if prev_int and fresh_hint.get("integration") != prev_int and (
+                aios.get("solution_id")
+                or aios.get("compose_phase") in ("gather", "await_approve", "blueprint")
+            ):
                 events.append(
                     {
                         "type": "aios_solution",
@@ -1247,8 +1570,16 @@ def process_chat_goal(
                     }
                 )
                 aios["solution_id"] = None
+                aios["workflow_id"] = None
                 aios["approved"] = False
                 aios["tested"] = False
+                aios["executable_preview"] = {}
+                aios["requirements"] = {}
+                aios["requirements_confirmed"] = False
+                aios["pending_compose_goal"] = None
+                aios["goal"] = None
+                aios.pop("planning_override", None)
+                aios.pop("planning_model", None)
             elif aios.get("goal") and (
                 intent == "refine"
                 or re.search(r"\b(for this|for that|from this)\b", text, re.I)
@@ -1274,6 +1605,7 @@ def process_chat_goal(
         from app.composer.recipes import match_recipe
         from app.composer.chat_requirements import (
             build_blueprint_preview,
+            build_requirements_brief,
             compose_goal_from_requirements,
             gather_prompt,
             merge_requirements_from_message,
@@ -1281,46 +1613,132 @@ def process_chat_goal(
             parse_requirements,
             sync_checklist_from_aios,
         )
+        from app.composer.llm_resolve import resolve_chat_llm_config
 
         if aios.get("requirements") and intent in ("compose", "refine"):
             req = merge_requirements_from_message(dict(aios["requirements"]), goal, db=db)
         else:
             req = parse_requirements(goal, last_field=aios.get("last_field"), db=db)
 
+        llm_cfg = resolve_chat_llm_config(db, workspace_id, user_id, aios)
+        aios["planning_label"] = llm_cfg.get("planning_label")
+        aios["planning_source"] = llm_cfg.get("source")
+        if llm_cfg.get("model"):
+            aios["planning_model"] = llm_cfg.get("model")
+
+        missing_slots_early = missing_workflow_slots(req)
+        explicit_express = bool(
+            re.search(r"\b(express compose|compose faster|fast compose|quick compose)\b", text, re.I)
+        )
+        is_new_work_compose = (
+            route_info.get("route") == "work_compose"
+            and not aios.get("solution_id")
+            and intent in ("compose", "refine")
+        )
+        if (
+            is_new_work_compose
+            and not explicit_express
+            and not aios.get("requirements_confirmed")
+            and not is_vague_goal(goal)
+        ):
+            from app.composer.recipes import match_recipe as _match_recipe_pre
+
+            recipe_pre = _match_recipe_pre(goal, fallback_generic=True)
+            rid = str((recipe_pre or {}).get("id") or "")
+            recipe_is_generic = (
+                not recipe_pre
+                or rid in ("generic_automation", "")
+                or "generic" in str((recipe_pre or {}).get("name") or "").lower()
+            )
+            if recipe_is_generic:
+                if (
+                    req.get("output") == "email"
+                    or req.get("email_plan")
+                    or req.get("email_count")
+                    or "email" in (req.get("output_channels") or [])
+                ):
+                    recipe_is_generic = False
+            if recipe_is_generic:
+                aios["pending_compose_goal"] = goal
+                aios["requirements"] = req
+                aios["compose_phase"] = "gather"
+                aios["next_action"] = "gather"
+                meta["aios"] = aios
+                _save_conv_meta(db, conv, meta)
+                events.append(build_requirements_brief(req, llm_cfg, missing_slots_early))
+                return _finalize(events, True, redacted_message)
+
         enriched_goal = compose_goal_from_requirements(req)
+        from app.composer.workflow_matcher import match_workflow
+
+        match_result = match_workflow(db, workspace_id, enriched_goal, req, llm_cfg)
+        match_note = None
+        if match_result.get("action") in ("modify", "reuse") and match_result.get("match_id"):
+            match_note = (
+                f"Matched existing workflow **{match_result.get('match_name')}** "
+                f"(confidence {int(float(match_result.get('confidence') or 0) * 100)}%) — building an updated graph."
+            )
+            aios["matched_workflow_id"] = match_result.get("match_id")
+            aios["workflow_match"] = match_result
         recipe_goal = req.get("raw") or req.get("goal") or goal
         if req.get("integration"):
             recipe_goal = f"{req.get('integration')} {recipe_goal}"
-        required_caps = infer_capabilities_from_goal(enriched_goal, force_workflow=True)
-        live_missing = analyze_solution_gaps(db, workspace_id, required_caps)
-        missing_slots = missing_workflow_slots(req)
+        required_caps = infer_capabilities_from_goal(enriched_goal, force_workflow=True, llm_cfg=llm_cfg)
         field = infer_field(enriched_goal, aios.get("last_field"))
         recipe = match_recipe(recipe_goal, fallback_generic=True)
         recipe_name = (recipe or {}).get("name")
-        attach_n = _attachment_count(db, conversation_id, workspace_id)
         knowledge_id = aios.get("knowledge_id")
+        if not knowledge_id:
+            knowledge_id = _ensure_workflow_knowledge_id(
+                db,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                goal=enriched_goal,
+                existing_id=knowledge_id,
+            )
+        attach_n = _attachment_count(db, conversation_id, workspace_id)
         if not knowledge_id and attach_n:
             knowledge_id = _attachment_knowledge_id(
                 db, workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id
             )
-
+        req_for_graph = dict(req)
+        req_for_graph["_llm_cfg"] = llm_cfg
         preview_executable = build_executable_graph(
             required_caps=required_caps,
             goal=enriched_goal,
             knowledge_id=knowledge_id,
             recipe_id=(recipe or {}).get("id"),
-            requirements=req,
+            requirements=req_for_graph,
             db=db,
             workspace_id=workspace_id,
+        )
+        preview_meta = preview_executable.get("meta") or {}
+        if preview_meta.get("unsupported"):
+            events.append(
+                {
+                    "type": "aios_clarify",
+                    "data": {
+                        "message": preview_meta.get("message") or "This workflow type is not supported yet.",
+                        "chips": [
+                            "Build a GitHub workflow",
+                            "Build a telegram bot",
+                            "What can you do?",
+                        ],
+                    },
+                }
+            )
+            return _finalize(events, True, redacted_message)
+        missing_slots, live_missing, compose_phase, next_action = _recompute_compose_gates(
+            db, workspace_id, req, required_caps, preview_executable
         )
         blueprint = build_blueprint_preview(
             enriched_goal, req, required_caps, preview_executable, missing_credentials=live_missing
         )
-        compose_phase = "gather" if missing_slots or live_missing else "await_approve"
-        next_action = "gather" if missing_slots else ("credentials" if live_missing else "approve")
         from app.composer.gap_analysis import credential_slots_for_missing
 
         from app.composer.chat_channels import friendly_title_for_goal
+        from app.composer.chat_requirements import oauth_assist_url
 
         friendly_title = req.get("workflow_name") or friendly_title_for_goal(enriched_goal)
         if req.get("integration") == "youtube":
@@ -1392,6 +1810,10 @@ def process_chat_goal(
         cred_chips = _build_cred_chips(required_caps, missing, missing_slots)
 
         solution_msg = gather_prompt(req, missing_slots, missing)
+        if preview_meta.get("planner_note"):
+            solution_msg = f"{preview_meta.get('planner_note')}\n\n{solution_msg}"
+        if match_note:
+            solution_msg = f"{match_note}\n\n{solution_msg}"
         preview_nodes = blueprint.get("preview_nodes") or preview_executable.get("nodes") or []
         preview_edges = blueprint.get("preview_edges") or preview_executable.get("edges") or []
 
@@ -1404,7 +1826,7 @@ def process_chat_goal(
             "nodes": preview_nodes,
             "edges": preview_edges,
             "test_report": None,
-            "credentials_url": "/credentials",
+            "credentials_url": oauth_assist_url(req.get("integration")),
             "chips": cred_chips,
             "message": solution_msg,
         }
@@ -1425,18 +1847,29 @@ def process_chat_goal(
             )
             if http_node:
                 http_data = http_node.get("data") or {}
+                suggested = {
+                    "url": http_data.get("url") or "{{base_url}}",
+                    "method": http_data.get("method") or "POST",
+                    "body": http_data.get("body") or "{{output}}",
+                    "auth": http_data.get("auth") or "custom",
+                }
+                nf = aios.setdefault("node_factory", {})
+                nf["suggested"] = suggested
+                nf["workflow_id"] = aios.get("workflow_id")
                 events.append(
                     {
                         "type": "aios_node_factory",
                         "data": {
                             "message": "No saved API node matched — probe your API, then save it to your node library.",
-                            "suggested": {
-                                "url": http_data.get("url") or "{{base_url}}",
-                                "method": http_data.get("method") or "POST",
-                                "body": http_data.get("body") or "{{output}}",
-                                "auth": http_data.get("auth") or "custom",
-                            },
-                            "chips": ["Probe API", "Open workflow builder"],
+                            "suggested": suggested,
+                            "workflow_id": aios.get("workflow_id"),
+                            "chips": [
+                                "Probe API",
+                                "Save node",
+                                "Test node",
+                                "Publish node",
+                                "Use in workflow",
+                            ],
                         },
                     }
                 )
@@ -1463,10 +1896,16 @@ def process_chat_goal(
 
         caps_check = list(aios.get("required_capabilities") or [])
         if caps_check:
-            from app.composer.gap_analysis import analyze_solution_gaps
+            from app.composer.gap_analysis import analyze_graph_credential_gaps, analyze_solution_gaps
             from app.composer.chat_channels import friendly_missing_name, paste_hints_for_missing
 
-            missing_now = analyze_solution_gaps(db, workspace_id, caps_check)
+            preview = aios.get("executable_preview") or {}
+            if isinstance(preview, dict) and preview.get("nodes"):
+                missing_now = analyze_graph_credential_gaps(
+                    db, workspace_id, preview, caps_check
+                )
+            else:
+                missing_now = analyze_solution_gaps(db, workspace_id, caps_check)
             aios["missing_credentials"] = missing_now
             if missing_now:
                 meta["aios"] = aios
@@ -1613,6 +2052,29 @@ def process_chat_goal(
         meta["aios"] = aios
         _save_conv_meta(db, conv, meta)
         events.append({"type": "aios_approved", "data": {"solution_id": aios.get("solution_id"), "status": "approved"}})
+        wf_id = aios.get("workflow_id")
+        gate = _publish_gate_for_preview(db, workspace_id, aios.get("executable_preview"))
+        if wf_id and aios.get("tested") and gate.get("ready"):
+            events.append(
+                {
+                    "type": "aios_suggest",
+                    "data": {
+                        "message": "Workflow passed sandbox and publish checks — ready to run.",
+                        "chips": ["Deploy now", "Run now", f"Open builder /workflows/{wf_id}"],
+                    },
+                }
+            )
+        elif wf_id and not gate.get("ready"):
+            events.append(
+                {
+                    "type": "aios_error",
+                    "data": {
+                        "message": "Workflow built but publish gate reports blockers before deploy.",
+                        "detail": _format_publish_blockers(gate),
+                        "blockers": gate.get("blockers") or [],
+                    },
+                }
+            )
         if materialized:
             built_exec = aios.get("executable_preview") or {}
             events.append(
@@ -1627,12 +2089,22 @@ def process_chat_goal(
                             f"Workflow **{aios.get('friendly_title') or 'ready'}** built — "
                             "review the graph below, then run a test."
                         ),
-                        "chips": ["Run test", "Deploy"],
+                        "chips": ["Run test", "Deploy", "Run now"] if aios.get("workflow_id") else ["Run test", "Deploy"],
                     },
                 }
             )
         if report is not None:
             events.append({"type": "aios_test_report", "data": report})
+            if report.get("status") != "success":
+                events.append(
+                    {
+                        "type": "aios_error",
+                        "data": {
+                            "message": "Sandbox test did not pass — fix credentials or heal before deploy.",
+                            "detail": "; ".join((report.get("logs") or [])[:4]) or report.get("summary") or "",
+                        },
+                    }
+                )
             events.append(
                 {
                     "type": "aios_sandbox",
@@ -1772,11 +2244,45 @@ def process_chat_goal(
             )
             return _finalize(events, True, redacted_message)
 
-        knowledge_id = aios.get("knowledge_id") or _attachment_knowledge_id(
-            db, workspace_id=workspace_id, user_id=user_id, conversation_id=conversation_id
+        knowledge_id = aios.get("knowledge_id") or _ensure_workflow_knowledge_id(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            goal=aios.get("goal") or text,
+            existing_id=aios.get("knowledge_id"),
         )
         if knowledge_id:
             aios["knowledge_id"] = knowledge_id
+            aios["executable_preview"] = _bind_knowledge_to_preview(
+                aios.get("executable_preview"), knowledge_id
+            )
+
+        preview = aios.get("executable_preview") or {}
+        gate = _publish_gate_for_preview(db, workspace_id, preview)
+        if not gate.get("ready") and not force_deploy:
+            blocker_msg = _format_publish_blockers(gate)
+            events.append(
+                {
+                    "type": "aios_error",
+                    "data": {
+                        "message": "Deploy blocked by publish validation.",
+                        "detail": blocker_msg,
+                        "blockers": gate.get("blockers") or [],
+                    },
+                }
+            )
+            events.append(
+                {
+                    "type": "aios_deploy",
+                    "data": {
+                        "status": "blocked",
+                        "message": blocker_msg,
+                        "chips": ["Heal", "Retest", "force deploy"],
+                    },
+                }
+            )
+            return _finalize(events, True, redacted_message)
 
         deploy = deploy_solution_graph(
             db,
@@ -1796,6 +2302,8 @@ def process_chat_goal(
             }
         aios["deploy"] = deploy
         aios["status"] = deploy.get("status")
+        aios["workflow_id"] = deploy.get("workflow_id")
+        aios["compose_phase"] = "done"
         aios["next_action"] = "done"
         if aios.get("agent_os"):
             aios["agent_os"]["status"] = "done"
@@ -1818,6 +2326,26 @@ def process_chat_goal(
             pass
         events.append({"type": "aios_deploy", "data": {**deploy, "chips": ["Run now", "Schedule", "Run test"]}})
         events.append(_emit_progress(aios))
+        req_obj = aios.get("requirements") or {}
+        if req_obj.get("trigger") == "schedule" or re.search(
+            r"\b(daily|weekly|every day|cron)\b", str(aios.get("goal") or ""), re.I
+        ):
+            events.append(
+                {
+                    "type": "aios_suggest",
+                    "data": {
+                        "message": "Workflow deployed — schedule it to run automatically?",
+                        "chips": [
+                            "Schedule my workflow daily at 9am",
+                            "Run now",
+                            "List schedules",
+                        ],
+                    },
+                }
+            )
+        finops_ev = _chat_finops_receipt_event(aios)
+        if finops_ev:
+            events.append(finops_ev)
         if isinstance(aios.get("requirements"), dict):
             events.append(
                 fulfillment_event(
@@ -1838,6 +2366,23 @@ def process_chat_goal(
             "What can you do?",
         ]
     return out
+
+
+def _chat_finops_receipt_event(aios: dict[str, Any]) -> dict[str, Any] | None:
+    lr = aios.get("last_receipt") or {}
+    cost = aios.get("cost_usd")
+    if not lr and not cost:
+        return None
+    return {
+        "type": "aios_receipt",
+        "data": {
+            "message": f"Session AI cost ~${float(cost or lr.get('est_cost_usd') or 0):.4f}",
+            "session_cost_usd": float(cost or 0),
+            "turns": int(aios.get("cost_turns") or 0),
+            "model": lr.get("model"),
+            "chips": ["Show AI costs", "Cost receipt"],
+        },
+    }
 
 
 def _finalize(
@@ -1884,6 +2429,9 @@ def _aios_public_snapshot(aios: dict[str, Any] | None) -> dict[str, Any]:
         "solution_id": aios.get("solution_id"),
         "workflow_id": (aios.get("deploy") or {}).get("workflow_id"),
         "missing_credentials": aios.get("missing_credentials"),
+        "planning_label": aios.get("planning_label"),
+        "planning_model": aios.get("planning_model"),
+        "planning_source": aios.get("planning_source"),
     }
 
 
@@ -1910,7 +2458,8 @@ async def process_chat_turn(
                     out["aios"] = snap
         return out
 
-    bridge = process_chat_goal(
+    bridge = run_sync_from_async(
+        process_chat_goal,
         db,
         workspace_id=workspace_id,
         user_id=user_id,
@@ -1939,7 +2488,42 @@ async def process_chat_turn(
             )
             if ops.get("summary"):
                 out["summary"] = ops["summary"]
+            if ops.get("recompose_after_confirm"):
+                inner = run_sync_from_async(
+                    process_chat_goal,
+                    db,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    user_message=ops.get("recompose_goal") or user_message,
+                )
+                inner_out = _finalize(
+                    inner.get("events") or [],
+                    bool(inner.get("blocked_normal_reply")),
+                    bridge.get("redacted_message") or user_message,
+                )
+                if inner.get("summary"):
+                    inner_out["summary"] = inner["summary"]
+                return _attach_aios_snapshot(inner_out)
             return _attach_aios_snapshot(out)
+        intent_label = bridge.get("ops_intent") or "action"
+        err_out = _finalize(
+            [
+                {
+                    "type": "aios_error",
+                    "data": {
+                        "message": (
+                            f"Could not complete **{intent_label}**. "
+                            "Try rephrasing, check workspace permissions, or pick a workflow by name or ID."
+                        ),
+                        "intent": intent_label,
+                    },
+                }
+            ],
+            True,
+            bridge.get("redacted_message") or user_message,
+        )
+        return _attach_aios_snapshot(err_out)
 
     events = list(bridge.get("events") or [])
     summary = bridge.get("summary") or ""

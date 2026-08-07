@@ -117,6 +117,8 @@ def store_gmail_oauth_tokens(
     workspace_id: int,
     token_data: dict[str, Any],
     email: str,
+    *,
+    user_id: int = 0,
 ) -> WorkspaceIntegration:
     row = get_or_create(db, workspace_id)
     refresh = (token_data.get("refresh_token") or "").strip()
@@ -135,7 +137,48 @@ def store_gmail_oauth_tokens(
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
+    sync_gmail_oauth_to_vault(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        email=email,
+        token_data=token_data,
+    )
     return row
+
+
+def sync_gmail_oauth_to_vault(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    email: str,
+    token_data: dict[str, Any],
+) -> None:
+    """Mirror WorkspaceIntegration Gmail OAuth into credentials vault for chat/workflows."""
+    try:
+        from app.services import credential_vault as vault
+
+        fields: dict[str, Any] = {"gmail_oauth_email": (email or "").strip()}
+        refresh = (token_data.get("refresh_token") or "").strip()
+        access = (token_data.get("access_token") or "").strip()
+        if refresh:
+            fields["refresh_token"] = refresh
+        if access:
+            fields["access_token"] = access
+        if len(fields) <= 1 and not refresh and not access:
+            return
+        vault.upsert_from_chat(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            category="email",
+            kind="gmail_oauth",
+            label="default",
+            fields=fields,
+        )
+    except Exception:
+        pass
 
 
 def disconnect_gmail_oauth(db: Session, workspace_id: int) -> None:
@@ -183,13 +226,15 @@ async def send_gmail_api_message(
     to_addr: str,
     subject: str,
     body: str,
+    *,
+    from_addr: str | None = None,
 ) -> dict:
     if not to_addr:
         return {"ok": False, "detail": "Missing recipient"}
     try:
         access = await get_valid_gmail_access_token(db, workspace_id)
         row = db.get(WorkspaceIntegration, workspace_id)
-        from_addr = (row.gmail_oauth_email if row else "") or "me"
+        from_addr = (from_addr or "").strip() or (row.gmail_oauth_email if row else "") or "me"
         msg = MIMEText(body[:8000], "plain", "utf-8")
         msg["To"] = to_addr
         msg["Subject"] = subject[:200]
@@ -208,13 +253,23 @@ async def send_gmail_api_message(
         return {"ok": False, "detail": str(exc)[:500]}
 
 
-def resolve_jira_config(db: Session, workspace_id: int | None) -> dict[str, Any]:
+def resolve_jira_config(
+    db: Session,
+    workspace_id: int | None,
+    credential_id: str | None = None,
+) -> dict[str, Any]:
     if not workspace_id:
         return {"base_url": "", "email": "", "api_token": "", "configured": False}
     try:
         from app.services import credential_vault as vault
 
-        fields = vault.resolve_fields(db, workspace_id, category="jira", kind="jira_cloud")
+        fields = vault.resolve_fields(
+            db,
+            workspace_id,
+            category="jira",
+            kind="jira_cloud",
+            credential_id=credential_id,
+        )
         base = (fields.get("base_url") or "").strip().rstrip("/")
         email = (fields.get("email") or "").strip()
         token = (fields.get("api_key") or "").strip()
@@ -259,8 +314,12 @@ def _plain_to_adf(text: str) -> dict:
     }
 
 
-async def jira_verify(db: Session, workspace_id: int) -> dict:
-    cfg = resolve_jira_config(db, workspace_id)
+async def jira_verify(
+    db: Session,
+    workspace_id: int,
+    credential_id: str | None = None,
+) -> dict:
+    cfg = resolve_jira_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         return {"ok": False, "detail": "Jira not configured — add base URL, email, and API token"}
     url = f"{cfg['base_url']}/rest/api/3/myself"
@@ -293,8 +352,10 @@ async def jira_create_issue(
     summary: str,
     description: str = "",
     issue_type: str = "Task",
+    priority: str | None = None,
+    credential_id: str | None = None,
 ) -> dict:
-    cfg = resolve_jira_config(db, workspace_id)
+    cfg = resolve_jira_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         raise ValueError("Jira not configured in Settings → Integrations")
     payload = {
@@ -305,6 +366,8 @@ async def jira_create_issue(
             "description": _plain_to_adf(description or summary),
         }
     }
+    if (priority or "").strip():
+        payload["fields"]["priority"] = {"name": (priority or "").strip()[:32]}
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             f"{cfg['base_url']}/rest/api/3/issue",
@@ -327,8 +390,9 @@ async def jira_update_issue(
     issue_key: str,
     summary: str = "",
     description: str = "",
+    credential_id: str | None = None,
 ) -> dict:
-    cfg = resolve_jira_config(db, workspace_id)
+    cfg = resolve_jira_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         raise ValueError("Jira not configured in Settings → Integrations")
     fields: dict[str, Any] = {}

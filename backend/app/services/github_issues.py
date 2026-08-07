@@ -11,9 +11,37 @@ from app.crypto import decrypt_secret
 from app.database import WorkspaceIntegration
 
 
-def resolve_github_config(db: Session, workspace_id: int | None) -> dict[str, Any]:
+def resolve_github_config(
+    db: Session,
+    workspace_id: int | None,
+    credential_id: str | None = None,
+) -> dict[str, Any]:
     if not workspace_id:
         return {"token": "", "owner": "", "repo": "", "default_repo": "", "configured": False}
+    try:
+        from app.services import credential_vault as vault
+
+        fields = vault.resolve_fields(
+            db,
+            workspace_id,
+            category="github",
+            kind="github_pat",
+            credential_id=credential_id,
+        )
+        token = (fields.get("token") or "").strip()
+        owner = (fields.get("owner") or "").strip()
+        repo = (fields.get("repo") or "").strip()
+        if token:
+            default_repo = f"{owner}/{repo}" if owner and repo else ""
+            return {
+                "token": token,
+                "owner": owner,
+                "repo": repo,
+                "default_repo": default_repo,
+                "configured": True,
+            }
+    except Exception:
+        pass
     row = db.get(WorkspaceIntegration, workspace_id)
     if not row:
         return {"token": "", "owner": "", "repo": "", "default_repo": "", "configured": False}
@@ -41,8 +69,12 @@ def _parse_repo(repo: str, fallback: str = "") -> tuple[str, str]:
     return owner, name
 
 
-async def github_verify(db: Session, workspace_id: int) -> dict:
-    cfg = resolve_github_config(db, workspace_id)
+async def github_verify(
+    db: Session,
+    workspace_id: int,
+    credential_id: str | None = None,
+) -> dict:
+    cfg = resolve_github_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         return {"ok": False, "detail": "GitHub PAT not configured — add a token in Settings → Integrations"}
     try:
@@ -75,8 +107,9 @@ async def github_create_issue(
     title: str,
     body: str = "",
     labels: list[str] | None = None,
+    credential_id: str | None = None,
 ) -> dict:
-    cfg = resolve_github_config(db, workspace_id)
+    cfg = resolve_github_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         raise ValueError("GitHub not configured in Settings → Integrations")
     owner, name = _parse_repo(repo, cfg["default_repo"])
@@ -109,8 +142,9 @@ async def github_update_issue(
     issue_number: int | str,
     title: str = "",
     body: str = "",
+    credential_id: str | None = None,
 ) -> dict:
-    cfg = resolve_github_config(db, workspace_id)
+    cfg = resolve_github_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         raise ValueError("GitHub not configured in Settings → Integrations")
     owner, name = _parse_repo(repo, cfg["default_repo"])

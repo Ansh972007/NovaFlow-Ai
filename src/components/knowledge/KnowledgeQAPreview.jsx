@@ -1,20 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { SearchIcon } from "@/components/workspace/WorkspaceIcons";
-import { searchKnowledgeChunks, answerKnowledgeQuestion } from "@/lib/api/knowledge";
+import {
+  answerKnowledgeQuestion,
+  retrieveKnowledge,
+  searchKnowledgeChunks,
+} from "@/lib/api/knowledge";
 
 export default function KnowledgeQAPreview({ knowledgeId, readyCount = 0 }) {
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState("answer"); // answer | search
+  const [mode, setMode] = useState("retrieve");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState([]);
   const [total, setTotal] = useState(0);
   const [method, setMethod] = useState("");
-  const [answer, setAnswer] = useState("");
+  const [digest, setDigest] = useState("");
   const [citations, setCitations] = useState([]);
+  const [embeddingAvailable, setEmbeddingAvailable] = useState(false);
+  const [llmAvailable, setLlmAvailable] = useState(false);
+
+  useEffect(() => {
+    retrieveKnowledge(knowledgeId, "sample", { limit: 1 })
+      .then((res) => {
+        setEmbeddingAvailable(Boolean(res?.embedding_available));
+        setLlmAvailable(Boolean(res?.llm_answer_available));
+      })
+      .catch(() => {
+        setEmbeddingAvailable(false);
+        setLlmAvailable(false);
+      });
+  }, [knowledgeId]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -22,34 +40,48 @@ export default function KnowledgeQAPreview({ knowledgeId, readyCount = 0 }) {
     if (!q) return;
     setLoading(true);
     setError("");
-    setAnswer("");
+    setDigest("");
     setCitations([]);
     try {
       if (mode === "answer") {
         const res = await answerKnowledgeQuestion(knowledgeId, q, { limit: 5 });
-        setAnswer(res?.answer || "");
+        setDigest(res?.answer || "");
         setResults(res?.data || []);
         setTotal(res?.total || 0);
         setMethod(res?.method || "");
         setCitations(res?.citations || []);
+        setEmbeddingAvailable(Boolean(res?.embedding_available));
+        setLlmAvailable(Boolean(res?.llm_answer_available));
+      } else if (mode === "retrieve") {
+        const res = await retrieveKnowledge(knowledgeId, q, { limit: 5 });
+        setDigest(res?.extractive_digest || "");
+        setResults(res?.data || []);
+        setTotal(res?.total || 0);
+        setMethod(res?.method || "");
+        setCitations(res?.citations || []);
+        setEmbeddingAvailable(Boolean(res?.embedding_available));
+        setLlmAvailable(Boolean(res?.llm_answer_available));
       } else {
         const res = await searchKnowledgeChunks(knowledgeId, q, { limit: 6 });
         setResults(res?.data || []);
         setTotal(res?.total || 0);
         setMethod(res?.method || res?.data?.[0]?.method || "");
+        setEmbeddingAvailable(Boolean(res?.embedding_available));
+        setLlmAvailable(Boolean(res?.llm_answer_available));
       }
     } catch (err) {
       setError(err.message || "Request failed");
       setResults([]);
       setTotal(0);
       setMethod("");
-      setAnswer("");
+      setDigest("");
     } finally {
       setLoading(false);
     }
   }
 
   const disabled = readyCount === 0;
+  const noLlmBadge = !embeddingAvailable || !llmAvailable;
 
   return (
     <div className="workspace-panel rounded-[1.75rem] p-6 sm:p-8">
@@ -61,12 +93,14 @@ export default function KnowledgeQAPreview({ knowledgeId, readyCount = 0 }) {
           <div>
             <p className="workspace-section-label">Q&A preview</p>
             <h2 className="mt-1 text-lg font-semibold tracking-tight">
-              {mode === "answer" ? "Ask your library" : "Test retrieval"}
+              {mode === "retrieve" ? "Retrieve passages" : mode === "answer" ? "Ask your library" : "Keyword browse"}
             </h2>
             <p className="mt-1 text-sm text-neutral-500">
-              {mode === "answer"
-                ? "Hybrid retrieve + grounded answer with [n] citations."
-                : "Semantic search over indexed chunks (falls back to keywords without embeddings)."}
+              {mode === "retrieve"
+                ? "Top ranked passages with numbered citations — no LLM required."
+                : mode === "answer"
+                  ? "Hybrid retrieve + grounded answer when an LLM is configured."
+                  : "Browse indexed chunks by keyword match."}
             </p>
           </div>
         </div>
@@ -74,19 +108,33 @@ export default function KnowledgeQAPreview({ knowledgeId, readyCount = 0 }) {
           <div className="inline-flex rounded-full border border-neutral-200 bg-white p-0.5 text-[11px] font-semibold">
             <button
               type="button"
-              onClick={() => setMode("answer")}
-              className={`rounded-full px-3 py-1 ${mode === "answer" ? "bg-neutral-900 text-white" : "text-neutral-600"}`}
+              onClick={() => setMode("retrieve")}
+              className={`rounded-full px-3 py-1 ${mode === "retrieve" ? "bg-neutral-900 text-white" : "text-neutral-600"}`}
             >
-              Answer
+              Retrieve
             </button>
             <button
               type="button"
               onClick={() => setMode("search")}
               className={`rounded-full px-3 py-1 ${mode === "search" ? "bg-neutral-900 text-white" : "text-neutral-600"}`}
             >
-              Search
+              Keyword browse
             </button>
+            {llmAvailable && (
+              <button
+                type="button"
+                onClick={() => setMode("answer")}
+                className={`rounded-full px-3 py-1 ${mode === "answer" ? "bg-neutral-900 text-white" : "text-neutral-600"}`}
+              >
+                Answer
+              </button>
+            )}
           </div>
+          {noLlmBadge && mode !== "answer" && (
+            <span className="rounded-full border border-sky-200/80 bg-sky-50/90 px-3 py-1 text-[11px] font-semibold text-sky-800">
+              No LLM — passages only
+            </span>
+          )}
           {disabled && (
             <span className="rounded-full border border-amber-200/80 bg-amber-50/90 px-3 py-1 text-[11px] font-semibold text-amber-800">
               Upload docs & wait for Ready
@@ -109,7 +157,17 @@ export default function KnowledgeQAPreview({ knowledgeId, readyCount = 0 }) {
           disabled={disabled || loading || !query.trim()}
           className="btn-primary shrink-0 !px-6 disabled:opacity-40"
         >
-          {loading ? (mode === "answer" ? "Answering…" : "Searching…") : mode === "answer" ? "Ask" : "Search"}
+          {loading
+            ? mode === "answer"
+              ? "Answering…"
+              : mode === "retrieve"
+                ? "Retrieving…"
+                : "Searching…"
+            : mode === "answer"
+              ? "Ask"
+              : mode === "retrieve"
+                ? "Retrieve"
+                : "Search"}
         </button>
       </form>
 
@@ -119,17 +177,19 @@ export default function KnowledgeQAPreview({ knowledgeId, readyCount = 0 }) {
         </p>
       )}
 
-      {answer && (
+      {digest && (
         <div className="mt-6 rounded-xl border border-emerald-200/70 bg-emerald-50/40 px-4 py-4">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Answer</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+              {mode === "answer" && llmAvailable ? "Answer" : "Extractive digest"}
+            </p>
             {method && (
               <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
                 {method}
               </span>
             )}
           </div>
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-800">{answer}</p>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-800">{digest}</p>
           {citations.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {citations.map((c) => (
@@ -181,7 +241,7 @@ export default function KnowledgeQAPreview({ knowledgeId, readyCount = 0 }) {
         </div>
       )}
 
-      {!loading && query.trim() && results.length === 0 && !error && !answer && (
+      {!loading && query.trim() && results.length === 0 && !error && !digest && (
         <p className="mt-6 text-center text-sm text-neutral-500">
           No matching chunks. Try different keywords.
         </p>

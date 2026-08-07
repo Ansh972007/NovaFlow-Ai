@@ -10,22 +10,33 @@ export const FILE_STATUS = {
   6: { label: "Timeout", color: "text-red-700 bg-red-50 border-red-200" },
 };
 
+export const KB_STATUS_LABELS = {
+  ready: { label: "Ready", color: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60" },
+  indexing: { label: "Indexing", color: "bg-amber-50 text-amber-800 ring-1 ring-amber-200/60" },
+  empty: { label: "Empty", color: "bg-neutral-100 text-neutral-500 ring-1 ring-neutral-200/60" },
+};
+
 export async function listKnowledge({ page = 1, pageSize = 50, name = "", type = 0 } = {}) {
   return client.get("/knowledge", {
     params: { page_num: page, page_size: pageSize, name, type },
   });
 }
 
+export async function getKnowledgeById(knowledgeId) {
+  return client.get(`/knowledge/${knowledgeId}`);
+}
+
 export async function getEmbeddingModels() {
   return client.get("/knowledge/embedding_param");
 }
 
-export async function createKnowledge({ name, description = "", model, type = 0 }) {
+export async function createKnowledge({ name, description = "", model, type = 0, classification = "internal" }) {
   return client.post("/knowledge/create", {
     name,
     description,
     model,
     type,
+    classification,
   });
 }
 
@@ -33,6 +44,10 @@ export async function getKnowledgeFiles(knowledgeId, { page = 1, pageSize = 50 }
   return client.get(`/knowledge/file_list/${knowledgeId}`, {
     params: { page_num: page, page_size: pageSize },
   });
+}
+
+export async function deleteKnowledgeFile(fileId) {
+  return client.delete(`/knowledge/file/${fileId}`);
 }
 
 export async function uploadKnowledgeFile(knowledgeId, file, onProgress) {
@@ -46,7 +61,6 @@ export async function uploadKnowledgeFile(knowledgeId, file, onProgress) {
     return uploadMultipart(`/knowledge/upload/${knowledgeId}`, formData, { onProgress });
   }
 
-  // Step 1: Initialize chunked upload session
   const initRes = await client.post(`/knowledge/upload-chunk/init/${knowledgeId}`, {
     file_name: file.name,
     file_size: fileSize,
@@ -65,7 +79,6 @@ export async function uploadKnowledgeFile(knowledgeId, file, onProgress) {
     onProgress({ loaded: totalUploaded, total: fileSize, percentage: pct });
   };
 
-  // Step 2: Upload chunks in parallel with concurrency throttling
   const CONCURRENCY = 4;
   const queue = [];
   for (let idx = 0; idx < totalChunks; idx++) {
@@ -100,7 +113,7 @@ export async function uploadKnowledgeFile(knowledgeId, file, onProgress) {
         while (queue.length > 0) {
           const chunkIndex = queue.shift();
           if (chunkIndex === undefined) break;
-          
+
           let attempts = 3;
           while (attempts > 0) {
             try {
@@ -119,7 +132,6 @@ export async function uploadKnowledgeFile(knowledgeId, file, onProgress) {
 
   await Promise.all(workers);
 
-  // Step 3: Complete upload and trigger merge on backend
   const completeRes = await client.post(`/knowledge/upload-chunk/complete/${uploadId}`);
   if (onProgress) {
     onProgress({ loaded: fileSize, total: fileSize, percentage: 100 });
@@ -146,10 +158,9 @@ export async function ingestKnowledgeUrl(knowledgeId, url) {
   return client.post(`/knowledge/ingest-url/${knowledgeId}`, { url });
 }
 
-/** Search indexed chunks (Q&A preview) */
+/** Search indexed chunks (keyword browse) */
 export async function searchKnowledgeChunks(knowledgeId, keyword, { page = 1, limit = 6 } = {}) {
   if (!keyword?.trim()) return { data: [], total: 0, method: "none" };
-  // Prefer semantic search (vector + keyword fallback)
   try {
     return await client.get("/knowledge/search", {
       params: {
@@ -170,7 +181,27 @@ export async function searchKnowledgeChunks(knowledgeId, keyword, { page = 1, li
   }
 }
 
-/** Grounded answer over one knowledge base */
+/** Extractive retrieve — no LLM required */
+export async function retrieveKnowledge(knowledgeId, question, { limit = 5 } = {}) {
+  if (!question?.trim()) {
+    return {
+      extractive_digest: "",
+      data: [],
+      total: 0,
+      method: "none",
+      citations: [],
+      embedding_available: false,
+      llm_answer_available: false,
+    };
+  }
+  return client.post("/knowledge/retrieve", {
+    knowledge_id: knowledgeId,
+    q: question.trim(),
+    limit,
+  });
+}
+
+/** Grounded answer over one knowledge base (falls back to extractive when no LLM) */
 export async function answerKnowledgeQuestion(knowledgeId, question, { limit = 5 } = {}) {
   if (!question?.trim()) {
     return { answer: "", data: [], total: 0, method: "none", citations: [] };

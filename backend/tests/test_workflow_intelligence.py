@@ -31,7 +31,7 @@ def _sample_graph() -> WorkflowGraph:
     return WorkflowGraph(
         nodes=[
             WorkflowNode("trigger", "trigger"),
-            WorkflowNode("retrieve", "retrieve", {"knowledge_id": None}),
+            WorkflowNode("retrieve", "retrieve", {"knowledge_id": 1, "query": "{{input}}", "limit": 6}),
             WorkflowNode("llm", "llm", {"prompt": "Answer"}),
             WorkflowNode("output", "output"),
         ],

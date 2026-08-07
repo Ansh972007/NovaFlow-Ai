@@ -1,4 +1,9 @@
-"""Global chat handler for general questions using user's API key."""
+"""Global chat handler for general questions using user's API key.
+
+Legacy auxiliary path for dynamic component / requirement gathering when no
+structured HTTP config exists. Production chat compose uses `chat_bridge` /
+`workflow_composer`; do not wire this as the primary assistant runtime.
+"""
 
 from typing import Dict, Optional
 import httpx

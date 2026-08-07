@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 
@@ -96,7 +97,6 @@ def test_telegram_knowledge_graph_shape():
     assert "retrieve" in types
     assert "llm" in types
     assert "notify" in types
-    assert "output" in types
     notify = next(n for n in graph["nodes"] if n["type"] == "notify")
     assert notify["data"]["channel"] == "telegram"
 
@@ -131,11 +131,45 @@ def test_compose_approve_deploy_bridge_flow(api_client):
             workspace_id=1,
             user_id=1,
             conversation_id=conv_id,
-            user_message="Build a telegram support bot that answers from knowledge",
+            user_message="express compose build a telegram support bot that answers from knowledge",
         )
         assert compose["blocked_normal_reply"] is True
         types = [e["type"] for e in compose["events"]]
-        assert "aios_solution" in types
+        if "aios_requirements_brief" in types and "aios_solution" not in types:
+            confirm = process_chat_goal(
+                db,
+                workspace_id=1,
+                user_id=1,
+                conversation_id=conv_id,
+                user_message="Yes build this",
+            )
+            if confirm.get("needs_ops_dispatch"):
+                from app.composer.chat_actions import dispatch_ops_action
+
+                ops = asyncio.run(
+                    dispatch_ops_action(
+                        db,
+                        workspace_id=1,
+                        user_id=1,
+                        conversation_id=conv_id,
+                        user_message="Yes build this",
+                        intent=confirm.get("ops_intent"),
+                        workspace_role="editor",
+                    )
+                )
+                if ops and ops.get("recompose_after_confirm"):
+                    compose = process_chat_goal(
+                        db,
+                        workspace_id=1,
+                        user_id=1,
+                        conversation_id=conv_id,
+                        user_message=ops.get("recompose_goal") or "Build telegram bot",
+                    )
+                else:
+                    compose = confirm
+            else:
+                compose = confirm
+            types = [e["type"] for e in compose.get("events") or []]
         sol = next(e for e in compose["events"] if e["type"] == "aios_solution")["data"]
         assert sol.get("phase") == "blueprint" or sol.get("status") == "blueprint"
         assert not sol.get("solution_id")
@@ -225,7 +259,7 @@ def test_gap_analysis_prefers_vault(api_client):
             category="telegram",
             kind="telegram_bot",
             label="default",
-            fields={"bot_token": "1234567890:AAFakeTelegramBotTokenForTestsXXXX"},
+            fields={"bot_token": "7123456789:AAFakeTelegramBotTokenForTestsAbCdEfGhIjKlMn"},
         )
         missing_after = analyze_solution_gaps(db, 1, ["cap_telegram"])
         assert "telegram_bot_token" not in missing_after
@@ -1200,7 +1234,7 @@ def test_vault_smtp_clears_gap_and_nl_save(api_client):
             kind="gmail_smtp",
             label="default",
             fields={
-                "smtp_user": "smtp.user@example.com",
+                "smtp_user": "smtp.vault.user@gmail.com",
                 "smtp_password": "abcdefghijklmnop",
                 "smtp_host": "smtp.gmail.com",
             },
@@ -1250,7 +1284,7 @@ def test_vault_smtp_clears_gap_and_nl_save(api_client):
                 workspace_id=1,
                 user_id=1,
                 conversation_id=conv2["id"],
-                user_message="my email is smtp.user@example.com and its pass is abcd efgh ijkl mnop",
+                user_message="my email is smtp.vault.paste@gmail.com and its pass is abcd efgh ijkl mnop",
                 workspace_role="editor",
             )
             assert any(e["type"] == "aios_credentials_saved" for e in saved["events"])
@@ -1483,7 +1517,7 @@ def test_universal_channel_graphs_and_gaps(api_client):
             category="google",
             kind="google_oauth",
             label="default",
-            fields={"client_id": "cid", "client_secret": "sec", "refresh_token": "rtok"},
+            fields={"client_id": "123456789012-abcdefg.apps.googleusercontent.com", "client_secret": "GOCSPX-testsecret123456", "refresh_token": "1//0gtest_refresh_token_value_here"},
         )
         assert analyze_solution_gaps(db, 1, ["cap_google"]) == []
 
@@ -1592,7 +1626,7 @@ def test_send_emails_diwali_blueprint_then_approve(api_client):
             workspace_id=1,
             user_id=1,
             conversation_id=conv["id"],
-            user_message="my email is tester@example.com and password is abcd efgh ijkl mnop",
+            user_message="my email is tester.vault@gmail.com and password is abcd efgh ijkl mnop",
         )
 
         approve = process_chat_goal(

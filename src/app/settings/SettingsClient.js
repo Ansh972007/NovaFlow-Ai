@@ -56,6 +56,7 @@ import {
   verifyLinear,
 } from "@/lib/api/integrations";
 import { createAbRoute, deleteAbRoute, listAbRoutes, updateAbRoute } from "@/lib/api/finetune";
+import { getOAuthSetup } from "@/lib/api/credentials";
 import { resetSetup } from "@/lib/setup/storage";
 
 const SECTION_ICONS = {
@@ -211,6 +212,7 @@ export default function SettingsClient() {
   const [slackSigningSecret, setSlackSigningSecret] = useState("");
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [integrationMsg, setIntegrationMsg] = useState("");
+  const [oauthSetup, setOauthSetup] = useState(null);
   const [publicBaseUrl, setPublicBaseUrl] = useState("");
 
   const isAdmin = user?.role === "admin";
@@ -325,6 +327,9 @@ export default function SettingsClient() {
     getIntegrationHealth()
       .then(setIntegrationHealth)
       .catch(() => setIntegrationHealth(null));
+    getOAuthSetup()
+      .then(setOauthSetup)
+      .catch(() => setOauthSetup(null));
   }, [isAdmin, reloadWorkspaceTeam]);
 
   useEffect(() => {
@@ -1840,9 +1845,20 @@ export default function SettingsClient() {
                       <p className="text-sm font-semibold">Google OAuth (recommended)</p>
                       <p className="mt-1 text-xs text-neutral-500">
                         {integrationSettings?.email?.oauth_enabled
-                          ? "Requires GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the API. Grants gmail.send scope."
+                          ? "Add both redirect URIs below in Google Cloud Console, then connect."
                           : "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the backend to enable Connect with Google."}
                       </p>
+                      {oauthSetup?.google?.redirect_uris?.length ? (
+                        <div className="mt-3 space-y-2 rounded-lg bg-neutral-50 p-3 text-xs text-neutral-700">
+                          <p className="font-semibold text-neutral-800">Authorized redirect URIs (Google Console)</p>
+                          {oauthSetup.google.redirect_uris.map((row) => (
+                            <div key={row.id}>
+                              <p className="font-medium text-neutral-600">{row.label}</p>
+                              <p className="break-all font-mono text-[11px]">{row.uri}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"

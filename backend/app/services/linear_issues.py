@@ -13,13 +13,23 @@ from app.database import WorkspaceIntegration
 LINEAR_GQL = "https://api.linear.app/graphql"
 
 
-def resolve_linear_config(db: Session, workspace_id: int | None) -> dict[str, Any]:
+def resolve_linear_config(
+    db: Session,
+    workspace_id: int | None,
+    credential_id: str | None = None,
+) -> dict[str, Any]:
     if not workspace_id:
         return {"api_key": "", "team_id": "", "configured": False}
     try:
         from app.services import credential_vault as vault
 
-        fields = vault.resolve_fields(db, workspace_id, category="linear", kind="linear_api")
+        fields = vault.resolve_fields(
+            db,
+            workspace_id,
+            category="linear",
+            kind="linear_api",
+            credential_id=credential_id,
+        )
         key = (fields.get("api_key") or "").strip()
         team_id = (fields.get("team_id") or "").strip()
         if key:
@@ -49,8 +59,12 @@ async def _gql(api_key: str, query: str, variables: dict | None = None) -> dict:
         return data.get("data") or {}
 
 
-async def linear_verify(db: Session, workspace_id: int) -> dict:
-    cfg = resolve_linear_config(db, workspace_id)
+async def linear_verify(
+    db: Session,
+    workspace_id: int,
+    credential_id: str | None = None,
+) -> dict:
+    cfg = resolve_linear_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         return {"ok": False, "detail": "Linear API key not configured — add it in Settings → Integrations"}
     try:
@@ -71,8 +85,9 @@ async def linear_create_issue(
     title: str,
     description: str = "",
     team_id: str = "",
+    credential_id: str | None = None,
 ) -> dict:
-    cfg = resolve_linear_config(db, workspace_id)
+    cfg = resolve_linear_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         raise ValueError("Linear not configured in Settings → Integrations")
     tid = (team_id or cfg["team_id"] or "").strip()
@@ -109,8 +124,9 @@ async def linear_update_issue(
     issue_id: str,
     title: str = "",
     description: str = "",
+    credential_id: str | None = None,
 ) -> dict:
-    cfg = resolve_linear_config(db, workspace_id)
+    cfg = resolve_linear_config(db, workspace_id, credential_id=credential_id)
     if not cfg["configured"]:
         raise ValueError("Linear not configured in Settings → Integrations")
     iid = (issue_id or "").strip()

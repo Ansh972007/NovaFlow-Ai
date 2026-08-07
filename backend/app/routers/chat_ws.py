@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -535,6 +536,12 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                     rag_query = f"{' '.join(prev_users[-1:])} {query}".strip()
             rag_hits = rag_hits_for_assistant(db, assistant_id, rag_query)
             system_prompt = assistant.prompt
+            if re.search(r"\b(what day|what date|today|current date)\b", query, re.I):
+                from datetime import datetime
+
+                system_prompt = (
+                    f"Current date: {datetime.now().strftime('%A, %B %d, %Y')}\n\n{system_prompt}"
+                )
             attachment_context = _attachment_texts(db, workspace_id=wid, attachment_ids=attachment_ids)
             if attachment_context:
                 query = query + "\n\nAttached context:\n" + "\n\n".join(attachment_context)
@@ -587,6 +594,9 @@ async def assistant_chat_ws(websocket: WebSocket, assistant_id: str):
                 "role": role,
                 "conversation_id": conversation_id,
                 "conversation_api_key": conversation_api_key,
+                "planning_label": (bridge.get("aios") or {}).get("planning_label"),
+                "planning_model": (bridge.get("aios") or {}).get("planning_model"),
+                "planning_source": (bridge.get("aios") or {}).get("planning_source"),
                 "user_id": user_id,
             }
 

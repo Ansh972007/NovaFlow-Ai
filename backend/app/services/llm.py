@@ -263,3 +263,43 @@ async def stream_chat_sync(
     ):
         parts.append(token)
     return "".join(parts)
+
+
+def complete_text(
+    system: str,
+    user: str,
+    *,
+    cfg: dict | None = None,
+    db=None,
+) -> str:
+    """One-shot chat completion for internal tooling (planner, etc.)."""
+    resolved = dict(cfg or get_chat_config(db))
+    if not resolved.get("api_key"):
+        return ""
+    base = (resolved.get("base_url") or "https://api.openai.com/v1").rstrip("/")
+    if base.endswith("/chat/completions"):
+        url = base
+    else:
+        url = f"{base}/chat/completions"
+    model = resolved.get("model") or "gpt-4o-mini"
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                url,
+                headers=_provider_headers(resolved),
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": 0,
+                    "max_tokens": 512,
+                },
+            )
+            if resp.status_code >= 400:
+                return ""
+            data = resp.json()
+            return (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    except Exception:
+        return ""

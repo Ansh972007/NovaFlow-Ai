@@ -273,6 +273,8 @@ def api_entity_graph(entity_id: str, db: Session = Depends(get_db), ctx=Depends(
 
 @router.post("/kos/documents/{file_id}/build-graph")
 def api_build_graph(file_id: int, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+    from app.services.knowledge import extract_text
+
     record = db.get(KnowledgeFile, file_id)
     if not record:
         return fail(404, "Document not found")
@@ -280,7 +282,7 @@ def api_build_graph(file_id: int, db: Session = Depends(get_db), ctx=Depends(req
     if not kb:
         return fail(404, "Document not found")
     path = UPLOAD_DIR / record.file_path
-    text = path.read_text(encoding="utf-8", errors="ignore")[:50000] if path.exists() else ""
+    text = extract_text(path, db)[:50000] if path.exists() else ""
     result = build_graph_for_file(db, file=record, workspace_id=ctx.workspace_id, text=text, organization_id=ctx.organization_id)
     return ok(result)
 
