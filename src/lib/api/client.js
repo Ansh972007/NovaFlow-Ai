@@ -28,11 +28,25 @@ function formatApiError(error) {
   const data = error.response.data;
 
   if (status === 500 || status === 502 || status === 503) {
-    return "NovaFlow API is temporarily unavailable. Make sure the backend is running on port 3001.";
+    if (data?.status_message && !String(data.status_message).includes("Internal Server Error")) {
+      return data.status_message;
+    }
+    return "NovaFlow API is temporarily unavailable. Run docker compose up -d --build (or start the API on port 3001), then retry.";
   }
 
   if (data?.status_message) {
-    return data.status_message;
+    let msg = data.status_message;
+    const gate = data?.data?.publish_gate;
+    if (gate && Array.isArray(gate.blockers) && gate.blockers.length) {
+      const parts = gate.blockers
+        .slice(0, 5)
+        .map((b) => b.message || b.code || b.source || String(b))
+        .filter(Boolean);
+      if (parts.length) {
+        msg = `${msg}: ${parts.join("; ")}`;
+      }
+    }
+    return msg;
   }
 
   if (data?.detail) {
@@ -57,6 +71,9 @@ export function storeAuthTokens(data) {
   }
   if (data.refresh_token) {
     localStorage.setItem("nf_refresh_token", data.refresh_token);
+  }
+  if (data.workspace_id) {
+    localStorage.setItem("nf_workspace_id", String(data.workspace_id));
   }
 }
 
@@ -165,13 +182,17 @@ client.interceptors.response.use(
     const original = error.config;
     const path = typeof window !== "undefined" ? window.location?.pathname || "" : "";
 
-    // Retry logic for network errors and 5xx errors
+    // Retry transient server / gateway errors
     if (
       original &&
-      !original._nfRetry &&
       !original._nfNetworkRetry &&
-      (error.code === "ECONNABORTED" || error.code === "ECONNRESET" || 
-       status === 502 || status === 503 || status === 504 || status === 429)
+      (error.code === "ECONNABORTED" ||
+        error.code === "ECONNRESET" ||
+        status === 500 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504 ||
+        status === 429)
     ) {
       original._nfNetworkRetry = true;
       const retryCount = original._nfRetryCount || 0;
@@ -249,6 +270,16 @@ client.interceptors.response.use(
             localStorage.removeItem("nf_workspace_id");
           } catch {
             /* ignore */
+          }
+          if (original && !original._nfWorkspaceRetry) {
+            original._nfWorkspaceRetry = true;
+            try {
+              const { ensureActiveWorkspace } = await import("@/lib/api/workspaces");
+              await ensureActiveWorkspace();
+              return client(original);
+            } catch {
+              /* fall through */
+            }
           }
         }
 

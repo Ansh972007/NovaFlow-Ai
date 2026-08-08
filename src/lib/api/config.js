@@ -1,5 +1,12 @@
-/** NovaFlow API base URL (browser) */
 export function getApiBaseUrl() {
+  if (typeof window !== "undefined") {
+    if (window.location.port === "3000") {
+      return `${window.location.protocol}//${window.location.hostname}:3001`;
+    }
+    if (window.location.origin) {
+      return window.location.origin;
+    }
+  }
   return process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001";
 }
 

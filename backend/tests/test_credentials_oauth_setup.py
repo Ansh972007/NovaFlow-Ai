@@ -43,6 +43,29 @@ def test_create_credential_rejects_placeholder_email(test_client):
     assert body.get("status_code") == 400 or res.status_code == 400
 
 
+def test_verify_returns_error_status_on_bad_llm_key(test_client):
+    headers = _auth_headers(test_client)
+    create = test_client.post(
+        "/api/v1/credentials",
+        headers=headers,
+        json={
+            "category": "llm",
+            "kind": "openai",
+            "label": "verify-fail-test",
+            "fields": {"api_key": "sk-invalid-test-key-for-verify"},
+            "is_default": False,
+        },
+    )
+    assert create.status_code == 200
+    entry_id = create.json()["data"]["id"]
+    verify = test_client.post(f"/api/v1/credentials/{entry_id}/verify", headers=headers)
+    assert verify.status_code == 200
+    data = verify.json()["data"]
+    assert data.get("status") == "error"
+    assert "credential" in data
+    assert data["credential"].get("status") == "error"
+
+
 def test_vault_create_rejects_placeholder_email():
     from app.database import SessionLocal
     from app.services import credential_vault as vault

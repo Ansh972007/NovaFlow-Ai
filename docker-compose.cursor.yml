@@ -115,12 +115,14 @@ services:
       ENFORCE_GMAIL_ONLY: "0"
       REQUIRE_USER_API_KEYS: "0"
       ALLOW_PASSWORD_LOGIN: "1"
-      GOOGLE_CLIENT_ID: ""
-      GOOGLE_CLIENT_SECRET: ""
-      OAUTH_REDIRECT_BASE: http://localhost:3001
-      FRONTEND_URL: http://localhost:3000
+      OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:3001}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NOVAFLOW_PUBLIC_BASE_URL: ${NOVAFLOW_PUBLIC_BASE_URL:-}
     volumes:
       - ./backend/app:/app/app
+      - ./backend/scripts:/app/scripts:ro
       - novaflow_data:/app/data
       - novaflow_components:/app/components
     mem_limit: 768m
@@ -144,8 +146,15 @@ services:
         condition: service_healthy
 
   web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:3001
+        NEXT_PUBLIC_APP_NAME: NovaFlow AI
+        NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED: "true"
     image: novaflow-web:local
-    pull_policy: never
+    pull_policy: build
     container_name: novaflow-web
     restart: unless-stopped
     ports:

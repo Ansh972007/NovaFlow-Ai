@@ -14,14 +14,37 @@ from app.services import credential_vault as vault
 router = APIRouter(prefix="/credentials", tags=["Credentials"])
 
 
+def _humanize_verify_detail(exc: Exception) -> str:
+    s = str(exc).strip()
+    low = s.lower()
+    if "username and password not accepted" in low or "badcredentials" in low or "535" in s:
+        return "Gmail rejected the login. Use an App Password or connect with Google OAuth."
+    if "invalid_grant" in low or "token refresh failed" in low:
+        return "Google OAuth expired. Reconnect with Google."
+    if "401" in s or "invalid api key" in low:
+        return "API key was rejected. Check the key and try again."
+    if "unauthorized" in low or "bot token" in low or "not found" in low and "bot" in low:
+        return "Bot token rejected. Copy the full token from @BotFather."
+    if "smtp user and password required" in low:
+        return "Enter your email address and App Password."
+    if s.startswith("(535,") or "gsmtp" in low:
+        return "Email login failed. For Gmail, use an App Password or OAuth."
+    if len(s) > 200:
+        return s[:200] + "…"
+    return s or "Verification failed"
+
+
 @router.get("/catalog")
 def catalog(ctx=Depends(require_permission(Permission.INTEGRATION_READ))):
     return ok(vault.get_catalog())
 
 
 @router.get("/oauth-setup")
-def oauth_setup(ctx=Depends(require_permission(Permission.INTEGRATION_READ))):
-    return ok(vault.get_oauth_setup_info())
+def oauth_setup(
+    db: Session = Depends(get_db),
+    ctx=Depends(require_permission(Permission.INTEGRATION_READ)),
+):
+    return ok(vault.get_oauth_setup_info(db, ctx.workspace_id))
 
 
 @router.get("/overview")
@@ -71,6 +94,9 @@ def create_credential(
         )
     except ValueError as exc:
         return fail(400, str(exc))
+    if row.category == "telegram" and row.kind == "telegram_bot":
+        vault.auto_verify_telegram(db, row)
+        row = vault.get_entry(db, ctx.workspace_id, row.id)
     ctx.audit("credential.created", resource_type="credential", resource_id=row.id)
     return ok(vault.serialize_entry(row))
 
@@ -109,6 +135,14 @@ def patch_credential(
         label=label if label is not None else None,
         is_default=is_default,
     )
+    if (
+        row.category == "telegram"
+        and row.kind == "telegram_bot"
+        and isinstance(body.get("fields"), dict)
+        and (body["fields"].get("bot_token") or "").strip()
+    ):
+        vault.auto_verify_telegram(db, row)
+        row = vault.get_entry(db, ctx.workspace_id, row.id)
     ctx.audit("credential.updated", resource_type="credential", resource_id=row.id)
     return ok(vault.serialize_entry(row))
 
@@ -224,24 +258,25 @@ async def verify_credential(
 
             detail = await asyncio.to_thread(_smtp_login)
         elif row.category == "email" and row.kind == "gmail_oauth":
+            from app.services.gmail_jira import resolve_google_oauth_client
+
             refresh = (fields.get("refresh_token") or "").strip()
             access = (fields.get("access_token") or "").strip()
+            client_id = (fields.get("client_id") or "").strip()
+            client_secret = (fields.get("client_secret") or "").strip()
+            if not client_id or not client_secret:
+                client_id, client_secret = resolve_google_oauth_client(db, ctx.workspace_id)
             if not refresh and not access:
                 row_ws = db.get(WorkspaceIntegration, ctx.workspace_id)
                 if row_ws and row_ws.gmail_oauth_refresh_token_enc:
                     detail = f"Gmail OAuth connected ({row_ws.gmail_oauth_email or 'account'})"
+                elif client_id and client_secret:
+                    detail = "Client ID and secret saved — use Connect with Google to finish"
                 else:
-                    raise ValueError("Connect Gmail with Google OAuth or paste a refresh token")
+                    raise ValueError("Enter Client ID and Client secret, then Save")
             else:
-                from app.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-
-                client_id = GOOGLE_CLIENT_ID
-                client_secret = GOOGLE_CLIENT_SECRET
-                google_vault = vault.resolve_fields(db, ctx.workspace_id, category="google", kind="google_oauth")
-                if google_vault.get("client_id"):
-                    client_id = google_vault["client_id"]
-                if google_vault.get("client_secret"):
-                    client_secret = google_vault["client_secret"]
+                if not client_id or not client_secret:
+                    raise ValueError("Client ID and Client secret are required")
                 if refresh and client_id and client_secret:
                     import httpx
 
@@ -331,7 +366,7 @@ async def verify_credential(
         vault.update_entry(db, row, status="ok")
     except Exception as exc:
         status = "error"
-        detail = str(exc)[:300]
+        detail = _humanize_verify_detail(exc)
         vault.update_entry(db, row, status="error")
     row = vault.get_entry(db, ctx.workspace_id, entry_id)
     return ok({"status": status, "detail": detail, "credential": vault.serialize_entry(row)})

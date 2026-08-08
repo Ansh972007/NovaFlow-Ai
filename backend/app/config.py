@@ -57,6 +57,10 @@ MICROSOFT_CLIENT_ID = os.getenv("MICROSOFT_CLIENT_ID", "")
 MICROSOFT_CLIENT_SECRET = os.getenv("MICROSOFT_CLIENT_SECRET", "")
 OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", f"http://localhost:{PORT}")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+# Public HTTPS base for Telegram/Slack webhooks (e.g. ngrok URL). Set via .env or scripts/start-with-ngrok.*
+PUBLIC_BASE_URL = (
+    os.getenv("NOVAFLOW_PUBLIC_BASE_URL", os.getenv("PUBLIC_BASE_URL", "")).strip().rstrip("/")
+)
 OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", FRONTEND_URL)
 OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "NovaFlow AI")
 

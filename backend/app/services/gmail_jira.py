@@ -24,7 +24,38 @@ def gmail_oauth_enabled() -> bool:
     return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
 
-def gmail_redirect_uri() -> str:
+def resolve_google_oauth_client(db: Session, workspace_id: int) -> tuple[str, str]:
+    """Workspace vault Client ID/secret, else platform env vars."""
+    from app.services import credential_vault as vault
+
+    for category, kind in (("email", "gmail_oauth"), ("google", "google_oauth")):
+        try:
+            fields = vault.resolve_fields(db, workspace_id, category=category, kind=kind)
+        except Exception:
+            fields = {}
+        cid = (fields.get("client_id") or "").strip()
+        secret = (fields.get("client_secret") or "").strip()
+        if cid and secret:
+            return cid, secret
+    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+        return GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+    return "", ""
+
+
+def gmail_oauth_enabled_for_workspace(db: Session, workspace_id: int) -> bool:
+    cid, secret = resolve_google_oauth_client(db, workspace_id)
+    return bool(cid and secret)
+
+
+def gmail_redirect_uri(db: Session | None = None, workspace_id: int | None = None) -> str:
+    if db and workspace_id:
+        try:
+            from app.services.workspace_integrations import resolve_public_base_url
+            base = resolve_public_base_url(db, workspace_id)
+            if base:
+                return f"{base.rstrip('/')}/api/v1/integrations/gmail/oauth/callback"
+        except Exception:
+            pass
     base = OAUTH_REDIRECT_BASE.rstrip("/")
     return f"{base}/api/v1/integrations/gmail/oauth/callback"
 
@@ -53,12 +84,13 @@ def verify_gmail_oauth_state(state: str) -> dict | None:
         return None
 
 
-def build_gmail_authorize_url(workspace_id: int, user_id: int) -> str | None:
-    if not gmail_oauth_enabled():
+def build_gmail_authorize_url(db: Session, workspace_id: int, user_id: int) -> str | None:
+    client_id, _ = resolve_google_oauth_client(db, workspace_id)
+    if not client_id:
         return None
     params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": gmail_redirect_uri(),
+        "client_id": client_id,
+        "redirect_uri": gmail_redirect_uri(db, workspace_id),
         "response_type": "code",
         "scope": GMAIL_SCOPES,
         "state": create_gmail_oauth_state(workspace_id, user_id),
@@ -69,15 +101,18 @@ def build_gmail_authorize_url(workspace_id: int, user_id: int) -> str | None:
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
 
 
-async def exchange_gmail_code(code: str) -> dict[str, Any]:
+async def exchange_gmail_code(db: Session, workspace_id: int, code: str) -> dict[str, Any]:
+    client_id, client_secret = resolve_google_oauth_client(db, workspace_id)
+    if not client_id or not client_secret:
+        raise ValueError("Google Client ID and Client secret are required")
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "code": code,
-                "redirect_uri": gmail_redirect_uri(),
+                "redirect_uri": gmail_redirect_uri(db, workspace_id),
                 "grant_type": "authorization_code",
             },
             headers={"Accept": "application/json"},
@@ -86,13 +121,16 @@ async def exchange_gmail_code(code: str) -> dict[str, Any]:
         return resp.json()
 
 
-async def refresh_gmail_access_token(refresh_token: str) -> dict[str, Any]:
+async def refresh_gmail_access_token(db: Session, workspace_id: int, refresh_token: str) -> dict[str, Any]:
+    client_id, client_secret = resolve_google_oauth_client(db, workspace_id)
+    if not client_id or not client_secret:
+        raise ValueError("Google Client ID and Client secret are required")
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             },
@@ -193,7 +231,20 @@ def disconnect_gmail_oauth(db: Session, workspace_id: int) -> None:
     db.commit()
 
 
-async def get_valid_gmail_access_token(db: Session, workspace_id: int) -> str:
+async def get_valid_gmail_access_token(
+    db: Session, 
+    workspace_id: int, 
+    credential_id: str | None = None,
+) -> str:
+    if credential_id:
+        from app.services import credential_vault as vault
+        try:
+            fields = vault.resolve_fields(db, workspace_id, category="email", kind="gmail_oauth", credential_id=credential_id)
+            if fields.get("access_token"):
+                return fields["access_token"]
+        except Exception:
+            pass
+
     row = db.get(WorkspaceIntegration, workspace_id)
     if not row or not row.gmail_oauth_refresh_token_enc:
         raise ValueError("Gmail OAuth not connected")
@@ -206,7 +257,7 @@ async def get_valid_gmail_access_token(db: Session, workspace_id: int) -> str:
     if access and expiry and expiry > datetime.utcnow() + timedelta(minutes=2):
         return access
 
-    token_data = await refresh_gmail_access_token(refresh)
+    token_data = await refresh_gmail_access_token(db, workspace_id, refresh)
     access = (token_data.get("access_token") or "").strip()
     if not access:
         raise ValueError("Failed to refresh Gmail access token")
@@ -228,11 +279,12 @@ async def send_gmail_api_message(
     body: str,
     *,
     from_addr: str | None = None,
+    credential_id: str | None = None,
 ) -> dict:
     if not to_addr:
         return {"ok": False, "detail": "Missing recipient"}
     try:
-        access = await get_valid_gmail_access_token(db, workspace_id)
+        access = await get_valid_gmail_access_token(db, workspace_id, credential_id=credential_id)
         row = db.get(WorkspaceIntegration, workspace_id)
         from_addr = (from_addr or "").strip() or (row.gmail_oauth_email if row else "") or "me"
         msg = MIMEText(body[:8000], "plain", "utf-8")

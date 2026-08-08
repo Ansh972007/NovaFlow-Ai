@@ -7,9 +7,22 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.database import Workflow, WorkflowPresence, WorkflowPresenceSession, WorkflowRun, WorkflowSchedule, WorkflowVersion, get_db
+from app.database import (
+    Workflow,
+    WorkflowComment,
+    WorkflowExecutionCheckpoint,
+    WorkflowPendingRun,
+    WorkflowPresence,
+    WorkflowPresenceSession,
+    WorkflowRating,
+    WorkflowRun,
+    WorkflowSchedule,
+    WorkflowTestCase,
+    WorkflowVersion,
+    get_db,
+)
 from app.deps import get_workspace_ctx, require_workspace_editor
-from app.schemas import WorkflowCreate, WorkflowRunRequest, WorkflowUpdate, fail, ok
+from app.schemas import WorkflowCreate, WorkflowDeleteRequest, WorkflowRunRequest, WorkflowUpdate, fail, ok
 from app.services.cron_schedule import validate_cron
 from app.services.workflow import (
     TEMPLATES,
@@ -116,6 +129,44 @@ def get_workflow_run(run_id: int, db: Session = Depends(get_db), ctx=Depends(get
             "steps": steps if isinstance(steps, list) else [],
         }
     )
+
+
+@router.get("/workflow/pending-runs")
+def list_pending_workflow_runs(
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    ctx=Depends(get_workspace_ctx),
+):
+    rows = (
+        ctx.query(WorkflowPendingRun)
+        .filter(WorkflowPendingRun.status == 0)
+        .order_by(WorkflowPendingRun.create_time.desc())
+        .limit(limit)
+        .all()
+    )
+    out = []
+    for p in rows:
+        wf = db.get(Workflow, p.workflow_id)
+        try:
+            context = json.loads(p.context_json or "{}")
+            steps = json.loads(p.steps_json or "[]")
+            step_count = len(steps) if isinstance(steps, list) else 0
+        except json.JSONDecodeError:
+            context = {}
+            step_count = 0
+        out.append(
+            {
+                "id": p.id,
+                "workflow_id": p.workflow_id,
+                "workflow_name": wf.name if wf else p.workflow_id,
+                "pause_after_node": p.pause_after_node or "",
+                "input": (context.get("input") or "")[:200],
+                "step_count": step_count,
+                "user_id": p.user_id,
+                "create_time": p.create_time.isoformat() if p.create_time else None,
+            }
+        )
+    return ok(out)
 
 
 @router.get("/workflow")
@@ -280,23 +331,47 @@ def set_workflow_status(
     if status == 1 and not getattr(w, "webhook_token", ""):
         w.webhook_token = secrets.token_urlsafe(24)
     db.commit()
-    return ok({"id": w.id, "status": status, "webhook_token": getattr(w, "webhook_token", "") or ""})
+    telegram_webhook: dict | None = None
+    if status == 1:
+        import asyncio
+
+        from app.services.integrations import ensure_telegram_webhook_for_workflow
+
+        telegram_webhook = asyncio.run(
+            ensure_telegram_webhook_for_workflow(db, ctx.workspace_id, w.id, w.graph_json or "")
+        )
+    payload = {"id": w.id, "status": status, "webhook_token": getattr(w, "webhook_token", "") or ""}
+    if telegram_webhook is not None:
+        payload["telegram_webhook"] = telegram_webhook
+    return ok(payload)
 
 
 @router.post("/workflow/delete")
 def delete_workflow(
-    workflow_id: str = Body(...),
+    body: WorkflowDeleteRequest,
     db: Session = Depends(get_db),
     ctx=Depends(require_workspace_editor),
 ):
+    workflow_id = body.workflow_id.strip()
     w = ctx.fetch(Workflow, workflow_id)
     if not w:
         return fail(404, "Workflow not found")
-    db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).delete()
-    db.query(WorkflowSchedule).filter(WorkflowSchedule.workflow_id == workflow_id).delete()
+    for model in (
+        WorkflowPresenceSession,
+        WorkflowPresence,
+        WorkflowPendingRun,
+        WorkflowExecutionCheckpoint,
+        WorkflowTestCase,
+        WorkflowVersion,
+        WorkflowRating,
+        WorkflowComment,
+        WorkflowRun,
+        WorkflowSchedule,
+    ):
+        db.query(model).filter(model.workflow_id == workflow_id).delete(synchronize_session=False)
     db.delete(w)
     db.commit()
-    return ok(None)
+    return ok({"deleted": workflow_id})
 
 
 @router.post("/workflow/run")

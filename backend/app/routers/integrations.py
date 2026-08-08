@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.config import PORT
@@ -63,15 +63,24 @@ def integration_health(db: Session = Depends(get_db), ctx=Depends(get_workspace_
 
 
 @router.get("/integrations/gmail/oauth/start")
-def gmail_oauth_start(db: Session = Depends(get_db), ctx=Depends(require_workspace_admin)):
-    from app.services.gmail_jira import build_gmail_authorize_url, gmail_oauth_enabled
+def gmail_oauth_start(
+    json_mode: bool | None = Query(None, alias="json"),
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_admin),
+):
+    from app.services.gmail_jira import build_gmail_authorize_url, gmail_oauth_enabled_for_workspace
     from fastapi.responses import RedirectResponse
 
-    if not gmail_oauth_enabled():
-        return fail(400, "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable Gmail OAuth")
-    url = build_gmail_authorize_url(ctx.workspace_id, ctx.user.user_id)
+    if not gmail_oauth_enabled_for_workspace(db, ctx.workspace_id):
+        return fail(
+            400,
+            "Add Google Client ID and Client secret under Credentials → Email & Gmail, then click Save credential before connecting.",
+        )
+    url = build_gmail_authorize_url(db, ctx.workspace_id, ctx.user.user_id)
     if not url:
-        return fail(400, "Could not build Google authorize URL")
+        return fail(400, "Could not build Google authorize URL. Verify Google Client ID & Secret.")
+    if json_mode:
+        return ok({"url": url})
     return RedirectResponse(url)
 
 
@@ -97,13 +106,14 @@ async def gmail_oauth_callback(
     if not payload or not code:
         return RedirectResponse(frontend_settings_redirect("tab=integrations&gmail=error&msg=invalid_state"))
     try:
-        token_data = await exchange_gmail_code(code)
+        wid = int(payload["workspace_id"])
+        token_data = await exchange_gmail_code(db, wid, code)
         access = token_data.get("access_token") or ""
         profile = await fetch_gmail_profile(access) if access else {}
         email = profile.get("email") or ""
         store_gmail_oauth_tokens(
             db,
-            int(payload["workspace_id"]),
+            wid,
             token_data,
             email,
             user_id=int(payload.get("user_id") or 0),
@@ -391,6 +401,7 @@ async def test_notify(
         bot_token=(body.get("bot_token") or "").strip(),
         db=db,
         workspace_id=ctx.workspace_id,
+        credential_id=body.get("credential_id"),
     )
     if not result.get("ok"):
         return fail(400, result.get("detail") or "Send failed")
@@ -399,6 +410,8 @@ async def test_notify(
 
 @router.post("/integrations/telegram/webhook/{workflow_id}")
 async def telegram_webhook(workflow_id: str, request: Request, db: Session = Depends(get_db)):
+    from app.services.integrations import telegram_trigger_chat_filter
+
     wf = db.get(Workflow, workflow_id)
     if not wf or wf.status != 1:
         return fail(404, "Workflow not found or not published")
@@ -409,13 +422,16 @@ async def telegram_webhook(workflow_id: str, request: Request, db: Session = Dep
     chat_id, text = parse_telegram_input(payload)
     if not text:
         return ok({"ignored": True})
+    chat_filter = telegram_trigger_chat_filter(wf.graph_json or "")
+    if chat_filter and chat_id and chat_id != chat_filter:
+        return ok({"ignored": True, "reason": "chat_filter"})
     result = await run_workflow(
         db,
         wf,
         wf.user_id,
         text,
         wf.workspace_id,
-        extra_context={"chat_id": chat_id},
+        extra_context={"chat_id": chat_id, "telegram_chat_id": chat_id},
     )
     return ok({"chat_id": chat_id, "result": result})
 
@@ -428,15 +444,17 @@ def telegram_setup(workflow_id: str, db: Session = Depends(get_db), ctx=Depends(
     settings = integrations_dict(db, ctx.workspace_id)
     public_base = resolve_public_base_url(db, ctx.workspace_id)
     webhook_url = f"{public_base}/api/v1/integrations/telegram/webhook/{workflow_id}"
+    tg = settings.get("telegram") or {}
     return ok(
         {
             "workflow": workflow_dict(wf),
             "webhook_url": webhook_url,
             "public_base_url": public_base,
-            "telegram_configured": settings["telegram"]["configured"],
-            "default_chat_id": settings["telegram"]["default_chat_id"],
-            "webhook_registered": settings["telegram"].get("webhook_workflow_id") == workflow_id,
-            "stored_webhook_url": settings["telegram"].get("webhook_url") or "",
-            "hint": "Save bot token in Settings → Integrations, then register webhook.",
+            "telegram_configured": tg.get("configured"),
+            "bot_username": tg.get("bot_username") or "",
+            "default_chat_id": tg.get("default_chat_id"),
+            "webhook_registered": tg.get("webhook_workflow_id") == workflow_id,
+            "stored_webhook_url": tg.get("webhook_url") or "",
+            "hint": "Add bot token in Credentials → Messaging, publish workflow — webhook registers automatically.",
         }
     )

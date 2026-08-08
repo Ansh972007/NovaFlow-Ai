@@ -99,12 +99,18 @@ import logging
 import traceback
 import uuid
 
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 logger = logging.getLogger("novaflow.errors")
+
 
 class GlobalErrorHandlerMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         try:
             return await call_next(request)
+        except (StarletteHTTPException, RequestValidationError):
+            raise
         except Exception as exc:
             ref_id = uuid.uuid4().hex[:8].upper()
             logger.error(

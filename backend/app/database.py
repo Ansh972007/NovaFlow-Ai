@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 
@@ -1594,6 +1595,33 @@ except Exception:
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
+_schema_log = logging.getLogger("novaflow.schema")
+_IS_MYSQL = DATABASE_URL.startswith("mysql")
+
+
+def _add_column_if_missing(
+    insp,
+    table: str,
+    col: str,
+    ddl: str,
+    *,
+    backfill_sql: str | None = None,
+) -> None:
+    from sqlalchemy import text
+
+    if table not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns(table)}
+    if col in cols:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(ddl))
+            if backfill_sql:
+                conn.execute(text(backfill_sql))
+    except Exception as exc:
+        _schema_log.warning("Schema migration skipped for %s.%s: %s", table, col, exc)
+
 
 def migrate_schema():
     """Lightweight SQLite/MySQL column migrations for dev upgrades."""
@@ -1610,6 +1638,20 @@ def migrate_schema():
         if "error_message" not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE knowledge_files ADD COLUMN error_message TEXT"))
+    if "knowledge_bases" in insp.get_table_names():
+        _add_column_if_missing(
+            insp,
+            "knowledge_bases",
+            "classification",
+            "ALTER TABLE knowledge_bases ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'",
+            backfill_sql="UPDATE knowledge_bases SET classification = 'internal' WHERE classification IS NULL OR classification = ''",
+        )
+        _add_column_if_missing(
+            insp,
+            "knowledge_bases",
+            "workspace_id",
+            "ALTER TABLE knowledge_bases ADD COLUMN workspace_id INTEGER",
+        )
     if "users" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("users")}
         if "role" not in cols:
@@ -1838,45 +1880,35 @@ def migrate_schema():
 
     # KOS — extended columns on knowledge tables
     kos_kb_cols = {
-        "classification": "ALTER TABLE knowledge_bases ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'",
-        "status": "ALTER TABLE knowledge_bases ADD COLUMN status VARCHAR(16) DEFAULT 'published'",
-        "tags_json": "ALTER TABLE knowledge_bases ADD COLUMN tags_json TEXT DEFAULT '[]'",
-        "labels_json": "ALTER TABLE knowledge_bases ADD COLUMN labels_json TEXT DEFAULT '[]'",
-        "aliases_json": "ALTER TABLE knowledge_bases ADD COLUMN aliases_json TEXT DEFAULT '[]'",
-        "retention_policy": "ALTER TABLE knowledge_bases ADD COLUMN retention_policy VARCHAR(32) DEFAULT 'standard'",
-        "review_required": "ALTER TABLE knowledge_bases ADD COLUMN review_required INTEGER DEFAULT 0",
-        "archived_at": "ALTER TABLE knowledge_bases ADD COLUMN archived_at DATETIME",
+        "classification": ("ALTER TABLE knowledge_bases ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'", "UPDATE knowledge_bases SET classification = 'internal' WHERE classification IS NULL OR classification = ''"),
+        "status": ("ALTER TABLE knowledge_bases ADD COLUMN status VARCHAR(16) DEFAULT 'published'", "UPDATE knowledge_bases SET status = 'published' WHERE status IS NULL OR status = ''"),
+        "tags_json": ("ALTER TABLE knowledge_bases ADD COLUMN tags_json TEXT DEFAULT '[]'", "UPDATE knowledge_bases SET tags_json = '[]' WHERE tags_json IS NULL"),
+        "labels_json": ("ALTER TABLE knowledge_bases ADD COLUMN labels_json TEXT DEFAULT '[]'", "UPDATE knowledge_bases SET labels_json = '[]' WHERE labels_json IS NULL"),
+        "aliases_json": ("ALTER TABLE knowledge_bases ADD COLUMN aliases_json TEXT DEFAULT '[]'", "UPDATE knowledge_bases SET aliases_json = '[]' WHERE aliases_json IS NULL"),
+        "retention_policy": ("ALTER TABLE knowledge_bases ADD COLUMN retention_policy VARCHAR(32) DEFAULT 'standard'", "UPDATE knowledge_bases SET retention_policy = 'standard' WHERE retention_policy IS NULL OR retention_policy = ''"),
+        "review_required": ("ALTER TABLE knowledge_bases ADD COLUMN review_required INTEGER DEFAULT 0", None),
+        "archived_at": ("ALTER TABLE knowledge_bases ADD COLUMN archived_at DATETIME", None),
     }
-    if "knowledge_bases" in insp.get_table_names():
-        cols = {c["name"] for c in insp.get_columns("knowledge_bases")}
-        for col, ddl in kos_kb_cols.items():
-            if col not in cols:
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text(ddl))
-                except Exception:
-                    pass
+    for col, (ddl, backfill) in kos_kb_cols.items():
+        if _IS_MYSQL and col in {"tags_json", "labels_json", "aliases_json"}:
+            ddl = ddl.replace(" DEFAULT '[]'", "")
+        _add_column_if_missing(insp, "knowledge_bases", col, ddl, backfill_sql=backfill)
 
     kos_file_cols = {
-        "folder_id": "ALTER TABLE knowledge_files ADD COLUMN folder_id VARCHAR(32)",
-        "version_no": "ALTER TABLE knowledge_files ADD COLUMN version_no INTEGER DEFAULT 1",
-        "content_hash": "ALTER TABLE knowledge_files ADD COLUMN content_hash VARCHAR(64) DEFAULT ''",
-        "document_type": "ALTER TABLE knowledge_files ADD COLUMN document_type VARCHAR(32) DEFAULT ''",
-        "lifecycle_status": "ALTER TABLE knowledge_files ADD COLUMN lifecycle_status VARCHAR(16) DEFAULT 'published'",
-        "classification": "ALTER TABLE knowledge_files ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'",
-        "metadata_json": "ALTER TABLE knowledge_files ADD COLUMN metadata_json TEXT DEFAULT '{}'",
-        "expires_at": "ALTER TABLE knowledge_files ADD COLUMN expires_at DATETIME",
-        "owner_id": "ALTER TABLE knowledge_files ADD COLUMN owner_id INTEGER",
+        "folder_id": ("ALTER TABLE knowledge_files ADD COLUMN folder_id VARCHAR(32)", None),
+        "version_no": ("ALTER TABLE knowledge_files ADD COLUMN version_no INTEGER DEFAULT 1", None),
+        "content_hash": ("ALTER TABLE knowledge_files ADD COLUMN content_hash VARCHAR(64) DEFAULT ''", "UPDATE knowledge_files SET content_hash = '' WHERE content_hash IS NULL"),
+        "document_type": ("ALTER TABLE knowledge_files ADD COLUMN document_type VARCHAR(32) DEFAULT ''", "UPDATE knowledge_files SET document_type = '' WHERE document_type IS NULL"),
+        "lifecycle_status": ("ALTER TABLE knowledge_files ADD COLUMN lifecycle_status VARCHAR(16) DEFAULT 'published'", "UPDATE knowledge_files SET lifecycle_status = 'published' WHERE lifecycle_status IS NULL OR lifecycle_status = ''"),
+        "classification": ("ALTER TABLE knowledge_files ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'", "UPDATE knowledge_files SET classification = 'internal' WHERE classification IS NULL OR classification = ''"),
+        "metadata_json": ("ALTER TABLE knowledge_files ADD COLUMN metadata_json TEXT DEFAULT '{}'", "UPDATE knowledge_files SET metadata_json = '{}' WHERE metadata_json IS NULL"),
+        "expires_at": ("ALTER TABLE knowledge_files ADD COLUMN expires_at DATETIME", None),
+        "owner_id": ("ALTER TABLE knowledge_files ADD COLUMN owner_id INTEGER", None),
     }
-    if "knowledge_files" in insp.get_table_names():
-        cols = {c["name"] for c in insp.get_columns("knowledge_files")}
-        for col, ddl in kos_file_cols.items():
-            if col not in cols:
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text(ddl))
-                except Exception:
-                    pass
+    for col, (ddl, backfill) in kos_file_cols.items():
+        if _IS_MYSQL and col == "metadata_json":
+            ddl = ddl.replace(" DEFAULT '{}'", "")
+        _add_column_if_missing(insp, "knowledge_files", col, ddl, backfill_sql=backfill)
 
     kos_chunk_cols = {
         "content_hash": "ALTER TABLE knowledge_chunks ADD COLUMN content_hash VARCHAR(64) DEFAULT ''",

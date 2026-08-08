@@ -19,7 +19,19 @@ function OAuthCallbackInner() {
     }
     if (token) {
       localStorage.setItem("nf_token", token);
-      router.replace("/chat");
+      import("@/lib/api/auth")
+        .then(({ getUserInfo }) => getUserInfo())
+        .then((user) => {
+          if (user?.workspace_id) {
+            localStorage.setItem("nf_workspace_id", String(user.workspace_id));
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          import("@/lib/api/workspaces").then(({ ensureActiveWorkspace }) => {
+            ensureActiveWorkspace().finally(() => router.replace("/chat"));
+          });
+        });
       return;
     }
     setMessage("Missing OAuth token. Try signing in again.");

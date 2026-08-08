@@ -100,3 +100,7 @@ class WorkflowUpdate(BaseModel):
 class WorkflowRunRequest(BaseModel):
     workflow_id: str
     input: str = Field(min_length=1, max_length=4000)
+
+
+class WorkflowDeleteRequest(BaseModel):
+    workflow_id: str = Field(min_length=1, max_length=64)

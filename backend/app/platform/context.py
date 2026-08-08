@@ -58,19 +58,23 @@ class TenantContext:
 
 def _active_emergency_grant(db: Session, user_id: int, workspace_id: int) -> EmergencyAccessGrant | None:
     now = datetime.utcnow()
-    return (
-        db.query(EmergencyAccessGrant)
-        .filter(
-            EmergencyAccessGrant.grantee_user_id == user_id,
-            EmergencyAccessGrant.workspace_id == workspace_id,
-            EmergencyAccessGrant.status == "active",
-            EmergencyAccessGrant.starts_at.isnot(None),
-            EmergencyAccessGrant.starts_at <= now,
-            EmergencyAccessGrant.ends_at.isnot(None),
-            EmergencyAccessGrant.ends_at >= now,
+    try:
+        return (
+            db.query(EmergencyAccessGrant)
+            .filter(
+                EmergencyAccessGrant.grantee_user_id == user_id,
+                EmergencyAccessGrant.workspace_id == workspace_id,
+                EmergencyAccessGrant.status == "active",
+                EmergencyAccessGrant.starts_at.isnot(None),
+                EmergencyAccessGrant.starts_at <= now,
+                EmergencyAccessGrant.ends_at.isnot(None),
+                EmergencyAccessGrant.ends_at >= now,
+            )
+            .first()
         )
-        .first()
-    )
+    except Exception:
+        db.rollback()
+        return None
 
 
 def resolve_tenant(

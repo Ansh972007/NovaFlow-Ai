@@ -31,17 +31,19 @@ import {
   updateWorkflow,
   getWorkflowsPage,
   validateWorkflowGraph,
+  testWorkflowSandbox,
 } from "@/lib/api/workflows";
+import { setWorkflowPublic } from "@/lib/api/marketplace";
 import {
   downloadWorkflowDiffJson,
   downloadWorkflowDiffMarkdown,
 } from "@/lib/workflow/diffExport";
 import CreateApiNodeModal from "@/components/workflow/CreateApiNodeModal";
 import OpenApiImportModal from "@/components/workflow/OpenApiImportModal";
+import NodeLibraryPanel from "@/components/workflow/NodeLibraryPanel";
 import { useWorkspaceAccess } from "@/lib/auth/workspaceAccess";
 import { listNodeLibrary } from "@/lib/api/nodes";
 
-const ease = [0.16, 1, 0.3, 1];
 const ease = [0.16, 1, 0.3, 1];
 
 function mergeNodeDataWithSchema(type, data, builtinSchemas) {
@@ -130,8 +132,11 @@ export default function WorkflowBuilderClient({ workflowId }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testReport, setTestReport] = useState(null);
   const [runningNodeId, setRunningNodeId] = useState(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  const [railTab, setRailTab] = useState("pipeline");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [inspectorTab, setInspectorTab] = useState("configure");
@@ -211,6 +216,30 @@ export default function WorkflowBuilderClient({ workflowId }) {
     [graph.nodes]
   );
 
+  const hasTelegramFlow = useMemo(
+    () =>
+      (graph.nodes || []).some((n) => {
+        const data = n.data || {};
+        if (n.type === "trigger" && (data.trigger_type || "").toLowerCase() === "telegram") return true;
+        if (n.type === "notify" && (data.channel || "").toLowerCase() === "telegram") return true;
+        return false;
+      }),
+    [graph.nodes]
+  );
+
+  const reloadNodeLibrary = useCallback(async () => {
+    try {
+      const lib = await listNodeLibrary({ include_drafts: true });
+      setCustomNodeDefs(lib?.custom || []);
+      setBuiltinSchemas(lib?.builtin || []);
+      setDynamicComponents(lib?.dynamic || []);
+    } catch {
+      setCustomNodeDefs([]);
+      setBuiltinSchemas([]);
+      setDynamicComponents([]);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     if (!safeWorkflowId || safeWorkflowId === "undefined" || safeWorkflowId === "null") {
       setError("Invalid workflow link. Return to the workflows list and open a workflow again.");
@@ -260,14 +289,9 @@ export default function WorkflowBuilderClient({ workflowId }) {
     }
 
     try {
-      const lib = await listNodeLibrary({ include_drafts: false });
-      setCustomNodeDefs(lib?.custom || []);
-      setBuiltinSchemas(lib?.builtin || []);
-      setDynamicComponents(lib?.dynamic || []);
+      await reloadNodeLibrary();
     } catch {
-      setCustomNodeDefs([]);
-      setBuiltinSchemas([]);
-      setDynamicComponents([]);
+      /* handled in reloadNodeLibrary */
     }
 
     try {
@@ -278,7 +302,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
     } finally {
       setLoading(false);
     }
-  }, [safeWorkflowId]);
+  }, [safeWorkflowId, reloadNodeLibrary]);
 
   useEffect(() => {
     getUserInfo()
@@ -436,18 +460,19 @@ export default function WorkflowBuilderClient({ workflowId }) {
     setSaved(false);
   }
 
-  function addNode(type) {
+  function addNode(type, presetData = null) {
     if (workspaceReadOnly) return;
     nodeSeqRef.current += 1;
     const id = `${type}_${nodeSeqRef.current}_${graph.nodes?.length || 0}`;
     const maxX = Math.max(60, ...(graph.nodes || []).map((n) => n.x || 0));
     const schemaDefaults = builtinSchemas.find((s) => s.type === type)?.defaults;
+    const baseDefaults = schemaDefaults || ADD_NODE_DEFAULTS[type] || {};
     const newNode = {
       id,
       type,
       x: maxX + 200,
       y: 120 + ((graph.nodes?.length || 0) % 4) * 80,
-      data: { ...(schemaDefaults || ADD_NODE_DEFAULTS[type] || {}) },
+      data: { ...baseDefaults, ...(presetData || {}) },
     };
     setGraph((prev) => ({
       ...prev,
@@ -618,11 +643,44 @@ export default function WorkflowBuilderClient({ workflowId }) {
     }
   }
 
+  async function handleTest() {
+    if (readOnly) return;
+    setTesting(true);
+    setError("");
+    setInspectorTab("test");
+    try {
+      await updateWorkflow({
+        id: workflowId,
+        name: name.trim(),
+        desc,
+        graph,
+        run_webhook_url: runWebhookUrl.trim(),
+      });
+      setSaved(true);
+      const res = await testWorkflowSandbox(workflowId, {
+        graph,
+        live_credential_probe: true,
+      });
+      setTestReport(res?.report || res);
+    } catch (err) {
+      setError(err.message || "Validation failed");
+      setTestReport(null);
+    } finally {
+      setTesting(false);
+    }
+  }
+
   async function handleRun() {
-    if (!runInput.trim() || readOnly) return;
+    if (readOnly) return;
+    if (!runInput.trim()) {
+      setError("Enter test input in the Test run panel before running.");
+      setInspectorTab("test");
+      return;
+    }
     setRunning(true);
     setRunningNodeId(null);
     setRunResult({ output: "", steps: [] });
+    setTestReport(null);
     setError("");
     setInspectorTab("test");
     const steps = [];
@@ -799,14 +857,18 @@ export default function WorkflowBuilderClient({ workflowId }) {
               Saved
             </motion.span>
           )}
+          {!saved && !loading && !readOnly && (
+            <span className="hidden text-[11px] font-semibold text-amber-600 lg:inline">Unsaved</span>
+          )}
           {!readOnly && (
             <>
               <button
                 type="button"
-                onClick={() => setInspectorTab("test")}
+                onClick={handleTest}
+                disabled={testing || running || loading}
                 className="workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs lg:inline-flex"
               >
-                Test
+                {testing ? "Testing…" : "Test"}
               </button>
               <button
                 type="button"
@@ -819,7 +881,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
               <button
                 type="button"
                 onClick={togglePublish}
-                className="workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs xl:inline-flex"
+                className="workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs lg:inline-flex"
               >
                 {status === 1 ? "Unpub" : "Publish"}
               </button>
@@ -827,7 +889,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 <button
                   type="button"
                   onClick={handleTogglePublic}
-                  className={`workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs xl:inline-flex ${
+                  className={`workspace-btn-ghost hidden !px-2.5 !py-1.5 text-xs lg:inline-flex ${
                     isPublic ? "!bg-violet-100 !text-violet-800" : ""
                   }`}
                 >
@@ -874,14 +936,49 @@ export default function WorkflowBuilderClient({ workflowId }) {
       )}
 
       <div className="relative z-10 flex min-h-0 flex-1">
-        <aside className={`workflow-studio-rail w-[240px] shrink-0 flex-col border-r border-white/60 ${mobileRailOpen ? "flex" : "hidden"} lg:flex`}>
-          <div className="border-b border-black/[0.04] p-4">
-            <p className="workspace-section-label">Pipeline</p>
-              <p className="mt-1 text-xs text-neutral-500">
-              {graph.nodes?.length || 0} nodes · connect in Configure panel
-            </p>
+        <aside
+          className={`workflow-studio-rail flex w-[248px] shrink-0 flex-col min-h-0 overflow-hidden border-r border-white/60 ${
+            mobileRailOpen ? "flex" : "hidden"
+          } lg:flex`}
+        >
+          <div className="shrink-0 border-b border-black/[0.04] p-3">
+            <div className="flex gap-1 rounded-xl bg-black/[0.04] p-1">
+              <button
+                type="button"
+                onClick={() => setRailTab("pipeline")}
+                className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                  railTab === "pipeline"
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-800"
+                }`}
+              >
+                Steps
+              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => setRailTab("library")}
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                    railTab === "library"
+                      ? "bg-white text-neutral-900 shadow-sm"
+                      : "text-neutral-500 hover:text-neutral-800"
+                  }`}
+                >
+                  Add nodes
+                </button>
+              )}
+            </div>
           </div>
-          <ul className="min-h-0 flex-1 space-y-0 overflow-y-auto p-3">
+
+          {railTab === "pipeline" ? (
+            <>
+              <div className="shrink-0 border-b border-black/[0.04] px-4 py-3">
+                <p className="workspace-section-label">Pipeline</p>
+                <p className="mt-1 text-xs text-neutral-500">
+                  {graph.nodes?.length || 0} nodes · connect in Configure panel
+                </p>
+              </div>
+              <ul className="min-h-0 flex-1 space-y-0 overflow-y-auto p-3">
             {(graph.nodes || []).map((node, i) => {
               const Icon = NODE_ICONS[node.type] || NODE_ICONS.output;
               const meta = NODE_META[node.type];
@@ -947,72 +1044,22 @@ export default function WorkflowBuilderClient({ workflowId }) {
                 </li>
               );
             })}
-          </ul>
-          {!readOnly && (
-            <div className="shrink-0 border-t border-black/[0.04] p-3">
-              <p className="workspace-section-label mb-2">Add node</p>
-              <div className="flex flex-wrap gap-1.5">
-                {(builtinSchemas.length > 0
-                  ? builtinSchemas.map((s) => s.type)
-                  : ["trigger", "loop", "parallel", "agent", "human", "subgraph", "transform", "condition", "http", "notify", "jira", "github", "linear", "retrieve", "llm", "output"]).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => addNode(type)}
-                    className="rounded-lg bg-white/70 px-2.5 py-1.5 text-[10px] font-semibold capitalize text-neutral-600 ring-1 ring-black/[0.06] hover:bg-white"
-                  >
-                    + {builtinSchemas.find((s) => s.type === type)?.label || type}
-                  </button>
-                ))}
-              </div>
-              {dynamicComponents.length > 0 && (
-                <div className="mt-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">AI components</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {dynamicComponents.map((comp) => (
-                      <button
-                        key={comp.name}
-                        type="button"
-                        onClick={() => addComponentNode(comp)}
-                        className="rounded-lg bg-sky-50 px-2.5 py-1.5 text-[10px] font-semibold text-sky-800 ring-1 ring-sky-200 hover:bg-sky-100"
-                      >
-                        + {comp.label || comp.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {customNodeDefs.length > 0 && (
-                <div className="mt-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">My API nodes</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {customNodeDefs.map((def) => (
-                      <button
-                        key={def.id}
-                        type="button"
-                        onClick={() => addApiNode(def)}
-                        className="rounded-lg bg-violet-50 px-2.5 py-1.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-200 hover:bg-violet-100"
-                      >
-                        + {def.display_name || def.slug}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => setApiNodeModalOpen(true)}
-                className="mt-3 w-full rounded-lg border border-dashed border-violet-300 bg-violet-50/50 px-2 py-2 text-[10px] font-semibold text-violet-700 hover:bg-violet-50"
-              >
-                + Create API node
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpenApiModalOpen(true)}
-                className="mt-2 w-full rounded-lg border border-dashed border-sky-300 bg-sky-50/50 px-2 py-2 text-[10px] font-semibold text-sky-700 hover:bg-sky-50"
-              >
-                Import OpenAPI spec
-              </button>
+              </ul>
+            </>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <NodeLibraryPanel
+                readOnly={readOnly}
+                builtinSchemas={builtinSchemas}
+                dynamicComponents={dynamicComponents}
+                customNodeDefs={customNodeDefs}
+                onAddBuiltin={addNode}
+                onAddComponent={addComponentNode}
+                onAddApiNode={addApiNode}
+                onCreateApiNode={() => setApiNodeModalOpen(true)}
+                onImportOpenApi={() => setOpenApiModalOpen(true)}
+                fullHeight
+              />
             </div>
           )}
         </aside>
@@ -1100,7 +1147,10 @@ export default function WorkflowBuilderClient({ workflowId }) {
           runInput={runInput}
           onRunInputChange={setRunInput}
           onRun={handleRun}
+          onTest={handleTest}
           running={running}
+          testing={testing}
+          testReport={testReport}
           runResult={runResult}
           pendingReview={pendingReview}
           onResume={handleResume}
@@ -1139,6 +1189,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
           readOnly={readOnly}
           workflowId={workflowId}
           hasNotifyNode={hasNotifyNode}
+          hasTelegramFlow={hasTelegramFlow}
           customNodeDefs={customNodeDefs}
           builtinSchemas={builtinSchemas}
           dynamicComponents={dynamicComponents}
@@ -1153,11 +1204,7 @@ export default function WorkflowBuilderClient({ workflowId }) {
       <OpenApiImportModal
         open={openApiModalOpen}
         onClose={() => setOpenApiModalOpen(false)}
-        onImported={() => {
-          listNodeLibrary().then((lib) => {
-            setCustomNodeDefs(lib?.custom || []);
-          });
-        }}
+        onImported={() => reloadNodeLibrary()}
       />
     </div>
   );

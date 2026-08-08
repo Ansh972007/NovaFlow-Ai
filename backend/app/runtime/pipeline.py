@@ -153,7 +153,14 @@ class AIRuntime:
             meta = getattr(req, "metadata", None) or {}
             conversation_api_key = getattr(req, "conversation_api_key", None) or meta.get("conversation_api_key")
             user_id = getattr(req, "user_id", None) or meta.get("user_id")
-            provider = resolve_provider(self.ctx.db, conversation_api_key, user_id)
+            credential_id = getattr(req, "credential_id", None) or meta.get("credential_id")
+            provider = resolve_provider(
+                self.ctx.db,
+                conversation_api_key=conversation_api_key,
+                user_id=user_id,
+                workspace_id=self.ctx.workspace_id,
+                credential_id=credential_id,
+            )
             route = route_model(
                 self.ctx.db, self.ctx.workspace_id, provider, policy=req.routing_policy
             )
@@ -262,7 +269,17 @@ class AIRuntime:
         req = ChatRequest(**{**req.__dict__, "user_message": user_msg})
 
         timer = MetricsTimer()
-        provider = resolve_provider(self.ctx.db)
+        meta = getattr(req, "metadata", None) or {}
+        conversation_api_key = getattr(req, "conversation_api_key", None) or meta.get("conversation_api_key")
+        user_id = getattr(req, "user_id", None) or meta.get("user_id")
+        credential_id = getattr(req, "credential_id", None) or meta.get("credential_id")
+        provider = resolve_provider(
+            self.ctx.db,
+            conversation_api_key=conversation_api_key,
+            user_id=user_id,
+            workspace_id=self.ctx.workspace_id,
+            credential_id=credential_id,
+        )
         route = route_model(
             self.ctx.db, self.ctx.workspace_id, provider, policy=req.routing_policy
         )

@@ -1,10 +1,14 @@
-# NovaFlow full stack — web + API + Milvus
+# NovaFlow full stack — web + API + MySQL + Redis + Milvus
 #
-# Recommended (16 GB RAM — builds Next on host, not inside Docker):
-#   .\scripts\full-stack-up.ps1
+# One command (builds web + API images inside Docker):
+#   docker compose up -d --build
 #
-# Cursor-safe (no Milvus, less RAM):
-#   .\scripts\cursor-stack-build.ps1
+# With Telegram / ngrok (start tunnel first, then Docker):
+#   scripts\start-with-ngrok.cmd
+#   scripts\start-with-ngrok.cmd -ComposeFile docker-compose.cursor.yml
+#
+# Low RAM / no Milvus (~16 GB):
+#   docker compose -f docker-compose.cursor.yml up -d --build
 #
 # Web http://localhost:3000 · API http://localhost:3001
 # Login: admin / NovaFlowLocalDevAdmin1
@@ -16,8 +20,15 @@ include:
 
 services:
   web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:3001
+        NEXT_PUBLIC_APP_NAME: NovaFlow AI
+        NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED: "true"
     image: novaflow-web:local
-    pull_policy: never
+    pull_policy: build
     container_name: novaflow-web
     restart: unless-stopped
     ports:

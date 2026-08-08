@@ -756,47 +756,20 @@ def _topo_order(graph: dict) -> list[dict]:
 
 def _apply_template(template: str, context: dict) -> str:
     text = template or ""
-    # Prefer longer / known keys first so nested names don't partial-clash
-    keys = sorted(
-        (
-            "retrieved",
-            "transform",
-            "linear_issue",
-            "github_issue",
-            "jira_key",
-            "github_url",
-            "linear_url",
-            "slack_channel",
-            "slack_user",
-            "agent_tools",
-            "subject",
-            "output",
-            "input",
-            "http",
-            "chat_id",
-            "item",
-        ),
-        key=len,
-        reverse=True,
-    )
-    for key in keys:
-        if key in context or key in (
-            "input",
-            "retrieved",
-            "output",
-            "http",
-            "transform",
-            "chat_id",
-            "subject",
-            "item",
-        ):
-            val = context.get(key)
-            if isinstance(val, (dict, list)):
-                try:
-                    val = json.dumps(val, ensure_ascii=False)[:4000]
-                except Exception:
-                    val = str(val)[:4000]
-            text = text.replace(f"{{{{{key}}}}}", str(val or ""))
+    if not text or "{{" not in text:
+        return text
+    # First replace all direct string/number keys in context
+    for key, val in sorted(context.items(), key=lambda x: len(x[0]), reverse=True):
+        if val is not None and not isinstance(val, (dict, list)):
+            text = text.replace(f"{{{{{key}}}}}", str(val))
+    # Next handle dict/list values
+    for key, val in sorted(context.items(), key=lambda x: len(x[0]), reverse=True):
+        if isinstance(val, (dict, list)):
+            try:
+                sval = json.dumps(val, ensure_ascii=False)[:4000]
+            except Exception:
+                sval = str(val)[:4000]
+            text = text.replace(f"{{{{{key}}}}}", sval)
     return text
 
 
@@ -810,21 +783,25 @@ def _extract_digest_subject(text: str) -> tuple[str, str]:
     if not raw:
         return "", ""
     m = re.search(
-        r"(?im)^\s*(?:subject(?:\s*line)?(?:\s*suggestion)?)\s*:\s*(.+)$",
+        r"(?im)^\s*\*?\*?(?:subject(?:\s*line)?(?:\s*suggestion)?)\*?\*?\s*:\s*(.+)$",
         raw,
     )
-    if not m:
-        return "", raw
-    subject = m.group(1).strip().strip("\"'")
-    lines = raw.splitlines()
-    drop_idx = None
-    for i, ln in enumerate(lines):
-        if re.match(r"(?i)^\s*(?:subject(?:\s*line)?(?:\s*suggestion)?)\s*:", ln):
-            drop_idx = i
-            break
-    body = raw
-    if drop_idx is not None:
-        body = "\n".join(lines[:drop_idx] + lines[drop_idx + 1 :]).strip()
+    subject = ""
+    if m:
+        subject = m.group(1).strip().strip("\"'*`")
+        lines = raw.splitlines()
+        drop_idx = None
+        for i, ln in enumerate(lines):
+            if re.match(r"(?i)^\s*\*?\*?(?:subject(?:\s*line)?(?:\s*suggestion)?)\*?\*?\s*:", ln):
+                drop_idx = i
+                break
+        body = raw
+        if drop_idx is not None:
+            body = "\n".join(lines[:drop_idx] + lines[drop_idx + 1 :]).strip()
+    else:
+        body = raw
+
+    body = re.sub(r"(?im)^\s*\*?\*?body\*?\*?\s*:\s*", "", body).strip()
     return subject[:200], body or raw
 
 
@@ -1171,7 +1148,10 @@ async def resume_workflow_pending(
     emit: EmitFn = None,
 ) -> dict[str, Any]:
     pending = db.get(WorkflowPendingRun, pending_id)
-    if not pending or pending.user_id != user_id or pending.status != 0:
+    if not pending or pending.status != 0:
+        return {"status": "error", "message": "Pending run not found"}
+    ws = int(workspace_id or pending.workspace_id or 0)
+    if int(pending.workspace_id or 0) != ws:
         return {"status": "error", "message": "Pending run not found"}
     workflow = db.get(Workflow, pending.workflow_id)
     if not workflow:
@@ -1389,21 +1369,36 @@ async def _execute_graph(
         elif ntype == "notify":
             channel = (data.get("channel") or "telegram").strip().lower()
             to_addr = _apply_template(data.get("to") or "", context).strip()
-            # If LLM set a digest subject and template still asks for {{subject}}, fill it
-            if not context.get("subject") and context.get("output"):
-                subj, _ = _extract_digest_subject(context["output"])
-                if subj:
-                    context["subject"] = subj
-            if not context.get("subject"):
-                context["subject"] = f"NovaFlow digest — {(context.get('input') or '')[:60]}".strip(" —")
-            subject = _apply_template(data.get("subject") or "{{subject}}", context)
-            if not subject.strip() or subject.strip() == "{{subject}}":
-                subject = context.get("subject") or "NovaFlow notification"
-            body_text = _apply_template(data.get("message") or "{{output}}", context)
+
+            llm_output = (context.get("llm") or context.get("output") or "").strip()
+            llm_subject = (context.get("subject") or "").strip()
+            if not llm_subject and llm_output:
+                extracted_subj, _ = _extract_digest_subject(llm_output)
+                if extracted_subj:
+                    llm_subject = extracted_subj
+                    context["subject"] = llm_subject
+
+            raw_subj = (data.get("subject") or "").strip()
+            if not raw_subj or raw_subj in ("NovaFlow", "{{subject}}", "NovaFlow test", "NovaFlow digest"):
+                subject = llm_subject or (f"NovaFlow digest — {(context.get('input') or '')[:60]}".strip(" —")) or "NovaFlow notification"
+            else:
+                subject = _apply_template(raw_subj, context).strip()
+                if not subject or subject == "{{subject}}":
+                    subject = llm_subject or "NovaFlow notification"
+
+            raw_msg = (data.get("message") or "").strip()
+            if not raw_msg or raw_msg in ("{{output}}", "{{llm}}"):
+                body_text = llm_output or (context.get("input") or "")
+            else:
+                body_text = _apply_template(raw_msg, context).strip()
+                if not body_text or body_text in ("{{output}}", "{{llm}}"):
+                    body_text = llm_output or (context.get("input") or "")
+
             body_text = _format_notify_body(channel, subject, body_text)
             bot_token = (data.get("bot_token") or "").strip()
             credential_id = (data.get("credential_id") or "").strip() or None
             from_addr = _apply_template(data.get("from") or "", context).strip() or None
+            auth_mode = (data.get("auth_mode") or "").strip().lower() or None
             prior_output = context.get("output") or body_text
             result = await send_notification(
                 channel,
@@ -1415,6 +1410,7 @@ async def _execute_graph(
                 workspace_id=workspace_id,
                 credential_id=credential_id,
                 from_addr=from_addr,
+                auth_mode=auth_mode,
             )
             detail = result.get("detail") or ("sent" if result.get("ok") else "failed")
             if result.get("ok"):
@@ -1586,14 +1582,20 @@ async def _execute_graph(
         elif ntype == "llm":
             prompt = (data.get("prompt") or DEFAULT_LLM_PROMPT).strip() or DEFAULT_LLM_PROMPT
             user_msg = _apply_template(data.get("user_prompt") or "{{input}}", context).strip()
+            node_id = step.get("node_id") or "llm"
             if not user_msg:
-                user_msg = context.get("transform") or context["input"]
+                user_msg = (context.get("transform") or context.get("input") or "").strip()
+            if not user_msg:
+                user_msg = "Draft a professional email update."
+            if "Do not ask clarifying questions" not in prompt:
+                prompt += "\nIMPORTANT: Do not ask clarifying questions or ask what subject/topic the user wants. Directly output a complete ready-to-send response with Subject and Body."
             if context.get("retrieved"):
                 user_msg = (
                     f"## Question\n{user_msg}\n\n"
                     f"## Retrieved context\n{context['retrieved']}\n\n"
                     f"## Instructions\nUse the context above. Cite sources as [n] when you rely on them."
                 )
+            credential_id = (data.get("credential_id") or "").strip() or None
             llm_messages = (prompt, user_msg)
             if skip_llm:
                 step["output"] = "(streaming)"
@@ -1602,34 +1604,40 @@ async def _execute_graph(
                 await _emit({"type": "llm_start"})
                 reply = ""
                 async for token in workflow_llm_stream(
-                    rt_ctx, prompt, user_msg, retrieved=context.get("retrieved") or ""
+                    rt_ctx, prompt, user_msg, retrieved=context.get("retrieved") or "", credential_id=credential_id
                 ):
                     reply += token
                     await _emit({"type": "stream", "message": {"content": token}})
                 subject, cleaned = _extract_digest_subject(reply)
+                output_val = (cleaned or reply).strip()
+                context["output"] = output_val
+                context["llm"] = output_val
+                context[node_id] = output_val
                 if subject:
                     context["subject"] = subject
-                    context["output"] = cleaned or reply
-                else:
-                    context["output"] = reply
-                step["output"] = (context["output"] or "")[:500] + (
-                    "…" if len(context.get("output") or "") > 500 else ""
-                )
+                elif not context.get("subject") and output_val:
+                    first_line = output_val.splitlines()[0].strip().strip("#* ").strip()
+                    if first_line and len(first_line) < 80:
+                        context["subject"] = first_line
+                step["output"] = output_val[:500] + ("…" if len(output_val) > 500 else "")
                 step["status"] = "ok"
                 await _emit({"type": "llm_end"})
             else:
                 reply = await workflow_llm_sync(
-                    rt_ctx, prompt, user_msg, retrieved=context.get("retrieved") or ""
+                    rt_ctx, prompt, user_msg, retrieved=context.get("retrieved") or "", credential_id=credential_id
                 )
                 subject, cleaned = _extract_digest_subject(reply)
+                output_val = (cleaned or reply).strip()
+                context["output"] = output_val
+                context["llm"] = output_val
+                context[node_id] = output_val
                 if subject:
                     context["subject"] = subject
-                    context["output"] = cleaned or reply
-                else:
-                    context["output"] = reply
-                step["output"] = (context["output"] or "")[:500] + (
-                    "…" if len(context.get("output") or "") > 500 else ""
-                )
+                elif not context.get("subject") and output_val:
+                    first_line = output_val.splitlines()[0].strip().strip("#* ").strip()
+                    if first_line and len(first_line) < 80:
+                        context["subject"] = first_line
+                step["output"] = output_val[:500] + ("…" if len(output_val) > 500 else "")
                 step["status"] = "ok"
         elif ntype == "output":
             context["output"] = context.get("output") or context.get("input") or ""

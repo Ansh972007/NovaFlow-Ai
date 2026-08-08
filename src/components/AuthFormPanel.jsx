@@ -176,6 +176,7 @@ export default function AuthFormPanel({
   const showPasswordForm = passwordLogin || ldapEnabled;
   const showOAuth = oauthProviders.length > 0 || samlEnabled;
   const googleProvider = oauthProviders.find((p) => p.id === "google");
+  const showOAuthConfigWarning = !showPasswordForm && !googleProvider;
 
   if (!clientReady) {
     return (
@@ -318,7 +319,7 @@ export default function AuthFormPanel({
                     </div>
                   </div>
 
-                  {showOAuth && !showPasswordForm && (
+                  {(showOAuth || showOAuthConfigWarning) && !showPasswordForm && (
                     <div className="mt-8 space-y-4">
                       {error && (
                         <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">

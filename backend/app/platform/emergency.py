@@ -156,15 +156,19 @@ def revoke_emergency_access(db: Session, *, grant_id: int, actor: User) -> Emerg
 
 def expire_stale_grants(db: Session) -> int:
     now = datetime.utcnow()
-    rows = (
-        db.query(EmergencyAccessGrant)
-        .filter(
-            EmergencyAccessGrant.status == "active",
-            EmergencyAccessGrant.ends_at.isnot(None),
-            EmergencyAccessGrant.ends_at < now,
+    try:
+        rows = (
+            db.query(EmergencyAccessGrant)
+            .filter(
+                EmergencyAccessGrant.status == "active",
+                EmergencyAccessGrant.ends_at.isnot(None),
+                EmergencyAccessGrant.ends_at < now,
+            )
+            .all()
         )
-        .all()
-    )
+    except Exception:
+        db.rollback()
+        return 0
     for row in rows:
         row.status = "expired"
         audit_log(

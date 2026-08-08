@@ -52,7 +52,7 @@ def resolve_telegram_token(
                 kind="telegram_bot",
                 credential_id=credential_id,
             )
-            token = (fields.get("bot_token") or "").strip()
+            token = "".join(str(fields.get("bot_token") or "").split())
             if token:
                 return token
         except Exception:
@@ -61,8 +61,38 @@ def resolve_telegram_token(
         if row and row.telegram_bot_token_enc:
             token = decrypt_secret(row.telegram_bot_token_enc)
             if token:
-                return token
-    return (TELEGRAM_BOT_TOKEN or "").strip()
+                return "".join(str(token).split())
+    raw_env = (TELEGRAM_BOT_TOKEN or "").strip()
+    return "".join(str(raw_env).split())
+def resolve_telegram_chat_id(
+    db: Session,
+    workspace_id: int | None,
+    override: str = "",
+    *,
+    credential_id: str | None = None,
+) -> str:
+    if override and override.strip() and override.strip() != "{{chat_id}}":
+        return override.strip()
+    if workspace_id:
+        try:
+            from app.services import credential_vault as vault
+
+            fields = vault.resolve_fields(
+                db,
+                workspace_id,
+                category="telegram",
+                kind="telegram_bot",
+                credential_id=credential_id,
+            )
+            cid = (fields.get("default_chat_id") or fields.get("chat_id") or "").strip()
+            if cid:
+                return cid
+        except Exception:
+            pass
+        row = db.get(WorkspaceIntegration, workspace_id)
+        if row and row.telegram_default_chat_id:
+            return row.telegram_default_chat_id.strip()
+    return ""
 
 
 def resolve_smtp_config(
@@ -291,7 +321,7 @@ def integrations_dict(db: Session, workspace_id: int) -> dict:
             "source": "oauth"
             if oauth_connected and auth_mode == "oauth"
             else ("workspace" if row.smtp_host or row.smtp_user else ("env" if SMTP_HOST else "none")),
-            "oauth_enabled": gmail_oauth_enabled(),
+            "oauth_enabled": gmail_oauth_enabled_for_workspace(db, workspace_id),
             "oauth_connected": oauth_connected,
             "oauth_email": row.gmail_oauth_email or "",
             "oauth_connected_at": row.gmail_oauth_connected_at.isoformat() if row.gmail_oauth_connected_at else None,
@@ -495,6 +525,47 @@ def resolve_public_base_url(db: Session, workspace_id: int, override: str = "") 
     row = db.get(WorkspaceIntegration, workspace_id)
     if row and row.public_base_url:
         return row.public_base_url.rstrip("/")
-    from app.config import PORT
+    from app.config import PORT, PUBLIC_BASE_URL
+
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/")
+
+    try:
+        import httpx
+
+        for api_url in ("http://host.docker.internal:4040/api/tunnels", "http://127.0.0.1:4040/api/tunnels"):
+            try:
+                res = httpx.get(api_url, timeout=1.5)
+                if res.status_code == 200:
+                    data = res.json()
+                    for t in data.get("tunnels", []):
+                        purl = (t.get("public_url") or "").strip().rstrip("/")
+                        if purl.startswith("https://"):
+                            if row:
+                                row.public_base_url = purl
+                                db.commit()
+                            return purl
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     return f"http://localhost:{PORT}"
+
+
+def apply_public_base_from_env(db: Session) -> str | None:
+    """Sync NOVAFLOW_PUBLIC_BASE_URL from env into all workspace integration rows."""
+    from app.config import PUBLIC_BASE_URL
+
+    base = (PUBLIC_BASE_URL or "").strip().rstrip("/")
+    if not base:
+        return None
+    rows = db.query(WorkspaceIntegration).all()
+    if not rows:
+        return base
+    for row in rows:
+        if row.public_base_url != base:
+            row.public_base_url = base[:500]
+            row.updated_at = datetime.utcnow()
+    db.commit()
+    return base

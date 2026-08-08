@@ -12,7 +12,8 @@ import { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
 import { getUserInfo } from "@/lib/api/auth";
 import { listKnowledge } from "@/lib/api/knowledge";
 import { listEvalSuites } from "@/lib/api/evaluation";
-import { listFineTuneDatasets } from "@/lib/api/finetune";
+import { listFineTuneDatasets, getFineTuneDataset } from "@/lib/api/finetune";
+import { humanizeFinetuneError } from "@/lib/humanizeErrors";
 import {
   createDatasetFromKnowledge,
   trainAndEval,
@@ -115,7 +116,7 @@ function KbSelectCard({ kb, selected, onToggle }) {
   );
 }
 
-function PipelineJobCard({ job, busy, onRefresh, onDeploy, canDeploy, index }) {
+function PipelineJobCard({ job, busy, onRefresh, onDeploy, onCopyModel, canDeploy, index }) {
   const evalPct =
     job.auto_eval?.total_count > 0
       ? Math.round((job.auto_eval.pass_count / job.auto_eval.total_count) * 100)
@@ -176,16 +177,26 @@ function PipelineJobCard({ job, busy, onRefresh, onDeploy, canDeploy, index }) {
             </div>
           )}
           {job.error_message && (
-            <p className="mt-2 text-xs leading-relaxed text-neutral-600">{job.error_message}</p>
+            <p className="mt-2 text-xs leading-relaxed text-red-700">{humanizeFinetuneError(job.error_message)}</p>
           )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <button type="button" disabled={busy} onClick={() => onRefresh(job.id)} className="btn-secondary text-xs disabled:opacity-50">
             Refresh
           </button>
+          {canDeploy(job) && job.fine_tuned_model && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onCopyModel(job)}
+              className="btn-secondary text-xs disabled:opacity-50"
+            >
+              Copy model ID
+            </button>
+          )}
           {canDeploy(job) && (
             <button type="button" disabled={busy} onClick={() => onDeploy(job)} className="btn-primary text-xs disabled:opacity-50">
-              Deploy to Chat
+              Test in Chat
             </button>
           )}
         </div>
@@ -319,7 +330,7 @@ export default function ModelLabClient() {
       setMsg("Training pipeline started. Jobs refresh automatically while active.");
       await load();
     } catch (err) {
-      setError(err.message || "Training failed");
+      setError(humanizeFinetuneError(err.message || "Training failed"));
     } finally {
       setBusy(false);
     }
@@ -339,6 +350,60 @@ export default function ModelLabClient() {
 
   function toggleKb(id) {
     setSelectedKb((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function handleCopyModel(job) {
+    const modelId = job.fine_tuned_model;
+    if (!modelId) return;
+    try {
+      await navigator.clipboard.writeText(modelId);
+      setMsg(`Model ID copied: ${modelId}`);
+      setError("");
+    } catch {
+      setError("Could not copy model ID to clipboard.");
+    }
+  }
+
+  async function handleExportDataset() {
+    if (!selectedDataset) {
+      setError("Select a dataset to export");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const ds = await getFineTuneDataset(Number(selectedDataset));
+      const rows = ds?.rows || [];
+      const lines = rows
+        .map((row) => {
+          const system = (row.system || "").trim();
+          const user = (row.user || row.prompt || "").trim();
+          const assistant = (row.assistant || row.completion || "").trim();
+          if (!user || !assistant) return null;
+          const messages = [];
+          if (system) messages.push({ role: "system", content: system });
+          messages.push({ role: "user", content: user });
+          messages.push({ role: "assistant", content: assistant });
+          return JSON.stringify({ messages });
+        })
+        .filter(Boolean);
+      if (!lines.length) {
+        setError("Dataset has no exportable rows.");
+        return;
+      }
+      const blob = new Blob([`${lines.join("\n")}\n`], { type: "application/jsonl" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(ds.name || "dataset").replace(/\s+/g, "_")}.jsonl`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg(`Exported ${lines.length} training rows as JSONL.`);
+    } catch (err) {
+      setError(err.message || "Export failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleDeploy(job) {
@@ -370,7 +435,7 @@ export default function ModelLabClient() {
           eyebrow="Fine-tuning studio"
           title="Model"
           titleHighlight="Lab"
-          description="Turn knowledge bases into fine-tune datasets, launch OpenAI training jobs, and auto-run eval suites when training completes. Add an OpenAI API key under Settings → Model providers first."
+          description="Turn knowledge bases into training datasets and fine-tune with a native OpenAI API key (not OpenRouter). Add your key under Credentials → AI / Models, then train, test in Chat, or export the model ID."
           badge={
             <span className="workspace-badge-live inline-flex items-center gap-2">
               <span className="relative flex h-2 w-2">
@@ -558,14 +623,24 @@ export default function ModelLabClient() {
               </select>
             </label>
             <label className="mt-4 block">
-              <span className="text-xs font-semibold text-neutral-700">Completion webhook (optional)</span>
+              <span className="text-xs font-semibold text-neutral-700">Notify on completion (optional)</span>
               <input
                 className="input-field mt-2 w-full text-sm"
                 value={jobWebhook}
                 onChange={(e) => setJobWebhook(e.target.value)}
-                placeholder="https://hooks.example.com/finetune-done"
+                placeholder="Your webhook URL when training finishes"
               />
             </label>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy || !selectedDataset}
+                onClick={handleExportDataset}
+                className="btn-secondary text-sm disabled:opacity-50"
+              >
+                Export JSONL
+              </button>
+            </div>
             <motion.button
               type="button"
               disabled={busy || !selectedDataset}
@@ -577,13 +652,13 @@ export default function ModelLabClient() {
               {busy ? "Starting…" : "Start training pipeline"}
             </motion.button>
             <p className="mt-4 text-xs text-neutral-500">
-              More eval tools in{" "}
+              Requires a native{" "}
+              <Link href="/credentials" className="font-medium text-neutral-800 underline">
+                OpenAI API key
+              </Link>
+              . More eval tools in{" "}
               <Link href="/evaluation" className="font-medium text-neutral-800 underline">
                 Evaluation
-              </Link>
-              {" · "}
-              <Link href="/settings" className="font-medium text-neutral-800 underline">
-                Settings
               </Link>
             </p>
           </motion.section>
@@ -594,7 +669,7 @@ export default function ModelLabClient() {
             <div>
               <p className="workspace-section-label">Step 3</p>
               <h2 className="mt-1 font-serif text-2xl tracking-tight text-neutral-900">Training pipelines</h2>
-              <p className="mt-1 text-sm text-neutral-500">Active jobs poll every 12s. Deploy succeeded models directly to Chat.</p>
+              <p className="mt-1 text-sm text-neutral-500">Active jobs poll every 12s. Test completed models in Chat or copy the model ID for export.</p>
             </div>
             <button type="button" onClick={load} disabled={busy} className="workspace-btn-ghost text-sm disabled:opacity-50">
               Refresh all
@@ -620,6 +695,7 @@ export default function ModelLabClient() {
                   busy={busy}
                   onRefresh={handleRefresh}
                   onDeploy={handleDeploy}
+                  onCopyModel={handleCopyModel}
                   canDeploy={canDeploy}
                 />
               ))}

@@ -53,6 +53,12 @@ def test_rbac_ranks():
     assert ROLE_RANK["viewer"] < ROLE_RANK["editor"] < ROLE_RANK["admin"]
 
 
+def test_integration_permissions_editor_write():
+    assert role_has_permission("editor", Permission.INTEGRATION_READ)
+    assert role_has_permission("editor", Permission.INTEGRATION_WRITE)
+    assert not role_has_permission("viewer", Permission.INTEGRATION_WRITE)
+
+
 def test_ssrf_blocks_localhost_and_metadata():
     for bad in (
         "http://127.0.0.1/secret",

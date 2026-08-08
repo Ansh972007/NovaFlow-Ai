@@ -58,6 +58,7 @@ async def workflow_llm_sync(
     user: str,
     *,
     retrieved: str = "",
+    credential_id: str | None = None,
 ) -> str:
     compiled = compile_prompt(
         PromptInputs(
@@ -72,6 +73,7 @@ async def workflow_llm_sync(
         system_prompt=compiled.system,
         user_id=ctx.user_id,
         conversation_api_key=ctx.conversation_api_key,
+        metadata={"credential_id": credential_id} if credential_id else None,
     )
     result = await runtime.chat(req)
     return validate_markdown_output(result.content).content
@@ -83,6 +85,7 @@ async def workflow_llm_stream(
     user: str,
     *,
     retrieved: str = "",
+    credential_id: str | None = None,
 ) -> AsyncIterator[str]:
     compiled = compile_prompt(
         PromptInputs(
@@ -97,6 +100,7 @@ async def workflow_llm_stream(
         system_prompt=compiled.system,
         user_id=ctx.user_id,
         conversation_api_key=ctx.conversation_api_key,
+        metadata={"credential_id": credential_id} if credential_id else None,
     )
     async for token in runtime.chat_stream(req):
         yield token

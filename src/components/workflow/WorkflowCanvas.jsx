@@ -483,9 +483,9 @@ export default function WorkflowCanvas({
       )}
 
       {editable && !diffOverlay && (
-        <div className="pointer-events-none absolute left-4 top-4 z-50 max-w-[220px] rounded-xl border border-white/80 bg-white/85 px-3 py-2 text-[10px] leading-relaxed text-neutral-600 backdrop-blur-md">
-          <strong className="font-semibold">Tip:</strong> link nodes in the Configure panel
-          (Connect from / Connect to). Shift+drag to pan · scroll to zoom.
+        <div className="pointer-events-none absolute bottom-4 left-4 z-50 max-w-[240px] rounded-xl border border-white/80 bg-white/85 px-3 py-2 text-[10px] leading-relaxed text-neutral-600 backdrop-blur-md">
+          <strong className="font-semibold">Tip:</strong> link nodes in Configure
+          (Connect from / to). Shift+drag pan · scroll zoom.
         </div>
       )}
 

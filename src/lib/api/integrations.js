@@ -36,14 +36,29 @@ export async function getTelegramSetup(workflowId) {
   return client.get(`/integrations/telegram/setup/${workflowId}`);
 }
 
-export function startGmailOAuth() {
+export async function startGmailOAuth() {
+  try {
+    const res = await client.get("/integrations/gmail/oauth/start?json=1");
+    const targetUrl = res?.url || res?.data?.url;
+    if (targetUrl) {
+      window.location.href = targetUrl;
+      return;
+    }
+  } catch (err) {
+    const msg = err.message || "Failed to initiate Google OAuth";
+    if (typeof window !== "undefined") {
+      alert(msg);
+    }
+    throw err;
+  }
   const params = new URLSearchParams();
   const token = typeof window !== "undefined" ? localStorage.getItem("nf_token") : "";
   const wid = typeof window !== "undefined" ? localStorage.getItem("nf_workspace_id") : "";
   if (token) params.set("t", token);
   if (wid) params.set("workspace_id", wid);
   const qs = params.toString();
-  window.location.href = `/api/v1/integrations/gmail/oauth/start${qs ? `?${qs}` : ""}`;
+  const apiBase = getApiBaseUrl();
+  window.location.href = `${apiBase}/api/v1/integrations/gmail/oauth/start${qs ? `?${qs}` : ""}`;
 }
 
 export async function disconnectGmailOAuth() {

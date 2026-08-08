@@ -69,6 +69,34 @@ def build_jsonl(rows: list[dict]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def _reject_non_finetune_provider(base_url: str, provider_type: str = "") -> None:
+    low = (base_url or "").lower()
+    ptype = (provider_type or "").lower()
+    if "openrouter" in low or ptype == "openrouter":
+        raise ValueError(
+            "Fine-tuning requires a native OpenAI API key. OpenRouter does not support model training. "
+            "Add OpenAI under Credentials → AI / Models."
+        )
+
+
+def _humanize_finetune_error(exc: Exception) -> str:
+    raw = str(exc).strip()
+    low = raw.lower()
+    if "openrouter" in low or ("404" in raw and "fine_tuning" in low):
+        return (
+            "OpenRouter cannot train models. Add a native OpenAI API key under Credentials → AI / Models."
+        )
+    if "401" in raw or "invalid api key" in low or "incorrect api key" in low:
+        return "OpenAI rejected the API key. Check your key in Credentials → AI / Models."
+    if "no api key" in low:
+        return "No API key configured. Add an OpenAI key before training."
+    if "dataset needs at least one row" in low:
+        return "Dataset is empty. Add at least one training row."
+    if len(raw) > 300:
+        return raw[:300] + "…"
+    return raw or "Training failed"
+
+
 def _provider_openai_key(db: Session, provider_id: int | None) -> tuple[str, str]:
     if provider_id:
         prov = db.get(LlmProvider, provider_id)
@@ -76,8 +104,13 @@ def _provider_openai_key(db: Session, provider_id: int | None) -> tuple[str, str
             raise ValueError("Provider not found")
         if prov.provider_type not in {"openai", "azure_openai", "custom"}:
             raise ValueError("Fine-tuning requires an OpenAI-compatible provider")
+        if prov.provider_type == "openrouter":
+            raise ValueError(
+                "Fine-tuning requires a native OpenAI API key. OpenRouter does not support model training."
+            )
         key = resolve_api_key(prov)
         base = (prov.base_url or "https://api.openai.com/v1").rstrip("/")
+        _reject_non_finetune_provider(base, prov.provider_type or "")
         if not key:
             raise ValueError("Provider API key not configured")
         return key, base
@@ -87,9 +120,11 @@ def _provider_openai_key(db: Session, provider_id: int | None) -> tuple[str, str
     cfg = get_active_config(db)
     if cfg.get("provider_type") == "anthropic":
         raise ValueError("Fine-tuning is not supported for Anthropic providers")
+    base = (cfg.get("base_url") or "").rstrip("/")
+    _reject_non_finetune_provider(base, cfg.get("provider_type") or "")
     if not cfg.get("api_key"):
-        raise ValueError("No API key configured for fine-tuning")
-    return cfg["api_key"], cfg["base_url"].rstrip("/")
+        raise ValueError("No API key configured for fine-tuning. Add OpenAI under Credentials → AI / Models.")
+    return cfg["api_key"], base
 
 
 async def start_finetune_job(
@@ -154,7 +189,7 @@ async def start_finetune_job(
             db.commit()
     except Exception as exc:
         job.status = "failed"
-        job.error_message = str(exc)[:2000]
+        job.error_message = _humanize_finetune_error(exc)
         job.update_time = datetime.utcnow()
         db.commit()
 

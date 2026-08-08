@@ -109,7 +109,7 @@ def _request_meta(request: Request) -> tuple[str, str]:
 def _issue_session(db: Session, user: User, request: Request) -> dict:
     ip, ua = _request_meta(request)
     pair = issue_token_pair(db, user, user_agent=ua, ip=ip)
-    ensure_personal_workspace(db, user)
+    ws = ensure_personal_workspace(db, user)
     return user_read(
         user,
         pair["access_token"],
@@ -117,6 +117,7 @@ def _issue_session(db: Session, user: User, request: Request) -> dict:
         token_type=pair["token_type"],
         expires_in=pair["expires_in"],
         session_id=pair["session_id"],
+        workspace_id=ws.id,
     )
 
 
@@ -482,8 +483,9 @@ def refresh(body: RefreshBody, request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/user/info")
-def user_info(user: User = Depends(get_current_user)):
-    return ok(user_read(user))
+def user_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ws = ensure_personal_workspace(db, user)
+    return ok(user_read(user, workspace_id=ws.id))
 
 
 @router.post("/user/logout")

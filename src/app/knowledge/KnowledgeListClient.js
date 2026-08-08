@@ -10,7 +10,9 @@ import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { WorkspaceStatCard, WorkspaceSkeletonGrid } from "@/components/workspace/WorkspaceTabs";
 import { KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
+import { checkBackendHealth } from "@/lib/api/health";
 import { useWorkspaceAccess } from "@/lib/auth/workspaceAccess";
+import { ensureActiveWorkspace } from "@/lib/api/workspaces";
 import {
   createKnowledge,
   getEmbeddingModels,
@@ -35,13 +37,26 @@ export default function KnowledgeListClient() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [apiOffline, setApiOffline] = useState(false);
   const [searchName, setSearchName] = useState("");
   const [classification, setClassification] = useState("internal");
 
   const load = useCallback(async (nameFilter = searchName) => {
     setLoading(true);
     setLoadError("");
+    setApiOffline(false);
     try {
+      await ensureActiveWorkspace();
+      const health = await checkBackendHealth();
+      if (!health.ok) {
+        setApiOffline(true);
+        setLoadError(
+          `NovaFlow API is not reachable (${health.apiUrl || "port 3001"}). Start the backend with docker compose up -d --build, then retry.`
+        );
+        setItems([]);
+        setTotal(0);
+        return;
+      }
       const res = await listKnowledge({ pageSize: 50, name: nameFilter.trim() });
       setItems(res?.data || []);
       setTotal(res?.total || 0);
@@ -49,6 +64,13 @@ export default function KnowledgeListClient() {
       setItems([]);
       setTotal(0);
       setLoadError(err.message || "Failed to load knowledge libraries");
+      if (
+        String(err.message || "").includes("unavailable") ||
+        String(err.message || "").includes("Cannot reach") ||
+        String(err.message || "").includes("offline")
+      ) {
+        setApiOffline(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -56,7 +78,18 @@ export default function KnowledgeListClient() {
 
   useEffect(() => {
     getUserInfo()
-      .then(setUser)
+      .then(async (u) => {
+        if (!u) {
+          router.replace("/login");
+          return;
+        }
+        try {
+          await ensureActiveWorkspace();
+        } catch {
+          /* optional */
+        }
+        setUser(u);
+      })
       .catch(() => router.push("/login"));
   }, [router]);
 
@@ -131,6 +164,20 @@ export default function KnowledgeListClient() {
           {loadError && (
             <WorkspaceAlert type="error" className="mt-6">
               {loadError}
+              <button
+                type="button"
+                onClick={() => load()}
+                className="ml-2 rounded-full border border-red-200 bg-white px-3 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+              >
+                Retry
+              </button>
+            </WorkspaceAlert>
+          )}
+
+          {apiOffline && (
+            <WorkspaceAlert type="warn" className="mt-4">
+              If you use Docker: run <code className="text-xs">docker compose up -d --build</code> from the
+              project root, then open http://localhost:3000
             </WorkspaceAlert>
           )}
 

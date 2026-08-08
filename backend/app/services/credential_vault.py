@@ -64,6 +64,8 @@ CATALOG: list[dict[str, Any]] = [
             "openid",
         ],
         "fields": [
+            {"key": "client_id", "label": "Client ID", "secret": False, "required": True},
+            {"key": "client_secret", "label": "Client secret", "secret": True, "required": True},
             {"key": "gmail_oauth_email", "label": "Connected email", "secret": False, "required": False},
         ],
         "advanced_fields": [
@@ -76,9 +78,29 @@ CATALOG: list[dict[str, Any]] = [
         "kind": "telegram_bot",
         "label": "Telegram bot",
         "fields": [
-            {"key": "bot_token", "label": "Bot token", "secret": True, "required": True},
-            {"key": "bot_username", "label": "Bot username", "secret": False, "required": False},
-            {"key": "default_chat_id", "label": "Default chat ID", "secret": False, "required": False},
+            {
+                "key": "bot_token",
+                "label": "Bot token",
+                "secret": True,
+                "required": True,
+                "placeholder": "From @BotFather (e.g. 7123456789:AAH…)",
+            },
+        ],
+        "advanced_fields": [
+            {
+                "key": "bot_username",
+                "label": "Bot username",
+                "secret": False,
+                "required": False,
+                "placeholder": "Auto-filled when verified",
+            },
+            {
+                "key": "default_chat_id",
+                "label": "Default chat ID (optional)",
+                "secret": False,
+                "required": False,
+                "placeholder": "Only for outbound-only bots",
+            },
         ],
     },
     {
@@ -226,17 +248,18 @@ def get_catalog() -> list[dict[str, Any]]:
     return CATALOG
 
 
-def get_oauth_setup_info() -> dict[str, Any]:
+def get_oauth_setup_info(db: Session | None = None, workspace_id: int | None = None) -> dict[str, Any]:
     """Redirect URIs and console instructions for Google OAuth setup."""
     from app.config import GOOGLE_CLIENT_ID, OAUTH_REDIRECT_BASE
-    from app.services.gmail_jira import GMAIL_SCOPES, gmail_redirect_uri, gmail_oauth_enabled
+    from app.services.gmail_jira import GMAIL_SCOPES, gmail_redirect_uri, gmail_oauth_enabled_for_workspace
     from app.services.oauth import redirect_uri as login_redirect_uri
 
     base = (OAUTH_REDIRECT_BASE or "").rstrip("/")
+    is_enabled = gmail_oauth_enabled_for_workspace(db, workspace_id) if db and workspace_id else bool(GOOGLE_CLIENT_ID)
     return {
         "google": {
             "platform_configured": bool(GOOGLE_CLIENT_ID),
-            "gmail_oauth_enabled": gmail_oauth_enabled(),
+            "gmail_oauth_enabled": is_enabled,
             "console_url": "https://console.cloud.google.com/apis/credentials",
             "redirect_uris": [
                 {
@@ -248,7 +271,7 @@ def get_oauth_setup_info() -> dict[str, Any]:
                 {
                     "id": "gmail_send",
                     "label": "Gmail send (workflows)",
-                    "uri": gmail_redirect_uri(),
+                    "uri": gmail_redirect_uri(db, workspace_id),
                     "purpose": "Send email from workflows via Gmail API",
                 },
             ],
@@ -386,6 +409,34 @@ def _clear_defaults(db: Session, workspace_id: int, category: str, kind: str) ->
     )
     for r in rows:
         r.is_default = 0
+
+
+def auto_verify_telegram(db: Session, row: CredentialVaultEntry) -> tuple[str, str]:
+    """Call Telegram getMe, store @username, sync integrations. Returns (status, detail)."""
+    if row.category != "telegram" or row.kind != "telegram_bot":
+        return row.status or "unverified", "not a telegram bot credential"
+    fields = _decrypt_fields(row.fields_enc or "")
+    token = (fields.get("bot_token") or "").strip()
+    if not token:
+        return "unverified", "Bot token required"
+    import httpx
+
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(f"https://api.telegram.org/bot{token}/getMe")
+            data = resp.json()
+        if not data.get("ok"):
+            update_entry(db, row, status="error")
+            return "error", str(data.get("description") or "Telegram verify failed")
+        username = (data.get("result") or {}).get("username") or ""
+        patch_fields: dict[str, Any] = {}
+        if username:
+            patch_fields["bot_username"] = username
+        update_entry(db, row, fields=patch_fields or None, status="ok")
+        return "ok", f"@{username}" if username else "bot verified"
+    except Exception as exc:
+        update_entry(db, row, status="error")
+        return "error", str(exc)[:200]
 
 
 def create_entry(

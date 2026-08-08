@@ -41,10 +41,22 @@ class ProviderConfig:
         }
 
 
-def resolve_provider(db: Session | None, conversation_api_key: str | None = None, user_id: int | None = None) -> ProviderConfig:
+def resolve_provider(
+    db: Session | None,
+    conversation_api_key: str | None = None,
+    user_id: int | None = None,
+    workspace_id: int | None = None,
+    credential_id: str | None = None,
+) -> ProviderConfig:
     from app.services.llm_providers import get_active_config
 
-    raw = get_active_config(db, conversation_api_key, user_id)
+    raw = get_active_config(
+        db,
+        conversation_api_key=conversation_api_key,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        credential_id=credential_id,
+    )
     ptype = (raw.get("provider_type") or "openai").lower()
     pid_raw = raw.get("provider_id")
     pid_str = str(pid_raw or "")

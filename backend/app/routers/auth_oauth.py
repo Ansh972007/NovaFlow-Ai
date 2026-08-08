@@ -22,13 +22,13 @@ router = APIRouter(tags=["OAuth"])
 
 
 @router.get("/auth/oauth/providers")
-def oauth_providers():
-    return ok(list_enabled_providers())
+def oauth_providers(db: Session = Depends(get_db)):
+    return ok(list_enabled_providers(db))
 
 
 @router.get("/auth/oauth/{provider}/start")
-def oauth_start(provider: str):
-    url = build_authorize_url(provider)
+def oauth_start(provider: str, db: Session = Depends(get_db)):
+    url = build_authorize_url(provider, db)
     if not url:
         return fail(404, f"OAuth provider '{provider}' is not configured")
     return RedirectResponse(url)
@@ -59,8 +59,8 @@ async def oauth_callback(
         return RedirectResponse(f"{base}/login/oauth-callback?error={quote('Invalid OAuth state')}")
 
     try:
-        token_data = await exchange_code(provider, code)
-        profile = await fetch_userinfo(provider, token_data)
+        token_data = await exchange_code(provider, code, db)
+        profile = await fetch_userinfo(provider, token_data, db)
         user = find_or_create_oauth_user(
             db,
             provider,

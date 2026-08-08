@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import CredentialsClient from "./CredentialsClient";
+import WorkspacePageLoading from "@/components/WorkspacePageLoading";
 
 export const metadata = {
   title: "Credentials — NovaFlow AI",
@@ -6,5 +8,9 @@ export const metadata = {
 };
 
 export default function CredentialsPage() {
-  return <CredentialsClient />;
+  return (
+    <Suspense fallback={<WorkspacePageLoading message="Loading credentials…" />}>
+      <CredentialsClient />
+    </Suspense>
+  );
 }

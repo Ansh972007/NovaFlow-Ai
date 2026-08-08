@@ -18,16 +18,44 @@ from app.config import (
 )
 from app.crypto import hash_password
 from app.services.tenancy import ensure_personal_workspace
-from app.database import User
+from app.database import User, CredentialVaultEntry
 from sqlalchemy.orm import Session
 
 
-def _provider_config() -> dict[str, dict[str, Any]]:
+def _resolve_google_login_client(db: Session | None = None) -> tuple[str, str]:
+    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+        return GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+    if not db:
+        return "", ""
+    try:
+        from app.services import credential_vault as vault
+
+        row = (
+            db.query(CredentialVaultEntry)
+            .filter(
+                CredentialVaultEntry.category == "email",
+                CredentialVaultEntry.kind == "gmail_oauth",
+            )
+            .order_by(CredentialVaultEntry.is_default.desc(), CredentialVaultEntry.update_time.desc())
+            .first()
+        )
+        if not row:
+            return "", ""
+        fields = vault.resolve_fields(db, row.workspace_id, category="email", kind="gmail_oauth", credential_id=row.id)
+        cid = (fields.get("client_id") or "").strip()
+        secret = (fields.get("client_secret") or "").strip()
+        return cid, secret
+    except Exception:
+        return "", ""
+
+
+def _provider_config(db: Session | None = None) -> dict[str, dict[str, Any]]:
+    google_id, google_secret = _resolve_google_login_client(db)
     return {
         "google": {
             "label": "Google",
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
+            "client_id": google_id,
+            "client_secret": google_secret,
             "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
             "token_url": "https://oauth2.googleapis.com/token",
             "userinfo_url": "https://openidconnect.googleapis.com/v1/userinfo",
@@ -45,9 +73,9 @@ def _provider_config() -> dict[str, dict[str, Any]]:
     }
 
 
-def list_enabled_providers() -> list[dict[str, str]]:
+def list_enabled_providers(db: Session | None = None) -> list[dict[str, str]]:
     items = []
-    for key, cfg in _provider_config().items():
+    for key, cfg in _provider_config(db).items():
         if cfg["client_id"] and cfg["client_secret"]:
             items.append({"id": key, "label": cfg["label"]})
     if GMAIL_ONLY_AUTH:
@@ -77,8 +105,8 @@ def verify_oauth_state(state: str, provider: str) -> bool:
         return False
 
 
-def build_authorize_url(provider: str) -> str | None:
-    cfg = _provider_config().get(provider)
+def build_authorize_url(provider: str, db: Session | None = None) -> str | None:
+    cfg = _provider_config(db).get(provider)
     if not cfg or not cfg["client_id"] or not cfg["client_secret"]:
         return None
     params = {
@@ -93,8 +121,8 @@ def build_authorize_url(provider: str) -> str | None:
     return f"{cfg['authorize_url']}?{urlencode(params)}"
 
 
-async def exchange_code(provider: str, code: str) -> dict[str, Any]:
-    cfg = _provider_config()[provider]
+async def exchange_code(provider: str, code: str, db: Session | None = None) -> dict[str, Any]:
+    cfg = _provider_config(db)[provider]
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             cfg["token_url"],
@@ -111,8 +139,8 @@ async def exchange_code(provider: str, code: str) -> dict[str, Any]:
         return resp.json()
 
 
-async def fetch_userinfo(provider: str, token_data: dict[str, Any]) -> dict[str, Any]:
-    cfg = _provider_config()[provider]
+async def fetch_userinfo(provider: str, token_data: dict[str, Any], db: Session | None = None) -> dict[str, Any]:
+    cfg = _provider_config(db)[provider]
     access_token = token_data.get("access_token")
     if not access_token:
         raise ValueError("No access token")

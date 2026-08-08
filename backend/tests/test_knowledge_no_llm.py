@@ -43,6 +43,19 @@ def _upload_text(client: TestClient, headers: dict, kb_id: int, name: str, conte
     return res.json()["data"]
 
 
+def test_list_knowledge(test_client: TestClient, auth_headers: dict):
+    kb_id = _create_kb(test_client, auth_headers)
+    res = test_client.get("/api/v1/knowledge", headers=auth_headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status_code"] == 200
+    data = body["data"]
+    assert data["total"] >= 1
+    rows = data["data"]
+    assert any(row["id"] == kb_id for row in rows)
+    assert rows[0].get("status") in {"empty", "ready", "indexing"}
+
+
 def test_get_knowledge_by_id(test_client: TestClient, auth_headers: dict):
     kb_id = _create_kb(test_client, auth_headers)
     res = test_client.get(f"/api/v1/knowledge/{kb_id}", headers=auth_headers)

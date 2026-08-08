@@ -31,6 +31,7 @@ def get_current_user(
     db: Session = Depends(get_db),
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="X-Api-Key"),
+    token_q: Optional[str] = Query(None, alias="t"),
 ) -> User:
     if x_api_key and x_api_key.startswith("nf_"):
         key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
@@ -42,6 +43,9 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     token = _extract_bearer(authorization)
+    if not token and token_q:
+        token = token_q
+
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 

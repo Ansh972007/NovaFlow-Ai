@@ -199,6 +199,10 @@ export async function listWorkspaceRuns(params = {}) {
   return client.get("/workflow/runs", { params });
 }
 
+export async function listPendingWorkflowRuns(params = {}) {
+  return client.get("/workflow/pending-runs", { params });
+}
+
 export async function getOnlineWorkflows() {
   return client.get("/workflow/online");
 }

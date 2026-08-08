@@ -16,14 +16,15 @@ def test_capabilities_event_has_workflow_types():
     assert len(data.get("workflow_types") or []) >= 5
 
 
-def test_ui_events_from_returns_multiple():
+def test_ui_events_from_returns_primary():
     events = [
         {"type": "aios_solution", "data": {"message": "a"}},
         {"type": "aios_progress", "data": {"message": "b"}},
         {"type": "aios_suggest", "data": {"message": "c"}},
     ]
     ui = _ui_events_from(events)
-    assert len(ui) >= 2
+    assert len(ui) == 1
+    assert ui[0]["type"] == "aios_solution"
 
 
 def test_oauth_assist_urls():

@@ -8,10 +8,18 @@ import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
 import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import AnimatedCounter from "@/components/AnimatedCounter";
-import { WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
+import { WorkspaceSkeletonList, WorkspaceStatCard } from "@/components/workspace/WorkspaceTabs";
 import WorkspaceEmpty from "@/components/workspace/WorkspaceEmpty";
+import { useWorkspaceAccess } from "@/lib/auth/workspaceAccess";
 import { getUserInfo } from "@/lib/api/auth";
-import { getWorkflowRun, getWorkflowsPage, listWorkspaceRuns } from "@/lib/api/workflows";
+import { ensureActiveWorkspace } from "@/lib/api/workspaces";
+import {
+  getWorkflowRun,
+  getWorkflowsPage,
+  listPendingWorkflowRuns,
+  listWorkspaceRuns,
+  resumeWorkflow,
+} from "@/lib/api/workflows";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -246,40 +254,56 @@ function RunCard({ run, active, onSelect, index }) {
 
 export default function RunsClient() {
   const router = useRouter();
+  const { readOnly: workspaceReadOnly } = useWorkspaceAccess();
   const [user, setUser] = useState(null);
+  const [pageTab, setPageTab] = useState("history");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [runs, setRuns] = useState([]);
+  const [pendingRuns, setPendingRuns] = useState([]);
   const [workflows, setWorkflows] = useState([]);
   const [filterWf, setFilterWf] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState(null);
   const [detailBusy, setDetailBusy] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [pendingNote, setPendingNote] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const readOnly = workspaceReadOnly || user?.role === "viewer";
+
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
+    setLoadError("");
     try {
-      const [rows, wfs] = await Promise.all([
-        listWorkspaceRuns({ limit: 50, workflow_id: filterWf || undefined }).catch(() => []),
-        getWorkflowsPage({ pageSize: 50 }).catch(() => ({ data: [] })),
+      const [rows, wfs, pending] = await Promise.all([
+        listWorkspaceRuns({ limit: 50, workflow_id: filterWf || undefined }),
+        getWorkflowsPage({ limit: 50 }),
+        listPendingWorkflowRuns({ limit: 50 }),
       ]);
       setRuns(Array.isArray(rows) ? rows : []);
       setWorkflows(wfs?.data || []);
-      setError("");
+      setPendingRuns(Array.isArray(pending) ? pending : []);
     } catch (err) {
-      setError(err.message || "Failed to load runs");
+      setLoadError(err.message || "Failed to load runs");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [filterWf]);
 
   useEffect(() => {
     getUserInfo()
-      .then((u) => {
+      .then(async (u) => {
         if (!u) {
           router.replace("/login");
           return;
+        }
+        try {
+          await ensureActiveWorkspace();
+        } catch {
+          /* optional */
         }
         setUser(u);
       })
@@ -324,6 +348,38 @@ export default function RunsClient() {
     }
   }
 
+  async function handleApprovePending(id) {
+    setBusy(`pending-${id}`);
+    setError("");
+    setSuccess("");
+    try {
+      await resumeWorkflow(id, { approved: true, note: pendingNote });
+      setPendingNote("");
+      setSuccess("Run approved and resumed.");
+      await load({ silent: true });
+    } catch (err) {
+      setError(err.message || "Approve failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleRejectPending(id) {
+    if (!window.confirm("Reject this pending run?")) return;
+    setBusy(`pending-${id}`);
+    setError("");
+    setSuccess("");
+    try {
+      await resumeWorkflow(id, { approved: false });
+      setSuccess("Run rejected.");
+      await load({ silent: true });
+    } catch (err) {
+      setError(err.message || "Reject failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <WorkspacePageShell user={user} loading={loading || !user} loadingMessage="Loading runs…" maxWidth="max-w-7xl">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
@@ -342,6 +398,55 @@ export default function RunsClient() {
             </span>
           }
         />
+
+        {readOnly && (
+          <WorkspaceAlert type="warn" className="mt-4">
+            Viewer access — you can inspect runs but cannot approve pending workflows.
+          </WorkspaceAlert>
+        )}
+
+        {loadError ? (
+          <WorkspaceAlert type="error" className="mt-4">
+            {loadError}
+            <button
+              type="button"
+              onClick={() => load()}
+              className="ml-2 rounded-full border border-red-200 bg-white px-3 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+            >
+              Retry
+            </button>
+          </WorkspaceAlert>
+        ) : null}
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setPageTab("history")}
+            className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+              pageTab === "history"
+                ? "bg-neutral-900 text-white"
+                : "border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+            }`}
+          >
+            History
+          </button>
+          <button
+            type="button"
+            onClick={() => setPageTab("pending")}
+            className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+              pageTab === "pending"
+                ? "bg-neutral-900 text-white"
+                : "border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+            }`}
+          >
+            Pending
+            {pendingRuns.length > 0 ? (
+              <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                {pendingRuns.length}
+              </span>
+            ) : null}
+          </button>
+        </div>
 
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -378,8 +483,100 @@ export default function RunsClient() {
               <WorkspaceAlert type="error">{error}</WorkspaceAlert>
             </motion.div>
           )}
+          {success && (
+            <motion.div
+              key="ok"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-6 overflow-hidden"
+            >
+              <WorkspaceAlert type="success">{success}</WorkspaceAlert>
+            </motion.div>
+          )}
         </AnimatePresence>
 
+        {pageTab === "pending" ? (
+          <div className="mt-8 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="workspace-section-label">Approvals</p>
+                <h2 className="mt-1 font-serif text-2xl tracking-tight text-neutral-900">Pending human review</h2>
+              </div>
+              <button type="button" onClick={() => load()} className="btn-secondary text-sm">
+                Refresh
+              </button>
+            </div>
+
+            {!readOnly && pendingRuns.length > 0 ? (
+              <label className="block max-w-xl">
+                <span className="text-xs font-semibold text-neutral-700">Approval note (optional)</span>
+                <input
+                  className="input-field mt-2 w-full text-sm"
+                  value={pendingNote}
+                  onChange={(e) => setPendingNote(e.target.value)}
+                  placeholder="Note passed to workflow on approve…"
+                />
+              </label>
+            ) : null}
+
+            {loading ? (
+              <WorkspaceSkeletonList count={3} />
+            ) : pendingRuns.length === 0 && !loadError ? (
+              <WorkspaceEmpty
+                title="No pending approvals"
+                description="Workflows paused at human-review nodes will appear here."
+                actionLabel="Open workflows"
+                actionHref="/workflows"
+                icon="◷"
+              />
+            ) : (
+              <ul className="space-y-3">
+                {pendingRuns.map((p) => (
+                  <li key={p.id} className="rounded-2xl border border-neutral-200 bg-white p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link href={`/workflows/${p.workflow_id}`} className="font-semibold text-neutral-900 hover:underline">
+                          {p.workflow_name || p.workflow_id}
+                        </Link>
+                        <p className="mt-1 font-mono text-[10px] text-neutral-400">pending #{p.id}</p>
+                        <p className="mt-2 line-clamp-2 text-sm text-neutral-600">{p.input || "No input"}</p>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-neutral-500">
+                          <span>Paused after: {p.pause_after_node || "—"}</span>
+                          <span>{p.step_count || 0} steps</span>
+                          <span>{fmtTime(p.create_time)}</span>
+                        </div>
+                      </div>
+                      {!readOnly ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="btn-primary !py-1.5 !text-xs"
+                            disabled={busy === `pending-${p.id}`}
+                            onClick={() => handleApprovePending(p.id)}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary !py-1.5 !text-xs"
+                            disabled={busy === `pending-${p.id}`}
+                            onClick={() => handleRejectPending(p.id)}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
+        {pageTab === "history" ? (
+        <>
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -441,7 +638,9 @@ export default function RunsClient() {
               <span className="text-xs text-neutral-500">{filteredRuns.length} shown</span>
             </div>
 
-            {filteredRuns.length === 0 ? (
+            {loading ? (
+              <WorkspaceSkeletonList count={4} />
+            ) : filteredRuns.length === 0 && !loadError ? (
               <WorkspaceEmpty
                 title="No runs found"
                 description={
@@ -453,7 +652,7 @@ export default function RunsClient() {
                 actionHref="/workflows"
                 icon="▸"
               />
-            ) : (
+            ) : filteredRuns.length > 0 ? (
               <ul className="space-y-2.5">
                 {filteredRuns.map((run, i) => (
                   <RunCard
@@ -465,7 +664,7 @@ export default function RunsClient() {
                   />
                 ))}
               </ul>
-            )}
+            ) : null}
           </section>
 
           <aside className="lg:sticky lg:top-24 lg:self-start">
@@ -519,6 +718,15 @@ export default function RunsClient() {
 
                       <p className="text-sm font-semibold text-neutral-900">{detail.workflow_name || detail.workflow_id}</p>
 
+                      {detail.workflow_id ? (
+                        <Link
+                          href={`/workflows/${detail.workflow_id}`}
+                          className="workspace-btn-ghost !px-2.5 !py-1 text-[11px]"
+                        >
+                          Open workflow
+                        </Link>
+                      ) : null}
+
                       <div className="flex flex-wrap gap-2">
                         <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-[10px] font-medium text-neutral-600">
                           {formatDuration(detail.duration_ms)}
@@ -570,6 +778,8 @@ export default function RunsClient() {
             </motion.div>
           </aside>
         </div>
+        </>
+        ) : null}
       </motion.div>
     </WorkspacePageShell>
   );

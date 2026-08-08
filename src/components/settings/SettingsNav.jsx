@@ -43,11 +43,11 @@ const ICONS = {
 export const SETTINGS_TABS = [
   { id: "overview", label: "Overview", icon: "overview" },
   { id: "security", label: "Security", icon: "security" },
-  { id: "team", label: "Team", icon: "team", adminOnly: true },
+  { id: "team", label: "Team", icon: "team", workspaceAdminOnly: true },
 ];
 
-export default function SettingsNav({ activeTab, onChange, isAdmin }) {
-  const tabs = SETTINGS_TABS.filter((t) => !t.adminOnly || isAdmin);
+export default function SettingsNav({ activeTab, onChange, canManageWorkspace }) {
+  const tabs = SETTINGS_TABS.filter((t) => !t.workspaceAdminOnly || canManageWorkspace);
 
   return (
     <>

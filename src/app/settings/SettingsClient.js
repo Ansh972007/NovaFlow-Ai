@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import WorkspacePageShell from "@/components/workspace/WorkspacePageShell";
 import WorkspaceLoading from "@/components/workspace/WorkspaceLoading";
 import WorkspaceHero from "@/components/workspace/WorkspaceHero";
+import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import SettingsNav, { SettingsStatCard } from "@/components/settings/SettingsNav";
 import SettingsSection, {
   SettingsRow,
@@ -14,6 +15,7 @@ import SettingsSection, {
   SettingsMessage,
 } from "@/components/settings/SettingsSection";
 import { getUserInfo, changePassword } from "@/lib/api/auth";
+import { useWorkspaceAccess } from "@/lib/auth/workspaceAccess";
 import { checkBackendHealth } from "@/lib/api/health";
 import {
   getAllLlm,
@@ -32,11 +34,15 @@ import {
   getWorkspaceQuotas,
   updateWorkspaceQuotas,
   getActiveWorkspaceId,
+  ensureActiveWorkspace,
   listWorkspaceMembers,
   updateWorkspaceMemberRole,
   inviteWorkspaceMember,
   listWorkspaceInvites,
   revokeWorkspaceInvite,
+  workspaceCanAdmin,
+  workspaceCanEdit,
+  workspaceCanManageApiKeys,
 } from "@/lib/api/workspaces";
 import { getOAuthProviders } from "@/lib/api/oauth";
 import { createApiKey, deleteApiKey, listApiKeys } from "@/lib/api/apiKeys";
@@ -133,20 +139,32 @@ function SettingsLoading() {
   return <WorkspaceLoading message="Loading settings…" />;
 }
 
+function isPlatformAdminUser(user) {
+  if (!user) return false;
+  const role = String(user.role || "").toLowerCase();
+  return role === "admin" || role === "super_admin" || user.is_admin === true;
+}
+
 export default function SettingsClient() {
   const router = useRouter();
+  const { role: workspaceRole, readOnly: workspaceReadOnly } = useWorkspaceAccess();
   const [user, setUser] = useState(null);
   const [health, setHealth] = useState(null);
   const [llmServers, setLlmServers] = useState([]);
   const [assistantCfg, setAssistantCfg] = useState(null);
   const [knowledgeCfg, setKnowledgeCfg] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [modelLoadWarning, setModelLoadWarning] = useState("");
+  const [adminLoadError, setAdminLoadError] = useState("");
+  const [teamLoadError, setTeamLoadError] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
   const [team, setTeam] = useState([]);
   const [invites, setInvites] = useState([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("viewer");
   const [inviteMsg, setInviteMsg] = useState("");
+  const [teamMsg, setTeamMsg] = useState("");
   const [teamBusy, setTeamBusy] = useState(null);
   const [provider, setProvider] = useState(null);
   const [providerSaving, setProviderSaving] = useState(false);
@@ -215,22 +233,71 @@ export default function SettingsClient() {
   const [oauthSetup, setOauthSetup] = useState(null);
   const [publicBaseUrl, setPublicBaseUrl] = useState("");
 
-  const isAdmin = user?.role === "admin";
+  const readOnly = workspaceReadOnly;
+  const canManageWorkspace = workspaceCanAdmin(workspaceRole);
+  const isPlatformAdmin = isPlatformAdminUser(user);
+  const canManageApiKeys = workspaceCanManageApiKeys(workspaceRole);
+  const canEditWorkspace = workspaceCanEdit(workspaceRole);
   const searchParams = useSearchParams();
+
+  const applyIntegrationSettings = useCallback((s) => {
+    setIntegrationSettings(s);
+    if (s?.telegram) {
+      setTgChatId(s.telegram.default_chat_id || "");
+      setTgUsername(s.telegram.bot_username || "");
+    }
+    if (s?.email) {
+      setGmailPreset(!!s.email.gmail_preset);
+      setSmtpHost(s.email.smtp_host || "smtp.gmail.com");
+      setSmtpPort(s.email.smtp_port || 587);
+      setSmtpUser(s.email.smtp_user || "");
+      setSmtpFrom(s.email.smtp_from || "");
+    }
+    if (s?.jira) {
+      setJiraBaseUrl(s.jira.base_url || "");
+      setJiraEmail(s.jira.email || "");
+    }
+    if (s?.slack) {
+      setSlackChannel(s.slack.default_channel || "");
+    }
+    if (s?.github) {
+      setGithubOwner(s.github.owner || "");
+      setGithubRepo(s.github.repo || "");
+    }
+    if (s?.discord) {
+      setDiscordChannel(s.discord.default_channel || "");
+    }
+    if (s?.linear) {
+      setLinearTeamId(s.linear.team_id || "");
+    }
+    setPublicBaseUrl(s?.public_base_url || "");
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
+    setModelLoadWarning("");
     try {
-      const [h, llm, aCfg, kCfg] = await Promise.all([
-        checkBackendHealth(),
-        getAllLlm().catch(() => []),
+      const h = await checkBackendHealth();
+      setHealth(h);
+      const llmPromise = getAllLlm().catch((err) => {
+        setModelLoadWarning(err.message || "Failed to load model providers");
+        return [];
+      });
+      const [llm, aCfg, kCfg] = await Promise.all([
+        llmPromise,
         getAssistantLlmConfig().catch(() => null),
         getKnowledgeLlmConfig().catch(() => null),
       ]);
-      setHealth(h);
       setLlmServers(Array.isArray(llm) ? llm : llm?.data || []);
       setAssistantCfg(aCfg);
       setKnowledgeCfg(kCfg);
+    } catch (err) {
+      setLoadError(err.message || "Failed to load settings");
+      setHealth(null);
+      setLlmServers([]);
+      setAssistantCfg(null);
+      setKnowledgeCfg(null);
     } finally {
       setLoading(false);
     }
@@ -238,8 +305,19 @@ export default function SettingsClient() {
 
   useEffect(() => {
     getUserInfo()
-      .then(setUser)
-      .catch(() => router.push("/login"));
+      .then(async (u) => {
+        if (!u) {
+          router.replace("/login");
+          return;
+        }
+        try {
+          await ensureActiveWorkspace();
+        } catch {
+          /* optional */
+        }
+        setUser(u);
+      })
+      .catch(() => router.replace("/login"));
   }, [router]);
 
   useEffect(() => {
@@ -251,86 +329,107 @@ export default function SettingsClient() {
     if (!wid) {
       setTeam([]);
       setInvites([]);
+      setTeamLoadError("");
       return;
     }
+    setTeamLoadError("");
     try {
-      const [members, pending] = await Promise.all([
-        listWorkspaceMembers(wid),
-        listWorkspaceInvites(wid).catch(() => []),
-      ]);
+      const members = await listWorkspaceMembers(wid);
       setTeam(Array.isArray(members) ? members : []);
-      setInvites(Array.isArray(pending) ? pending : []);
-    } catch {
+      try {
+        const pending = await listWorkspaceInvites(wid);
+        setInvites(Array.isArray(pending) ? pending : []);
+      } catch (invErr) {
+        setInvites([]);
+        setTeamLoadError(invErr.message || "Failed to load pending invites");
+      }
+    } catch (err) {
       setTeam([]);
       setInvites([]);
+      setTeamLoadError(err.message || "Failed to load team");
     }
   }, []);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    reloadWorkspaceTeam();
-    getLlmSettings()
-      .then(setProvider)
-      .catch(() => setProvider(null));
-    getOAuthProviders()
-      .then((list) => setSsoProviders(Array.isArray(list) ? list : []))
-      .catch(() => setSsoProviders([]));
-    listApiKeys()
-      .then((rows) => setApiKeys(Array.isArray(rows) ? rows : rows?.data || []))
-      .catch(() => setApiKeys([]));
-    setAuditLoading(true);
-    getAuditEvents(14, 80)
-      .then((rows) => setAuditEvents(Array.isArray(rows) ? rows : []))
-      .catch(() => setAuditEvents([]))
-      .finally(() => setAuditLoading(false));
+  const reloadAdminSections = useCallback(async () => {
+    setAdminLoadError("");
     const wid = getActiveWorkspaceId();
-    if (wid) {
-      getWorkspaceQuotas(wid).then(setQuotas).catch(() => setQuotas(null));
+
+    if (canManageWorkspace) {
+      await reloadWorkspaceTeam();
+      try {
+        const [settings, health] = await Promise.all([
+          getIntegrationSettings(),
+          getIntegrationHealth(),
+        ]);
+        applyIntegrationSettings(settings);
+        setIntegrationHealth(health);
+      } catch (err) {
+        setAdminLoadError(err.message || "Failed to load workspace settings");
+      }
+      if (wid) {
+        try {
+          setQuotas(await getWorkspaceQuotas(wid));
+        } catch {
+          setQuotas(null);
+        }
+      }
+      try {
+        setOauthSetup(await getOAuthSetup());
+      } catch {
+        setOauthSetup(null);
+      }
     }
-    listAbRoutes()
-      .then((rows) => setAbRoutes(Array.isArray(rows) ? rows : rows?.data || []))
-      .catch(() => setAbRoutes([]));
-    getIntegrationSettings()
-      .then((s) => {
-        setIntegrationSettings(s);
-        if (s?.telegram) {
-          setTgChatId(s.telegram.default_chat_id || "");
-          setTgUsername(s.telegram.bot_username || "");
-        }
-        if (s?.email) {
-          setGmailPreset(!!s.email.gmail_preset);
-          setSmtpHost(s.email.smtp_host || "smtp.gmail.com");
-          setSmtpPort(s.email.smtp_port || 587);
-          setSmtpUser(s.email.smtp_user || "");
-          setSmtpFrom(s.email.smtp_from || "");
-        }
-        if (s?.jira) {
-          setJiraBaseUrl(s.jira.base_url || "");
-          setJiraEmail(s.jira.email || "");
-        }
-        if (s?.slack) {
-          setSlackChannel(s.slack.default_channel || "");
-        }
-        if (s?.github) {
-          setGithubOwner(s.github.owner || "");
-          setGithubRepo(s.github.repo || "");
-        }
-        if (s?.discord) {
-          setDiscordChannel(s.discord.default_channel || "");
-        }
-        if (s?.linear) {
-          setLinearTeamId(s.linear.team_id || "");
-        }
-        setPublicBaseUrl(s?.public_base_url || "");
-      })
-      .catch(() => setIntegrationSettings(null));
-    getIntegrationHealth()
-      .then(setIntegrationHealth)
-      .catch(() => setIntegrationHealth(null));
-    getOAuthSetup()
-      .then(setOauthSetup)
-      .catch(() => setOauthSetup(null));
-  }, [isAdmin, reloadWorkspaceTeam]);
+
+    if (isPlatformAdmin) {
+      try {
+        setProvider(await getLlmSettings());
+      } catch {
+        setProvider(null);
+      }
+      try {
+        const list = await getOAuthProviders();
+        setSsoProviders(Array.isArray(list) ? list : []);
+      } catch {
+        setSsoProviders([]);
+      }
+      setAuditLoading(true);
+      try {
+        const rows = await getAuditEvents(14, 80);
+        setAuditEvents(Array.isArray(rows) ? rows : []);
+      } catch {
+        setAuditEvents([]);
+      } finally {
+        setAuditLoading(false);
+      }
+      try {
+        const rows = await listAbRoutes();
+        setAbRoutes(Array.isArray(rows) ? rows : rows?.data || []);
+      } catch {
+        setAbRoutes([]);
+      }
+    }
+
+    if (canManageApiKeys) {
+      try {
+        const rows = await listApiKeys();
+        setApiKeys(Array.isArray(rows) ? rows : rows?.data || []);
+      } catch {
+        setApiKeys([]);
+      }
+    }
+  }, [
+    canManageWorkspace,
+    isPlatformAdmin,
+    canManageApiKeys,
+    reloadWorkspaceTeam,
+    applyIntegrationSettings,
+  ]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!canManageWorkspace && !isPlatformAdmin && !canManageApiKeys) return;
+    reloadAdminSections();
+  }, [user, canManageWorkspace, isPlatformAdmin, canManageApiKeys, reloadAdminSections]);
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
@@ -351,15 +450,25 @@ export default function SettingsClient() {
     if (gmail === "error") {
       setIntegrationMsg(`Gmail OAuth failed: ${searchParams.get("msg") || "unknown error"}`);
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
+
+  useEffect(() => {
+    if (activeTab === "models" || activeTab === "integrations") {
+      setActiveTab("overview");
+    }
+  }, [activeTab]);
 
   async function handleRoleChange(memberId, role) {
     const wid = getActiveWorkspaceId();
-    if (!wid) return;
+    if (!wid || readOnly || !canManageWorkspace) return;
     setTeamBusy(memberId);
+    setTeamMsg("");
     try {
       await updateWorkspaceMemberRole(wid, memberId, role);
       await reloadWorkspaceTeam();
+      setTeamMsg("Role updated.");
+    } catch (err) {
+      setTeamMsg(err.message || "Role update failed");
     } finally {
       setTeamBusy(null);
     }
@@ -368,8 +477,9 @@ export default function SettingsClient() {
   async function handleInvite(e) {
     e.preventDefault();
     const wid = getActiveWorkspaceId();
-    if (!wid || !inviteEmail.trim()) return;
+    if (!wid || !inviteEmail.trim() || readOnly || !canManageWorkspace) return;
     setInviteMsg("");
+    setTeamMsg("");
     try {
       await inviteWorkspaceMember(wid, { email: inviteEmail.trim(), role: inviteRole });
       setInviteEmail("");
@@ -382,11 +492,15 @@ export default function SettingsClient() {
 
   async function handleRevokeInvite(inviteId) {
     const wid = getActiveWorkspaceId();
-    if (!wid) return;
+    if (!wid || readOnly || !canManageWorkspace) return;
     setTeamBusy(inviteId);
+    setTeamMsg("");
     try {
       await revokeWorkspaceInvite(wid, inviteId);
       await reloadWorkspaceTeam();
+      setTeamMsg("Invitation revoked.");
+    } catch (err) {
+      setTeamMsg(err.message || "Revoke failed");
     } finally {
       setTeamBusy(null);
     }
@@ -1118,7 +1232,12 @@ export default function SettingsClient() {
             actions={
               <button
                 type="button"
-                onClick={load}
+                onClick={() => {
+                  load();
+                  if (canManageWorkspace || isPlatformAdmin || canManageApiKeys) {
+                    reloadAdminSections();
+                  }
+                }}
                 disabled={loading}
                 className="workspace-btn-ghost disabled:opacity-50"
               >
@@ -1141,9 +1260,9 @@ export default function SettingsClient() {
               <SettingsStatCard
                 label="Signed in as"
                 value={user.user_name}
-                hint={isAdmin ? "Administrator" : user.role || "Member"}
+                hint={canManageWorkspace ? `Workspace ${workspaceRole}` : user.role || workspaceRole || "Member"}
               />
-              {isAdmin ? (
+              {canManageWorkspace ? (
                 <SettingsStatCard
                   label="Integrations"
                   value={
@@ -1164,9 +1283,41 @@ export default function SettingsClient() {
             </div>
           </WorkspaceHero>
 
+          {readOnly ? (
+            <WorkspaceAlert type="warn" className="mt-4">
+              View-only access — you cannot change workspace settings.
+            </WorkspaceAlert>
+          ) : null}
+
+          {loadError ? (
+            <WorkspaceAlert type="error" className="mt-4">
+              {loadError}
+              <button
+                type="button"
+                onClick={() => load()}
+                className="ml-2 rounded-full border border-red-200 bg-white px-3 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+              >
+                Retry
+              </button>
+            </WorkspaceAlert>
+          ) : null}
+
+          {adminLoadError ? (
+            <WorkspaceAlert type="error" className="mt-4">
+              {adminLoadError}
+              <button
+                type="button"
+                onClick={() => reloadAdminSections()}
+                className="ml-2 rounded-full border border-red-200 bg-white px-3 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+              >
+                Retry
+              </button>
+            </WorkspaceAlert>
+          ) : null}
+
           <div className="settings-layout mt-8 lg:mt-10">
             <aside className="settings-sidebar shrink-0">
-              <SettingsNav activeTab={activeTab} onChange={setActiveTab} isAdmin={isAdmin} />
+              <SettingsNav activeTab={activeTab} onChange={setActiveTab} canManageWorkspace={canManageWorkspace} />
             </aside>
 
             <div className="settings-content min-w-0 space-y-5">
@@ -1206,8 +1357,13 @@ export default function SettingsClient() {
                     <p className="text-sm text-neutral-600">
                       {loading
                         ? "Loading providers…"
-                        : `${llmServers.length} provider${llmServers.length !== 1 ? "s" : ""}, ${modelCount} model${modelCount !== 1 ? "s" : ""}`}
+                        : loadError
+                          ? "Could not load model providers"
+                          : `${llmServers.length} provider${llmServers.length !== 1 ? "s" : ""}, ${modelCount} model${modelCount !== 1 ? "s" : ""}`}
                     </p>
+                    {modelLoadWarning ? (
+                      <SettingsMessage type="error">{modelLoadWarning}</SettingsMessage>
+                    ) : null}
                     {!loading && llmServers.length > 0 && (
                       <ul className="mt-4 space-y-2">
                         {llmServers.slice(0, 8).map((server) => (
@@ -1230,13 +1386,13 @@ export default function SettingsClient() {
                         <p className="mt-1 truncate text-sm font-medium text-neutral-900">{embeddingModel}</p>
                       </div>
                     </div>
-                    {isAdmin && (
+                    {canEditWorkspace && (
                       <button
                         type="button"
                         onClick={() => router.push("/credentials")}
                         className="workspace-btn-ghost mt-5 !py-2 text-sm"
                       >
-                        Open Credentials →
+                        Manage credentials & integrations →
                       </button>
                     )}
                   </SettingsSection>
@@ -1263,7 +1419,7 @@ export default function SettingsClient() {
                       <Link href="/knowledge" className="workspace-btn-ghost">Knowledge</Link>
                       <Link href="/workflows" className="workspace-btn-ghost">Workflows</Link>
                       <Link href="/chat" className="workspace-btn-ghost">Chat</Link>
-                      {isAdmin && (
+                      {(isPlatformAdmin || canManageApiKeys) && (
                         <Link href="/developer" className="workspace-btn-ghost">Developer</Link>
                       )}
                     </div>
@@ -1319,7 +1475,7 @@ export default function SettingsClient() {
                     </form>
                   </SettingsSection>
 
-                  {isAdmin && (
+                  {isPlatformAdmin && (
                     <SettingsSection
                       icon={SECTION_ICONS.sso}
                       title="Single sign-on"
@@ -1346,7 +1502,7 @@ export default function SettingsClient() {
                 </>
               )}
 
-              {activeTab === "models" && isAdmin && (
+              {activeTab === "models" && isPlatformAdmin && (
                 <>
                   {provider && (
                     <SettingsSection
@@ -1659,7 +1815,7 @@ export default function SettingsClient() {
                 </>
               )}
 
-              {activeTab === "integrations" && isAdmin && (
+              {activeTab === "integrations" && canManageWorkspace && (
                 <>
                   <SettingsSection
                     icon={SECTION_ICONS.health}
@@ -2437,8 +2593,15 @@ export default function SettingsClient() {
                 </>
               )}
 
-              {activeTab === "team" && isAdmin && (
+              {activeTab === "team" && canManageWorkspace && (
                 <>
+                  {teamMsg ? (
+                    <SettingsMessage
+                      type={teamMsg.includes("updated") || teamMsg.includes("revoked") ? "success" : "error"}
+                    >
+                      {teamMsg}
+                    </SettingsMessage>
+                  ) : null}
                   <SettingsSection
                     icon={SECTION_ICONS.team}
                     title="Invite members"
@@ -2454,7 +2617,8 @@ export default function SettingsClient() {
                           value={inviteEmail}
                           onChange={(e) => setInviteEmail(e.target.value)}
                           placeholder="colleague@company.com"
-                          className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                          disabled={readOnly}
+                          className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
                         />
                       </label>
                       <label className="space-y-1 sm:w-36">
@@ -2462,7 +2626,8 @@ export default function SettingsClient() {
                         <select
                           value={inviteRole}
                           onChange={(e) => setInviteRole(e.target.value)}
-                          className="settings-role-select w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-xs font-semibold"
+                          disabled={readOnly}
+                          className="settings-role-select w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-xs font-semibold disabled:opacity-60"
                         >
                           <option value="admin">Admin</option>
                           <option value="manager">Manager</option>
@@ -2475,12 +2640,17 @@ export default function SettingsClient() {
                       </label>
                       <button
                         type="submit"
-                        className="rounded-lg bg-foreground px-4 py-2 text-xs font-semibold text-white"
+                        disabled={readOnly}
+                        className="rounded-lg bg-foreground px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
                       >
                         Send invite
                       </button>
                     </form>
-                    {inviteMsg ? <SettingsMessage>{inviteMsg}</SettingsMessage> : null}
+                    {inviteMsg ? (
+                      <SettingsMessage type={inviteMsg.includes("sent") ? "success" : "error"}>
+                        {inviteMsg}
+                      </SettingsMessage>
+                    ) : null}
                   </SettingsSection>
 
                   <SettingsSection
@@ -2489,7 +2659,18 @@ export default function SettingsClient() {
                     description="Manage workspace access for your team."
                     delay={0.08}
                   >
-                    {team.length === 0 ? (
+                    {teamLoadError ? (
+                      <SettingsMessage type="error">
+                        {teamLoadError}
+                        <button
+                          type="button"
+                          onClick={() => reloadWorkspaceTeam()}
+                          className="ml-2 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-medium text-red-700"
+                        >
+                          Retry
+                        </button>
+                      </SettingsMessage>
+                    ) : team.length === 0 ? (
                       <SettingsEmpty>No team members found.</SettingsEmpty>
                     ) : (
                       <ul className="space-y-2">
@@ -2503,9 +2684,9 @@ export default function SettingsClient() {
                             </div>
                             <select
                               value={member.role || "editor"}
-                              disabled={teamBusy === member.user_id || member.role === "owner"}
+                              disabled={readOnly || teamBusy === member.user_id || member.role === "owner"}
                               onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
-                              className="settings-role-select rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs font-semibold"
+                              className="settings-role-select rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs font-semibold disabled:opacity-60"
                             >
                               <option value="owner">Owner</option>
                               <option value="admin">Admin</option>
@@ -2544,9 +2725,9 @@ export default function SettingsClient() {
                               </div>
                               <button
                                 type="button"
-                                disabled={teamBusy === inv.id}
+                                disabled={readOnly || teamBusy === inv.id}
                                 onClick={() => handleRevokeInvite(inv.id)}
-                                className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-50"
+                                className="rounded-lg border border-black/10 px-2.5 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-50 disabled:opacity-50"
                               >
                                 Revoke
                               </button>

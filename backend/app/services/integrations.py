@@ -60,10 +60,23 @@ async def send_email_notification(
     smtp_override: dict | None = None,
     credential_id: str | None = None,
     from_addr_override: str | None = None,
+    auth_mode: str | None = None,
 ) -> dict:
-    if db and workspace_id and not smtp_override and not credential_id:
+    if auth_mode == "oauth" or (db and workspace_id and not smtp_override and not credential_id):
         from app.database import WorkspaceIntegration
         from app.services.gmail_jira import send_gmail_api_message
+
+        if auth_mode == "oauth" and credential_id:
+            # Explicit oauth credential provided by node
+            return await send_gmail_api_message(
+                db,
+                workspace_id,
+                to_addr,
+                subject,
+                body,
+                from_addr=from_addr_override,
+                credential_id=credential_id,
+            )
 
         row = db.get(WorkspaceIntegration, workspace_id)
         if row and (row.gmail_auth_mode or "").lower() == "oauth" and row.gmail_oauth_refresh_token_enc:
@@ -112,25 +125,65 @@ async def send_telegram_message(
     workspace_id: int | None = None,
     credential_id: str | None = None,
 ) -> dict:
+    from app.services.workspace_integrations import resolve_telegram_chat_id, resolve_telegram_token
+
     token = (
         resolve_telegram_token(db, workspace_id, bot_token or "", credential_id=credential_id)
         if db
         else (bot_token or TELEGRAM_BOT_TOKEN or "").strip()
     )
-    if not token or not chat_id:
-        return {"ok": False, "detail": "Telegram bot token or chat_id missing — add in Credentials"}
+    target_chat_id = (
+        resolve_telegram_chat_id(db, workspace_id, chat_id or "", credential_id=credential_id)
+        if db
+        else (chat_id or "").strip()
+    )
+    if not token:
+        return {
+            "ok": False,
+            "detail": "Telegram bot token missing — select a valid bot credential or set Bot Token in Settings → Integrations.",
+        }
+    if not target_chat_id or target_chat_id == "{{chat_id}}":
+        return {
+            "ok": True,
+            "detail": "Telegram template {{chat_id}} ready. Publish your workflow and send any message to your bot on Telegram for live public responses!",
+        }
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 url,
-                json={"chat_id": chat_id, "text": text[:4096]},
+                json={"chat_id": target_chat_id, "text": text[:4096]},
             )
+            if resp.status_code == 403 or "can't send messages to the bot" in resp.text:
+                return {
+                    "ok": False,
+                    "detail": "Telegram Error (403): You entered the Bot's ID as the recipient. A bot cannot message itself! Send a message to your bot on Telegram, get YOUR personal numeric Chat ID from @userinfobot (e.g. 123456789), and enter YOUR Chat ID in the node.",
+                }
+            if resp.status_code == 401:
+                return {
+                    "ok": False,
+                    "detail": f"Telegram Bot Token ({token[:12]}...) is INVALID or REVOKED by Telegram (@BotFather). Please create an active bot via @BotFather on Telegram and copy its token into Credentials.",
+                }
             resp.raise_for_status()
             payload = resp.json()
             if not payload.get("ok"):
-                return {"ok": False, "detail": str(payload.get("description") or "Telegram API error")}
-            return {"ok": True, "detail": f"Telegram message sent to {chat_id}"}
+                desc = payload.get("description") or "Telegram API error"
+                if "can't send messages to the bot" in desc:
+                    desc = "Telegram Error (403): You entered the Bot's ID as the recipient. A bot cannot message itself! Get your personal numeric Chat ID from @userinfobot on Telegram and enter YOUR Chat ID in the node."
+                return {"ok": False, "detail": str(desc)}
+            return {"ok": True, "detail": f"Telegram message sent to {target_chat_id}"}
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403 or "can't send messages to the bot" in exc.response.text:
+            return {
+                "ok": False,
+                "detail": "Telegram Error (403): You entered the Bot's ID as the recipient. A bot cannot message itself! Send a message to your bot on Telegram, get YOUR personal numeric Chat ID from @userinfobot (e.g. 123456789), and enter YOUR Chat ID in the node.",
+            }
+        if exc.response.status_code == 401:
+            return {
+                "ok": False,
+                "detail": f"Telegram Bot Token ({token[:12]}...) is INVALID or REVOKED by Telegram (@BotFather). Please create an active bot via @BotFather on Telegram and copy its token into Credentials.",
+            }
+        return {"ok": False, "detail": f"Telegram API error ({exc.response.status_code}): {exc.response.text[:200]}"}
     except Exception as exc:
         return {"ok": False, "detail": str(exc)[:500]}
 
@@ -261,6 +314,7 @@ async def send_notification(
     workspace_id: int | None = None,
     credential_id: str | None = None,
     from_addr: str | None = None,
+    auth_mode: str | None = None,
 ) -> dict:
     ch = (channel or "telegram").strip().lower()
     if ch == "email":
@@ -272,6 +326,7 @@ async def send_notification(
             workspace_id=workspace_id,
             credential_id=credential_id,
             from_addr_override=from_addr,
+            auth_mode=auth_mode,
         )
     if ch == "webhook":
         return await send_webhook_notification(to_addr, subject, body)
@@ -314,8 +369,9 @@ async def register_telegram_webhook(
     workspace_id: int,
     webhook_url: str,
     bot_token: str = "",
+    credential_id: str | None = None,
 ) -> dict:
-    token = resolve_telegram_token(db, workspace_id, bot_token)
+    token = resolve_telegram_token(db, workspace_id, bot_token, credential_id=credential_id)
     if not token:
         return {"ok": False, "detail": "Telegram bot token not configured"}
     if not webhook_url:
@@ -333,8 +389,13 @@ async def register_telegram_webhook(
         return {"ok": False, "detail": str(exc)[:500]}
 
 
-async def get_telegram_bot_info(db: Session, workspace_id: int, bot_token: str = "") -> dict:
-    token = resolve_telegram_token(db, workspace_id, bot_token)
+async def get_telegram_bot_info(
+    db: Session, 
+    workspace_id: int, 
+    bot_token: str = "",
+    credential_id: str | None = None,
+) -> dict:
+    token = resolve_telegram_token(db, workspace_id, bot_token, credential_id=credential_id)
     if not token:
         return {"ok": False, "detail": "Telegram bot token not configured"}
     url = f"https://api.telegram.org/bot{token}/getMe"
@@ -350,11 +411,13 @@ async def get_telegram_bot_info(db: Session, workspace_id: int, bot_token: str =
         return {"ok": False, "detail": str(exc)[:500]}
 
 
-from app.services.workspace_integrations import resolve_telegram_token
-
-
-async def get_telegram_webhook_info(db: Session, workspace_id: int, bot_token: str = "") -> dict:
-    token = resolve_telegram_token(db, workspace_id, bot_token)
+async def get_telegram_webhook_info(
+    db: Session, 
+    workspace_id: int, 
+    bot_token: str = "",
+    credential_id: str | None = None,
+) -> dict:
+    token = resolve_telegram_token(db, workspace_id, bot_token, credential_id=credential_id)
     if not token:
         return {"ok": False, "detail": "Telegram bot token not configured"}
     url = f"https://api.telegram.org/bot{token}/getWebhookInfo"
@@ -377,6 +440,60 @@ def parse_telegram_input(payload: dict) -> tuple[str, str]:
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id") or "")
     return chat_id, text
+
+
+def workflow_uses_telegram(graph_json: str) -> bool:
+    try:
+        import json
+
+        raw = json.loads(graph_json or "{}")
+        for node in raw.get("nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            ntype = (node.get("type") or "").strip().lower()
+            data = node.get("data") or {}
+            if ntype == "trigger" and (data.get("trigger_type") or "").strip().lower() == "telegram":
+                return True
+            if ntype == "notify" and (data.get("channel") or "").strip().lower() == "telegram":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def telegram_trigger_chat_filter(graph_json: str) -> str:
+    try:
+        import json
+
+        raw = json.loads(graph_json or "{}")
+        for node in raw.get("nodes") or []:
+            if (node.get("type") or "") != "trigger":
+                continue
+            data = node.get("data") or {}
+            if (data.get("trigger_type") or "").strip().lower() != "telegram":
+                continue
+            return (data.get("telegram_chat_filter") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+async def ensure_telegram_webhook_for_workflow(
+    db: Session,
+    workspace_id: int,
+    workflow_id: str,
+    graph_json: str = "",
+) -> dict | None:
+    if not workflow_uses_telegram(graph_json):
+        return None
+    from app.services.workspace_integrations import record_telegram_webhook, resolve_public_base_url
+
+    public_base = resolve_public_base_url(db, workspace_id)
+    webhook_url = f"{public_base}/api/v1/integrations/telegram/webhook/{workflow_id}"
+    result = await register_telegram_webhook(db, workspace_id, webhook_url, "")
+    if result.get("ok"):
+        record_telegram_webhook(db, workspace_id, workflow_id, webhook_url)
+    return {**result, "webhook_url": webhook_url, "public_base_url": public_base}
 
 
 def parse_slack_event(payload: dict) -> tuple[str, str, str]:

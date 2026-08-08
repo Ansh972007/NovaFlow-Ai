@@ -27,7 +27,13 @@ export async function ensureActiveWorkspace() {
     if (stored && !storedValid && typeof window !== "undefined") {
       localStorage.removeItem(WORKSPACE_STORAGE_KEY);
     }
-    const id = storedValid ? Number(stored) : data?.current_id || items[0]?.id;
+    const personal =
+      items.find((w) => w.workspace_type === "personal" && w.role === "owner") ||
+      items.find((w) => w.workspace_type === "personal") ||
+      items.find((w) => w.role === "owner");
+    const id = storedValid
+      ? Number(stored)
+      : personal?.id || data?.current_id || items[0]?.id;
     if (id) setActiveWorkspaceId(id);
     return id;
   } catch {
@@ -68,6 +74,14 @@ export function workspaceCanEdit(role) {
 
 export function workspaceCanRun(role) {
   return workspaceRoleRank(role) >= WORKSPACE_ROLE_RANK.editor;
+}
+
+export function workspaceCanManageApiKeys(role) {
+  return workspaceRoleRank(role) >= WORKSPACE_ROLE_RANK.developer;
+}
+
+export function workspaceCanAdmin(role) {
+  return workspaceRoleRank(role) >= WORKSPACE_ROLE_RANK.admin;
 }
 
 export async function getActiveWorkspaceRole() {

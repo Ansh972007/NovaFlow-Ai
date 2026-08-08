@@ -307,65 +307,101 @@ def resolve_api_key(row: LlmProvider | None) -> str:
     return ""
 
 
-def get_active_config(db: Session | None = None, conversation_api_key: str | None = None, user_id: int | None = None) -> dict[str, str]:
-    # STRICT SECURITY: User API keys are MANDATORY - no system fallback allowed
-    # This is a production-grade security requirement
-    
-    # Priority 1: Use API key from conversation if provided
+def get_active_config(
+    db: Session | None = None,
+    conversation_api_key: str | None = None,
+    user_id: int | None = None,
+    workspace_id: int | None = None,
+    credential_id: str | None = None,
+) -> dict:
+    # Priority 1: Direct conversation-scoped API key
     if conversation_api_key:
-        # Detect provider type from API key format
         ptype = "openrouter" if conversation_api_key.startswith("sk-or-") else "openai"
         meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
-        
         return {
             "provider_id": "conversation",
             "provider_type": ptype,
-            "provider_name": f"Conversation-provided ({ptype})",
+            "provider_name": f"Conversation key ({ptype})",
             "api_key": conversation_api_key,
             "base_url": meta["base_url"].rstrip("/"),
             "model": meta["default_chat"],
             "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
         }
-    
-    # Priority 2: Use user-specific API key (MANDATORY for chat)
-    if db is not None and user_id is not None:
-        from app.services.user_management import UserApiKeyManager
-        user_api_manager = UserApiKeyManager(db)
-        user_api_key = user_api_manager.get_user_api_key(user_id)
-        
-        if user_api_key:
-            user_config = user_api_manager.get_user_api_config(user_id)
-            ptype = user_config.get("provider", "openrouter")
-            meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
-            
-            return {
-                "provider_id": f"user_{user_id}",
-                "provider_type": ptype,
-                "provider_name": f"User-specific ({ptype})",
-                "api_key": user_api_key,
-                "base_url": user_api_manager.get_base_url_for_user(user_id),
-                "model": user_api_manager.get_model_for_user(user_id),
-                "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
-            }
-        
+
+    # Priority 2: User-specific API Key
+    if user_id:
+        try:
+            from app.services.user_api_key_manager import user_api_manager
+
+            user_api_key = user_api_manager.get_api_key_for_user(user_id)
+            if user_api_key:
+                ptype = user_api_manager.get_provider_type_for_user(user_id) or (
+                    "openrouter" if user_api_key.startswith("sk-or-") else "openai"
+                )
+                meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
+                return {
+                    "provider_id": f"user_{user_id}",
+                    "provider_type": ptype,
+                    "provider_name": f"User-specific ({ptype})",
+                    "api_key": user_api_key,
+                    "base_url": user_api_manager.get_base_url_for_user(user_id),
+                    "model": user_api_manager.get_model_for_user(user_id),
+                    "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
+                }
+        except Exception:
+            pass
+
     # Priority 2.5: Use Credential Vault API key if saved in workspace credentials
     if db is not None:
         try:
-            from app.services.credential_vault import get_credential
-            ws_id = getattr(db, "_workspace_id", 1) or 1
-            vault_key = get_credential(db, ws_id, "llm", "openai", "api_key") or get_credential(db, ws_id, "llm", "openrouter", "api_key")
-            if vault_key:
-                ptype = "openrouter" if vault_key.startswith("sk-or-") else "openai"
-                meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
-                return {
-                    "provider_id": "vault",
-                    "provider_type": ptype,
-                    "provider_name": f"Vault-provided ({ptype})",
-                    "api_key": vault_key,
-                    "base_url": meta["base_url"].rstrip("/"),
-                    "model": meta["default_chat"],
-                    "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
-                }
+            import json as _json
+            from app.crypto import decrypt_secret
+            from app.database import CredentialVaultEntry
+
+            ws_id = workspace_id or getattr(db, "_workspace_id", 3) or 3
+            entry = None
+            if credential_id:
+                entry = db.get(CredentialVaultEntry, credential_id)
+            if not entry:
+                entry = (
+                    db.query(CredentialVaultEntry)
+                    .filter(
+                        CredentialVaultEntry.workspace_id == ws_id,
+                        CredentialVaultEntry.category == "llm",
+                    )
+                    .order_by(CredentialVaultEntry.is_default.desc(), CredentialVaultEntry.create_time.desc())
+                    .first()
+                )
+            if entry and entry.fields_enc:
+                dec = decrypt_secret(entry.fields_enc)
+                fields = {}
+                if isinstance(dec, str) and dec.startswith("{"):
+                    try:
+                        fields = _json.loads(dec)
+                    except Exception:
+                        pass
+                vault_key = (
+                    fields.get("api_key")
+                    or fields.get("key")
+                    or (dec if isinstance(dec, str) and not dec.startswith("{") else "")
+                ).strip()
+                if vault_key:
+                    ptype = (
+                        fields.get("provider_type")
+                        or ("openrouter" if vault_key.startswith("sk-or-") else "openai")
+                    ).lower()
+                    meta = PROVIDER_TYPES.get(ptype, PROVIDER_TYPES["openai"])
+                    base_url = (fields.get("base_url") or meta["base_url"]).rstrip("/")
+                    model = fields.get("chat_model") or fields.get("model") or meta["default_chat"]
+                    return {
+                        "provider_id": entry.id,
+                        "provider_type": ptype,
+                        "provider_name": f"Vault ({entry.label})",
+                        "api_key": vault_key,
+                        "base_url": base_url,
+                        "model": model,
+                        "embedding_model": meta.get("default_embedding") or OPENAI_EMBEDDING_MODEL,
+                    }
         except Exception:
             pass
 

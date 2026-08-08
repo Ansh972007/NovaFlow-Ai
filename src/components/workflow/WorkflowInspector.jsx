@@ -24,7 +24,10 @@ export default function WorkflowInspector({
   runInput,
   onRunInputChange,
   onRun,
+  onTest,
   running,
+  testing = false,
+  testReport = null,
   runResult,
   pendingReview,
   onResume,
@@ -59,6 +62,7 @@ export default function WorkflowInspector({
   readOnly = false,
   workflowId = "",
   hasNotifyNode = false,
+  hasTelegramFlow = false,
   customNodeDefs = [],
   builtinSchemas = [],
   dynamicComponents = [],
@@ -268,12 +272,14 @@ export default function WorkflowInspector({
                           )}
                         </div>
                       )}
-                      {(hasNotifyNode || workflowId) && (
+                      {(hasTelegramFlow || hasNotifyNode) && (
                         <>
-                          <WorkflowTelegramPanel
-                            workflowId={workflowId}
-                            published={workflowStatus === 1}
-                          />
+                          {hasTelegramFlow ? (
+                            <WorkflowTelegramPanel
+                              workflowId={workflowId}
+                              published={workflowStatus === 1}
+                            />
+                          ) : null}
                           <WorkflowSlackPanel
                             workflowId={workflowId}
                             workflowStatus={workflowStatus}
@@ -561,19 +567,59 @@ export default function WorkflowInspector({
               exit={{ opacity: 0, x: -8 }}
               transition={{ duration: 0.25, ease }}
             >
-              <p className="workspace-section-label">Test run</p>
-              <p className="mt-1 text-sm text-neutral-500">Execute the full pipeline with sample input.</p>
+              <p className="workspace-section-label">Test & run</p>
+              <p className="mt-1 text-sm text-neutral-500">
+                Validate the graph (no live run) or execute the full pipeline with sample input.
+              </p>
+
+              <button
+                type="button"
+                onClick={onTest}
+                disabled={testing || running || readOnly}
+                className="btn-secondary mt-4 w-full !text-xs"
+              >
+                {testing ? "Validating…" : "Validate workflow (sandbox)"}
+              </button>
+
+              {testReport && (
+                <div
+                  className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+                    testReport.status === "success"
+                      ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
+                      : "border-red-200 bg-red-50/80 text-red-900"
+                  }`}
+                >
+                  <p className="font-semibold">
+                    Sandbox: {testReport.status === "success" ? "Passed" : "Issues found"}
+                  </p>
+                  <p className="mt-1 text-xs opacity-80">
+                    {testReport.passed ?? 0} passed · {testReport.failed ?? 0} failed · {testReport.warnings ?? 0} warnings
+                    {testReport.total_ms != null ? ` · ${testReport.total_ms}ms` : ""}
+                  </p>
+                  {testReport.checks?.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-[11px]">
+                      {testReport.checks.map((c, i) => (
+                        <li key={c.id || i} className="flex gap-2">
+                          <span className="font-semibold uppercase">{c.status}</span>
+                          <span>{c.name}: {c.message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               <textarea
                 value={runInput}
                 onChange={(e) => onRunInputChange(e.target.value)}
                 rows={5}
-                placeholder="Enter a question or topic…"
+                placeholder="Enter a question or topic for a live run…"
                 className="mt-4 w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2.5 text-sm"
               />
               <button
                 type="button"
                 onClick={onRun}
-                disabled={running || !runInput.trim() || readOnly}
+                disabled={running || testing || !runInput.trim() || readOnly}
                 className="btn-primary mt-4 w-full"
               >
                 {running ? "Running pipeline…" : "Run workflow"}
@@ -596,35 +642,58 @@ export default function WorkflowInspector({
 
               {runResult && (
                 <div className="mt-5 space-y-3">
-                  <div className="rounded-xl border border-white/70 bg-white/75 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">Output</p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-neutral-800">
-                      {runResult.output}
-                    </p>
-                    <p className="mt-3 text-xs text-neutral-400">{runResult.duration_ms}ms</p>
-                  </div>
+                  {runResult.output && (
+                    <div className="rounded-xl border border-white/70 bg-white/75 p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">Workflow output</p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-neutral-800">
+                        {runResult.output}
+                      </p>
+                      {runResult.duration_ms != null && (
+                        <p className="mt-3 text-xs text-neutral-400">{runResult.duration_ms}ms</p>
+                      )}
+                    </div>
+                  )}
                   {runResult.steps?.length > 0 && (
                     <div className="relative mt-4 pl-4">
                       <div className="absolute bottom-2 left-[5px] top-2 w-px bg-neutral-200" />
                       <ul className="space-y-3">
-                        {runResult.steps.map((step, i) => (
+                        {runResult.steps.map((step, i) => {
+                          const isError = step.status === "error";
+                          const isRunning = step.status === "running";
+                          const isOk = step.status === "ok" || step.status === "completed";
+                          return (
                           <motion.li
-                            key={step.node_id}
+                            key={step.node_id || i}
                             initial={{ opacity: 0, x: -8 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: i * 0.08 }}
-                            className="relative flex items-center gap-3"
+                            className="relative flex items-start gap-3"
                           >
-                            <span className="relative z-10 flex h-2.5 w-2.5 shrink-0 rounded-full bg-neutral-900 ring-4 ring-white" />
+                            <span
+                              className={`relative z-10 mt-2 flex h-2.5 w-2.5 shrink-0 rounded-full ring-4 ring-white ${
+                                isError ? "bg-red-500" : isRunning ? "bg-amber-400 animate-pulse" : isOk ? "bg-emerald-500" : "bg-neutral-900"
+                              }`}
+                            />
                             <div className="min-w-0 flex-1 rounded-lg bg-white/70 px-3 py-2">
-                              <span className="text-xs font-semibold capitalize text-neutral-800">{step.type}</span>
-                              <span className="ml-2 text-[10px] text-emerald-600">{step.status}</span>
-                              {step.status === "running" && (
-                                <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-semibold capitalize text-neutral-800">{step.type}</span>
+                                <span
+                                  className={`text-[10px] font-bold uppercase ${
+                                    isError ? "text-red-600" : isRunning ? "text-amber-600" : isOk ? "text-emerald-600" : "text-neutral-500"
+                                  }`}
+                                >
+                                  {step.status}
+                                </span>
+                              </div>
+                              {(step.output || step.message) && (
+                                <p className="mt-1 line-clamp-4 text-[11px] leading-relaxed text-neutral-600">
+                                  {step.output || step.message}
+                                </p>
                               )}
                             </div>
                           </motion.li>
-                        ))}
+                          );
+                        })}
                       </ul>
                     </div>
                   )}

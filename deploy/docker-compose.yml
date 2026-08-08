@@ -93,6 +93,8 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:3001}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      # ngrok / public tunnel — set by scripts/start-with-ngrok.* or .env
+      NOVAFLOW_PUBLIC_BASE_URL: ${NOVAFLOW_PUBLIC_BASE_URL:-}
       ALLOW_PASSWORD_LOGIN: ${ALLOW_PASSWORD_LOGIN:-1}
       
       # Universal AI Chat System Configuration
@@ -114,14 +116,21 @@ services:
       DEFAULT_USER_MODEL: "openai/gpt-4o-mini"
     volumes:
       - ../backend/app:/app/app
+      - ../backend/scripts:/app/scripts:ro
       - novaflow_data:/app/data
       - novaflow_components:/app/components
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:3001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
     depends_on:
       mysql:
         condition: service_healthy

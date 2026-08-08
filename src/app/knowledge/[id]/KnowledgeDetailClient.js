@@ -9,6 +9,8 @@ import WorkspaceBackLink from "@/components/workspace/WorkspaceBackLink";
 import WorkspaceAlert from "@/components/workspace/WorkspaceAlert";
 import { FileIcon, KnowledgeIcon } from "@/components/workspace/WorkspaceIcons";
 import { getUserInfo } from "@/lib/api/auth";
+import { checkBackendHealth } from "@/lib/api/health";
+import { ensureActiveWorkspace } from "@/lib/api/workspaces";
 import {
   FILE_STATUS,
   KB_STATUS_LABELS,
@@ -43,6 +45,8 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
   const [ingestUrl, setIngestUrl] = useState("");
   const [ingesting, setIngesting] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [apiOffline, setApiOffline] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -59,7 +63,19 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
   const load = useCallback(async () => {
     setLoading(true);
     setNotFound(false);
+    setLoadError("");
+    setApiOffline(false);
     try {
+      await ensureActiveWorkspace();
+      const health = await checkBackendHealth();
+      if (!health.ok) {
+        setApiOffline(true);
+        setLoadError(
+          `NovaFlow API is not reachable (${health.apiUrl || "port 3001"}). Start the backend with docker compose up -d --build, then retry.`
+        );
+        setKb(null);
+        return;
+      }
       const detail = await getKnowledgeById(knowledgeId);
       setKb(detail);
       await loadFiles();
@@ -68,7 +84,16 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
       if (err?.status === 404 || /not found/i.test(err.message || "")) {
         setNotFound(true);
       } else {
-        setError(err.message || "Failed to load library");
+        const msg = err.message || "Failed to load library";
+        setLoadError(msg);
+        setError(msg);
+        if (
+          String(msg).includes("unavailable") ||
+          String(msg).includes("Cannot reach") ||
+          String(msg).includes("offline")
+        ) {
+          setApiOffline(true);
+        }
       }
     } finally {
       setLoading(false);
@@ -77,7 +102,18 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
 
   useEffect(() => {
     getUserInfo()
-      .then(setUser)
+      .then(async (u) => {
+        if (!u) {
+          router.replace("/login");
+          return;
+        }
+        try {
+          await ensureActiveWorkspace();
+        } catch {
+          /* optional */
+        }
+        setUser(u);
+      })
       .catch(() => router.push("/login"));
   }, [router]);
 
@@ -262,7 +298,26 @@ export default function KnowledgeDetailClient({ knowledgeId }) {
           </div>
         )}
 
-        {error && <WorkspaceAlert type="error" className="relative mt-4">{error}</WorkspaceAlert>}
+        {loadError && (
+          <WorkspaceAlert type="error" className="relative mt-4">
+            {loadError}
+            <button
+              type="button"
+              onClick={() => load()}
+              className="ml-2 rounded-full border border-red-200 bg-white px-3 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+            >
+              Retry
+            </button>
+          </WorkspaceAlert>
+        )}
+
+        {apiOffline && (
+          <WorkspaceAlert type="warn" className="relative mt-4">
+            If you use Docker: run <code className="text-xs">docker compose up -d --build</code> from the project root, then retry.
+          </WorkspaceAlert>
+        )}
+
+        {error && !loadError && <WorkspaceAlert type="error" className="relative mt-4">{error}</WorkspaceAlert>}
 
         <div className="relative mt-4 rounded-xl border border-neutral-200/70 bg-white/60 px-4 py-3 text-sm text-neutral-600">
           {piiFiles > 0

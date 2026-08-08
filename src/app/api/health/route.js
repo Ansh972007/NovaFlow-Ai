@@ -1,7 +1,7 @@
 import { getApiBaseUrl, getServerApiBaseUrl } from "@/lib/api/config";
 
-const TIMEOUT_MS = 5_000;
-const RETRIES = 2;
+const TIMEOUT_MS = 12_000;
+const RETRIES = 3;
 
 async function probe(url) {
   const res = await fetch(url, {

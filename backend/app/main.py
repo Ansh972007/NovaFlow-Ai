@@ -77,7 +77,7 @@ async def lifespan(_app: FastAPI):
                 password=hash_password(ADMIN_PASSWORD),
                 role="admin",
                 email="novaflow85@gmail.com",  # STRICT: Gmail-only authentication
-                must_change_password=1,  # Force password change for security
+                must_change_password=1 if IS_PRODUCTION else 0,
                 password_changed_at=None,
             )
             db.add(admin)
@@ -96,6 +96,11 @@ async def lifespan(_app: FastAPI):
             seed_demo_data(db)
         load_settings(db)
         ensure_default_provider(db)
+        from app.services.workspace_integrations import apply_public_base_from_env
+
+        applied = apply_public_base_from_env(db)
+        if applied:
+            print(f"[NovaFlow] Public API base URL: {applied}")
     finally:
         db.close()
     init_vector_store()
