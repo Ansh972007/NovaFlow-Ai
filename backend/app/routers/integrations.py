@@ -410,7 +410,7 @@ async def test_notify(
 
 @router.post("/integrations/telegram/webhook/{workflow_id}")
 async def telegram_webhook(workflow_id: str, request: Request, db: Session = Depends(get_db)):
-    from app.services.integrations import telegram_trigger_chat_filter
+    from app.services.integrations import parse_telegram_input, send_telegram_message, telegram_trigger_chat_filter
 
     wf = db.get(Workflow, workflow_id)
     if not wf or wf.status != 1:
@@ -419,21 +419,32 @@ async def telegram_webhook(workflow_id: str, request: Request, db: Session = Dep
         payload = await request.json()
     except Exception:
         return fail(400, "Invalid JSON")
-    chat_id, text = parse_telegram_input(payload)
+    chat_id, text, user_name, first_name = parse_telegram_input(payload)
     if not text:
         return ok({"ignored": True})
     chat_filter = telegram_trigger_chat_filter(wf.graph_json or "")
     if chat_filter and chat_id and chat_id != chat_filter:
         return ok({"ignored": True, "reason": "chat_filter"})
+
+    # Check for /greetings or /start command
+    if text.lower().startswith("/greetings") or text.lower().startswith("/start"):
+        greeting_text = f"Hello {user_name}! 👋 Welcome to NovaFlow AI. How can I assist you today?"
+        await send_telegram_message(db, wf.workspace_id, chat_id, greeting_text)
+
     result = await run_workflow(
         db,
         wf,
         wf.user_id,
         text,
         wf.workspace_id,
-        extra_context={"chat_id": chat_id, "telegram_chat_id": chat_id},
+        extra_context={
+            "chat_id": chat_id,
+            "telegram_chat_id": chat_id,
+            "user_name": user_name,
+            "first_name": first_name or user_name,
+        },
     )
-    return ok({"chat_id": chat_id, "result": result})
+    return ok({"chat_id": chat_id, "user_name": user_name, "result": result})
 
 
 @router.get("/integrations/telegram/setup/{workflow_id}")

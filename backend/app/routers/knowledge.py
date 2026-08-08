@@ -19,6 +19,7 @@ from app.services.knowledge import (
     _parse_file_meta,
     build_citations,
     build_extractive_digest,
+    delete_knowledge_base,
     delete_knowledge_file,
     kb_file_stats,
     kb_status_from_stats,
@@ -205,6 +206,30 @@ def delete_file(
         detail={"knowledge_id": kb.id, "file_name": record.file_name},
     )
     return ok({"deleted": True, "id": file_id})
+
+
+@router.delete("/knowledge/{knowledge_id}")
+@router.post("/knowledge/delete")
+def delete_kb(
+    knowledge_id: int | None = None,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+    ctx=Depends(require_workspace_editor),
+):
+    kid = knowledge_id or (body and (body.get("knowledge_id") or body.get("id")))
+    if not kid:
+        return fail(400, "knowledge_id required")
+    kb = ctx.fetch(KnowledgeBase, int(kid))
+    if not kb:
+        return fail(404, "Knowledge base not found")
+    delete_knowledge_base(db, kb)
+    ctx.audit(
+        "knowledge.deleted",
+        resource_type="knowledge",
+        resource_id=str(kid),
+        detail={"name": kb.name},
+    )
+    return ok({"deleted": True, "id": kid})
 
 
 @router.post("/knowledge/process")

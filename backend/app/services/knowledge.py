@@ -181,6 +181,16 @@ def delete_knowledge_file(db: Session, record: KnowledgeFile) -> None:
         path.unlink()
     db.delete(record)
     db.commit()
+
+
+def delete_knowledge_base(db: Session, kb: KnowledgeBase) -> None:
+    from app.database import AssistantKnowledge
+    files = db.query(KnowledgeFile).filter(KnowledgeFile.knowledge_id == kb.id).all()
+    for f in files:
+        delete_knowledge_file(db, f)
+    db.query(AssistantKnowledge).filter(AssistantKnowledge.knowledge_id == kb.id).delete()
+    db.delete(kb)
+    db.commit()
     """True when Settings vault or env has an API key usable for embeddings."""
     from app.services.workspace_settings import get_chat_config
 

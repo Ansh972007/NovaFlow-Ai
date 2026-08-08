@@ -83,7 +83,16 @@ def list_enabled_providers(db: Session | None = None) -> list[dict[str, str]]:
     return items
 
 
-def redirect_uri(provider: str) -> str:
+def redirect_uri(provider: str, db: Session | None = None, workspace_id: int | None = None) -> str:
+    if db and workspace_id:
+        try:
+            from app.services.workspace_integrations import resolve_public_base_url
+
+            base = resolve_public_base_url(db, workspace_id)
+            if base:
+                return f"{base.rstrip('/')}/api/v1/auth/oauth/{provider}/callback"
+        except Exception:
+            pass
     base = OAUTH_REDIRECT_BASE.rstrip("/")
     return f"{base}/api/v1/auth/oauth/{provider}/callback"
 

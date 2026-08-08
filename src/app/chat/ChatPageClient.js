@@ -15,6 +15,7 @@ import { useAssistantChat } from "@/hooks/useAssistantChat";
 import { getOnlineApps, getAssistants, getAssistantInfo, FLOW_TYPE } from "@/lib/api/apps";
 import { getUserInfo } from "@/lib/api/auth";
 import {
+  deleteSession,
   getSessionsForApp,
   getSessionMessages,
   upsertSession,
@@ -161,13 +162,18 @@ export default function ChatPageClient() {
       setRagCount(0);
       return;
     }
+    const ft = String(selectedApp.flow_type || "").toLowerCase();
+    if (ft === "workflow" || ft === "flow" || selectedApp.id === "default_assistant") {
+      setRagCount(0);
+      return;
+    }
     getAssistantInfo(selectedApp.id)
       .then((info) => {
         const ids = info?.knowledge_ids || info?.knowledge_list?.map((k) => k.id) || [];
         setRagCount(ids.length);
       })
       .catch(() => setRagCount(0));
-  }, [selectedApp?.id]);
+  }, [selectedApp?.id, selectedApp?.flow_type]);
 
   useEffect(() => {
     if (!selectedApp?.id) return;
@@ -249,6 +255,31 @@ export default function ChatPageClient() {
     startNewChat();
   };
 
+  const handleDeleteSession = useCallback(
+    (targetId) => {
+      const idToDelete = targetId || sessionId;
+      if (!idToDelete) return;
+      const remaining = deleteSession(idToDelete);
+      if (selectedApp?.id) {
+        const appSessions = remaining.filter((s) => s.appId === selectedApp.id);
+        setSessions(appSessions);
+        if (idToDelete === sessionId) {
+          if (appSessions.length > 0) {
+            const first = appSessions[0];
+            setSessionId(first.id);
+            setInitialMessages(getSessionMessages(first.id));
+            if (typeof window !== "undefined") {
+              window.history.replaceState(null, "", `/chat?app=${selectedApp.id}&session=${first.id}`);
+            }
+          } else {
+            startNewChat(selectedApp);
+          }
+        }
+      }
+    },
+    [sessionId, selectedApp, startNewChat]
+  );
+
   const headerTitle = useMemo(() => selectedApp?.name || "Build", [selectedApp]);
   const hasAiosSession = useMemo(
     () => messages.some((m) => m?.event?.type?.startsWith?.("aios_")),
@@ -301,6 +332,7 @@ export default function ChatPageClient() {
             onSelectApp={handleSelectApp}
             onSelectSession={handleSelectSession}
             onNewChat={handleNewChat}
+            onDeleteSession={handleDeleteSession}
             loading={loadingApps}
             open={sidebarOpen}
             onClose={() => setSidebarOpen(false)}
@@ -369,6 +401,20 @@ export default function ChatPageClient() {
                 >
                   + New build
                 </button>
+                {sessionId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Are you sure you want to delete this chat session?")) {
+                        handleDeleteSession();
+                      }
+                    }}
+                    className="rounded-full border border-red-200 bg-red-50/80 px-3.5 py-2 text-xs font-semibold text-red-700 shadow-sm transition-colors hover:bg-red-100/80"
+                    title="Delete current chat"
+                  >
+                    Delete chat
+                  </button>
+                )}
                 {messages.length > 0 && (
                   <button
                     type="button"

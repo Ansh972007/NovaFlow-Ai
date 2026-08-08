@@ -22,6 +22,7 @@ export default function ChatSidebar({
   onSelectApp,
   onSelectSession,
   onNewChat,
+  onDeleteSession,
   loading,
   open,
   onClose,
@@ -106,6 +107,7 @@ export default function ChatSidebar({
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.03, duration: 0.3 }}
+                className="group/session relative flex items-center"
               >
                 <button
                   type="button"
@@ -113,17 +115,32 @@ export default function ChatSidebar({
                     onSelectSession(session);
                     onClose?.();
                   }}
-                  className={`chat-nav-item flex-col !items-start gap-0.5 ${
+                  className={`chat-nav-item flex-1 flex-col !items-start gap-0.5 pr-8 ${
                     selectedSessionId === session.id ? "chat-nav-item--active" : ""
                   }`}
                 >
                   <span className="w-full truncate text-left">
-                    {truncate(session.title || "New chat", 36)}
+                    {truncate(session.title || "New chat", 32)}
                   </span>
                   <span className="text-[10px] font-normal text-neutral-400">
                     {formatWhen(session.updatedAt)}
                   </span>
                 </button>
+                {onDeleteSession && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSession(session.id);
+                    }}
+                    title="Delete chat session"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-400 opacity-0 hover:bg-red-50 hover:text-red-600 transition-all group-hover/session:opacity-100"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
               </motion.li>
             ))}
           </ul>

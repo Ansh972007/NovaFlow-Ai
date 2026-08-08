@@ -433,13 +433,18 @@ async def get_telegram_webhook_info(
         return {"ok": False, "detail": str(exc)[:500]}
 
 
-def parse_telegram_input(payload: dict) -> tuple[str, str]:
-    """Return (chat_id, text) from a Telegram webhook update."""
+def parse_telegram_input(payload: dict) -> tuple[str, str, str, str]:
+    """Return (chat_id, text, user_name, first_name) from a Telegram webhook update."""
     message = payload.get("message") or payload.get("edited_message") or {}
     text = (message.get("text") or "").strip()
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id") or "")
-    return chat_id, text
+
+    sender = message.get("from") or chat or {}
+    first_name = (sender.get("first_name") or "").strip()
+    username = (sender.get("username") or "").strip()
+    user_name = first_name or username or "User"
+    return chat_id, text, user_name, first_name
 
 
 def workflow_uses_telegram(graph_json: str) -> bool:

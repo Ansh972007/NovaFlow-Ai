@@ -47,7 +47,7 @@ router = APIRouter(tags=["Conversations"])
 
 
 @router.post("/conversations")
-def api_create_conversation(body: dict, db: Session = Depends(get_db), ctx=Depends(require_workspace_editor)):
+def api_create_conversation(body: dict, db: Session = Depends(get_db), ctx=Depends(get_workspace_ctx)):
     c = create_conversation(
         db,
         workspace_id=ctx.workspace_id,

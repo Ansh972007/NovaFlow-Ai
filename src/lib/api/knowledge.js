@@ -40,6 +40,10 @@ export async function createKnowledge({ name, description = "", model, type = 0,
   });
 }
 
+export async function deleteKnowledge(knowledgeId) {
+  return client.delete(`/knowledge/${knowledgeId}`);
+}
+
 export async function getKnowledgeFiles(knowledgeId, { page = 1, pageSize = 50 } = {}) {
   return client.get(`/knowledge/file_list/${knowledgeId}`, {
     params: { page_num: page, page_size: pageSize },

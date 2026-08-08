@@ -523,13 +523,9 @@ def resolve_public_base_url(db: Session, workspace_id: int, override: str = "") 
     if override:
         return override.rstrip("/")
     row = db.get(WorkspaceIntegration, workspace_id)
-    if row and row.public_base_url:
-        return row.public_base_url.rstrip("/")
-    from app.config import PORT, PUBLIC_BASE_URL
 
-    if PUBLIC_BASE_URL:
-        return PUBLIC_BASE_URL.rstrip("/")
-
+    # Check live Ngrok status
+    active_ngrok = ""
     try:
         import httpx
 
@@ -541,14 +537,28 @@ def resolve_public_base_url(db: Session, workspace_id: int, override: str = "") 
                     for t in data.get("tunnels", []):
                         purl = (t.get("public_url") or "").strip().rstrip("/")
                         if purl.startswith("https://"):
-                            if row:
+                            active_ngrok = purl
+                            if row and row.public_base_url != purl:
                                 row.public_base_url = purl
                                 db.commit()
-                            return purl
+                            break
             except Exception:
                 pass
+            if active_ngrok:
+                break
     except Exception:
         pass
+
+    if active_ngrok:
+        return active_ngrok
+
+    if row and row.public_base_url and "ngrok" not in row.public_base_url.lower():
+        return row.public_base_url.rstrip("/")
+
+    from app.config import PORT, PUBLIC_BASE_URL
+
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/")
 
     return f"http://localhost:{PORT}"
 

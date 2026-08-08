@@ -265,7 +265,7 @@ def get_oauth_setup_info(db: Session | None = None, workspace_id: int | None = N
                 {
                     "id": "login",
                     "label": "Login (SSO)",
-                    "uri": login_redirect_uri("google"),
+                    "uri": login_redirect_uri("google", db, workspace_id),
                     "purpose": "User sign-in with Google",
                 },
                 {

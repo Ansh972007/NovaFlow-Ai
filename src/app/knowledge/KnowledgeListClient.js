@@ -15,6 +15,7 @@ import { useWorkspaceAccess } from "@/lib/auth/workspaceAccess";
 import { ensureActiveWorkspace } from "@/lib/api/workspaces";
 import {
   createKnowledge,
+  deleteKnowledge,
   getEmbeddingModels,
   KB_STATUS_LABELS,
   listKnowledge,
@@ -129,6 +130,18 @@ export default function KnowledgeListClient() {
     }
   }
 
+  async function handleDeleteKb(kb, e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to delete "${kb.name}"?`)) return;
+    try {
+      await deleteKnowledge(kb.id);
+      load();
+    } catch (err) {
+      alert(err.message || "Failed to delete knowledge library");
+    }
+  }
+
   if (!user) {
     return null;
   }
@@ -234,12 +247,12 @@ export default function KnowledgeListClient() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.08 + i * 0.05, ease }}
                   >
-                    <Link href={`/knowledge/${kb.id}`} className="workspace-card group block rounded-2xl p-6">
+                    <div className="workspace-card group relative block rounded-2xl p-6">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="workspace-icon-tile h-11 w-11 transition-transform duration-300 group-hover:scale-105">
+                        <Link href={`/knowledge/${kb.id}`} className="workspace-icon-tile h-11 w-11 transition-transform duration-300 group-hover:scale-105">
                           <KnowledgeIcon className="h-5 w-5" />
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
+                        </Link>
+                        <div className="flex items-center gap-2">
                           <span
                             className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${statusMeta.color}`}
                           >
@@ -250,23 +263,37 @@ export default function KnowledgeListClient() {
                               {kb.classification}
                             </span>
                           )}
+                          {!workspaceReadOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteKb(kb, e)}
+                              title="Delete library"
+                              className="rounded-lg p-1.5 text-neutral-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <h2 className="mt-5 text-lg font-semibold tracking-tight group-hover:text-neutral-900">
-                        {kb.name}
-                      </h2>
-                      <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-neutral-500">
-                        {kb.description || "No description"}
-                      </p>
-                      <p className="mt-5 flex items-center justify-between text-[11px] text-neutral-400">
-                        <span>
-                          {kb.ready_count || 0} ready · {kb.file_count || 0} docs
-                        </span>
-                        <span className="font-semibold text-neutral-700 opacity-0 transition-opacity group-hover:opacity-100">
-                          Open →
-                        </span>
-                      </p>
-                    </Link>
+                      <Link href={`/knowledge/${kb.id}`} className="block">
+                        <h2 className="mt-5 text-lg font-semibold tracking-tight group-hover:text-neutral-900">
+                          {kb.name}
+                        </h2>
+                        <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-neutral-500">
+                          {kb.description || "No description"}
+                        </p>
+                        <p className="mt-5 flex items-center justify-between text-[11px] text-neutral-400">
+                          <span>
+                            {kb.ready_count || 0} ready · {kb.file_count || 0} docs
+                          </span>
+                          <span className="font-semibold text-neutral-700 opacity-0 transition-opacity group-hover:opacity-100">
+                            Open →
+                          </span>
+                        </p>
+                      </Link>
+                    </div>
                   </motion.div>
                   );
                 })}
