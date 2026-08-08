@@ -429,7 +429,7 @@ async def telegram_webhook(workflow_id: str, request: Request, db: Session = Dep
     # Check for /greetings or /start command
     if text.lower().startswith("/greetings") or text.lower().startswith("/start"):
         greeting_text = f"Hello {user_name}! 👋 Welcome to NovaFlow AI. How can I assist you today?"
-        await send_telegram_message(db, wf.workspace_id, chat_id, greeting_text)
+        await send_telegram_message(chat_id=chat_id, text=greeting_text, db=db, workspace_id=wf.workspace_id)
 
     result = await run_workflow(
         db,
