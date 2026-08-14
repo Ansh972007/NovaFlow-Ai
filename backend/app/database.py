@@ -1597,6 +1597,32 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 _schema_log = logging.getLogger("novaflow.schema")
 _IS_MYSQL = DATABASE_URL.startswith("mysql")
+_IS_POSTGRES = (
+    DATABASE_URL.startswith("postgres")
+    or DATABASE_URL.startswith("postgresql")
+    or "+psycopg" in DATABASE_URL
+    or "+asyncpg" in DATABASE_URL
+)
+
+
+def _normalize_ddl(ddl: str) -> str:
+    """Normalize DDL for dialect quirks across SQLite, MySQL, and PostgreSQL."""
+    import re
+
+    if _IS_POSTGRES:
+        # In PostgreSQL, DATETIME type does not exist; use standard TIMESTAMP
+        d = re.sub(r"\bDATETIME\b", "TIMESTAMP", ddl, flags=re.IGNORECASE)
+        # Handle MySQL "MODIFY COLUMN" -> PostgreSQL "ALTER COLUMN ... TYPE"
+        if "MODIFY COLUMN" in d:
+            d = d.replace("MODIFY COLUMN", "ALTER COLUMN")
+            d = re.sub(
+                r"ALTER COLUMN\s+(\w+)\s+([A-Z0-9\(\)]+)",
+                r"ALTER COLUMN \1 TYPE \2",
+                d,
+                flags=re.IGNORECASE,
+            )
+        return d
+    return ddl
 
 
 def _add_column_if_missing(
@@ -1615,12 +1641,14 @@ def _add_column_if_missing(
     if col in cols:
         return
     try:
+        norm_ddl = _normalize_ddl(ddl)
         with engine.begin() as conn:
-            conn.execute(text(ddl))
+            conn.execute(text(norm_ddl))
             if backfill_sql:
                 conn.execute(text(backfill_sql))
     except Exception as exc:
         _schema_log.warning("Schema migration skipped for %s.%s: %s", table, col, exc)
+
 
 
 def migrate_schema():
@@ -1855,7 +1883,7 @@ def migrate_schema():
         "fine_tune_jobs",
     )
     enterprise_cols = {
-        "deleted_at": "ALTER TABLE {t} ADD COLUMN deleted_at DATETIME",
+        "deleted_at": "ALTER TABLE {t} ADD COLUMN deleted_at TIMESTAMP",
         "legal_hold": "ALTER TABLE {t} ADD COLUMN legal_hold INTEGER DEFAULT 0",
         "row_version": "ALTER TABLE {t} ADD COLUMN row_version INTEGER DEFAULT 1",
         "visibility": "ALTER TABLE {t} ADD COLUMN visibility VARCHAR(16) DEFAULT 'workspace'",
@@ -1869,14 +1897,8 @@ def migrate_schema():
     for table in enterprise_tables:
         if table not in insp.get_table_names():
             continue
-        cols = {c["name"] for c in insp.get_columns(table)}
         for col, ddl_tmpl in enterprise_cols.items():
-            if col not in cols:
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text(ddl_tmpl.format(t=table)))
-                except Exception:
-                    pass
+            _add_column_if_missing(insp, table, col, ddl_tmpl.format(t=table))
 
     # KOS — extended columns on knowledge tables
     kos_kb_cols = {
@@ -1887,7 +1909,7 @@ def migrate_schema():
         "aliases_json": ("ALTER TABLE knowledge_bases ADD COLUMN aliases_json TEXT DEFAULT '[]'", "UPDATE knowledge_bases SET aliases_json = '[]' WHERE aliases_json IS NULL"),
         "retention_policy": ("ALTER TABLE knowledge_bases ADD COLUMN retention_policy VARCHAR(32) DEFAULT 'standard'", "UPDATE knowledge_bases SET retention_policy = 'standard' WHERE retention_policy IS NULL OR retention_policy = ''"),
         "review_required": ("ALTER TABLE knowledge_bases ADD COLUMN review_required INTEGER DEFAULT 0", None),
-        "archived_at": ("ALTER TABLE knowledge_bases ADD COLUMN archived_at DATETIME", None),
+        "archived_at": ("ALTER TABLE knowledge_bases ADD COLUMN archived_at TIMESTAMP", None),
     }
     for col, (ddl, backfill) in kos_kb_cols.items():
         if _IS_MYSQL and col in {"tags_json", "labels_json", "aliases_json"}:
@@ -1902,7 +1924,7 @@ def migrate_schema():
         "lifecycle_status": ("ALTER TABLE knowledge_files ADD COLUMN lifecycle_status VARCHAR(16) DEFAULT 'published'", "UPDATE knowledge_files SET lifecycle_status = 'published' WHERE lifecycle_status IS NULL OR lifecycle_status = ''"),
         "classification": ("ALTER TABLE knowledge_files ADD COLUMN classification VARCHAR(16) DEFAULT 'internal'", "UPDATE knowledge_files SET classification = 'internal' WHERE classification IS NULL OR classification = ''"),
         "metadata_json": ("ALTER TABLE knowledge_files ADD COLUMN metadata_json TEXT DEFAULT '{}'", "UPDATE knowledge_files SET metadata_json = '{}' WHERE metadata_json IS NULL"),
-        "expires_at": ("ALTER TABLE knowledge_files ADD COLUMN expires_at DATETIME", None),
+        "expires_at": ("ALTER TABLE knowledge_files ADD COLUMN expires_at TIMESTAMP", None),
         "owner_id": ("ALTER TABLE knowledge_files ADD COLUMN owner_id INTEGER", None),
     }
     for col, (ddl, backfill) in kos_file_cols.items():
@@ -1914,15 +1936,8 @@ def migrate_schema():
         "content_hash": "ALTER TABLE knowledge_chunks ADD COLUMN content_hash VARCHAR(64) DEFAULT ''",
         "version_no": "ALTER TABLE knowledge_chunks ADD COLUMN version_no INTEGER DEFAULT 1",
     }
-    if "knowledge_chunks" in insp.get_table_names():
-        cols = {c["name"] for c in insp.get_columns("knowledge_chunks")}
-        for col, ddl in kos_chunk_cols.items():
-            if col not in cols:
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text(ddl))
-                except Exception:
-                    pass
+    for col, ddl in kos_chunk_cols.items():
+        _add_column_if_missing(insp, "knowledge_chunks", col, ddl)
 
     for table_name in (
         "knowledge_folders",
