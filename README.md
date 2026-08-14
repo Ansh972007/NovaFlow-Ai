@@ -41,6 +41,7 @@
 - [Quickstart & Installation](#-quickstart--installation)
 - [Configuration & Environment Variables](#-configuration--environment-variables)
 - [Testing & Quality Verification](#-testing--quality-verification)
+- [📚 Comprehensive Documentation](#-documentation)
 - [Troubleshooting Runbook](#-troubleshooting-runbook)
 - [Future Roadmap](#-future-roadmap)
 - [License & Authors](#-license--authors)
@@ -472,6 +473,29 @@ python -m pytest tests/test_real_pipeline.py -v
 cd ..
 npm run verify
 ```
+
+---
+
+## 📚 Documentation
+
+For an exhaustive, in-depth architectural and engineering breakdown, explore the master technical documentation:
+
+### 📖 [NovaFlow AI — Master Technical Architecture & Engineering Specification (25–30 Pages)](docs/NovaFlow_AI_Technical_Documentation.md)
+
+This engineering document provides complete implementation specifications across 34 core chapters:
+- **Executive Summary & High-Level System Architecture**
+- **Frontend Architecture** (`Next.js 16`, `React 19`, `useAssistantChat.js`, State Management)
+- **Backend ASGI Kernel & Lifespan Architecture** (`FastAPI`, Middleware Pipeline, Security Headers)
+- **Universal AI Chat & AIOS Composer Execution Pipeline** (Intent classification, blueprint synthesis)
+- **Deterministic Workflow Graph Engine** (Topological sorting, typed node execution, human-in-the-loop)
+- **Enterprise Knowledge Base & Hybrid RAG Subsystem** (PDF/Doc ingestion, Milvus vector store)
+- **Zero-Trust AES-256-GCM Credential Vault** (Encryption, secret masking, node binding)
+- **Omni-Channel Integrations & Public Telegram Gateway** (Webhooks, dynamic `/greetings` command)
+- **Comprehensive REST API Catalog & WebSocket Protocols** (All 30+ routers & payload framing)
+- **Database Schema & Complete ER Model** (All SQLAlchemy entities & relationships)
+- **Production Docker Stack, Configuration Matrix & Troubleshooting Runbook**
+
+👉 **[Click here to open the Full Technical Documentation](docs/NovaFlow_AI_Technical_Documentation.md)**
 
 ---
 
