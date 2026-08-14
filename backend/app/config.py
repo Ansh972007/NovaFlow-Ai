@@ -24,7 +24,16 @@ else:
     DATABASE_URL = _raw_db_url
 
 REDIS_URL = os.getenv("REDIS_URL", "")
-JWT_SECRET = os.getenv("JWT_SECRET", "novaflow-dev-secret-change-in-prod")
+_raw_jwt = (os.getenv("JWT_SECRET") or "").strip()
+if _raw_jwt and len(_raw_jwt) >= 32 and _raw_jwt != "novaflow-dev-secret-change-in-prod":
+    JWT_SECRET = _raw_jwt
+elif NOVAFLOW_ENV in ("production", "prod"):
+    import secrets
+
+    JWT_SECRET = _raw_jwt if len(_raw_jwt) >= 32 else secrets.token_hex(32)
+else:
+    JWT_SECRET = _raw_jwt or "novaflow-dev-secret-change-in-prod"
+
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "72"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -37,8 +46,6 @@ _dev_default_admin_password = "NovaFlowLocalDevAdmin1"
 _raw_admin_password = (os.getenv("NOVAFLOW_ADMIN_PASSWORD") or "").strip()
 if _raw_admin_password:
     ADMIN_PASSWORD = _raw_admin_password
-elif NOVAFLOW_ENV in ("production", "prod"):
-    ADMIN_PASSWORD = ""
 else:
     ADMIN_PASSWORD = _dev_default_admin_password
 

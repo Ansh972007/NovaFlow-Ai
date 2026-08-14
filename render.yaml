@@ -19,6 +19,8 @@ services:
         generateValue: true
       - key: ENCRYPTION_KEY
         generateValue: true
+      - key: NOVAFLOW_ADMIN_PASSWORD
+        generateValue: true
       - key: FRONTEND_URL
         sync: false # Set to your deployed Vercel frontend URL (e.g. https://your-app.vercel.app)
       - key: ALLOW_PASSWORD_LOGIN
