@@ -506,9 +506,16 @@ def patch_preferences(
 # --- WebSocket Endpoint ---
 @router.websocket("/notifications/ws")
 async def notifications_ws(websocket: WebSocket, db: Session = Depends(get_db)):
-    # Standard query token extraction
-    token = websocket.query_params.get("token") or websocket.query_params.get("t")
-    workspace_id_str = websocket.query_params.get("workspace_id")
+    token = (
+        websocket.query_params.get("token")
+        or websocket.query_params.get("t")
+        or websocket.query_params.get("access_token")
+    )
+    if not token:
+        auth = websocket.headers.get("authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+    workspace_id_str = websocket.query_params.get("workspace_id") or websocket.query_params.get("wid")
     if not token or not workspace_id_str:
         await websocket.close(code=4003)
         return

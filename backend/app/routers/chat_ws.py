@@ -30,7 +30,21 @@ def get_user_id_from_ws(websocket: WebSocket) -> int | None:
         if auth and auth.lower().startswith("bearer "):
             token = auth.split(" ", 1)[1].strip()
         if not token:
-            token = websocket.query_params.get("t") or websocket.query_params.get("token")
+            token = (
+                websocket.query_params.get("t")
+                or websocket.query_params.get("token")
+                or websocket.query_params.get("access_token")
+            )
+        if not token:
+            subprotocols = websocket.headers.get("sec-websocket-protocol", "").split(",")
+            for p in subprotocols:
+                p = p.strip()
+                if p.lower().startswith("bearer."):
+                    token = p.split(".", 1)[1].strip()
+                    break
+                elif p.lower().startswith("bearer_"):
+                    token = p.split("_", 1)[1].strip()
+                    break
     except Exception as e:
         print(f"Error extracting token from WebSocket: {e}")
         return None

@@ -31,8 +31,16 @@ def oauth_providers(db: Session = Depends(get_db)):
 def oauth_start(
     provider: str,
     return_to: str | None = None,
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
+    if not return_to and request:
+        ref = request.headers.get("referer") or request.headers.get("origin")
+        if ref and "://" in ref:
+            scheme, rest = ref.split("://", 1)
+            host = rest.split("/")[0]
+            return_to = f"{scheme}://{host}"
+
     url = build_authorize_url(provider, db, return_to=return_to)
     if not url:
         return fail(404, f"OAuth provider '{provider}' is not configured")

@@ -44,40 +44,40 @@ export function getWsQueryString() {
 /** Centralized dynamic WebSocket URL builder */
 export function getWsUrl(path) {
   const normPath = path.startsWith("/") ? path : `/${path}`;
+  const [pathname, existingQuery] = normPath.split("?");
+
+  const searchParams = new URLSearchParams(existingQuery || "");
+  if (typeof window !== "undefined") {
+    try {
+      const token = localStorage.getItem("nf_token");
+      if (token && !searchParams.has("t") && !searchParams.has("token")) {
+        searchParams.set("t", token);
+      }
+      const wid = localStorage.getItem("nf_workspace_id");
+      if (wid && !searchParams.has("workspace_id")) {
+        searchParams.set("workspace_id", wid);
+      }
+    } catch (error) {
+      console.error("Error accessing localStorage in getWsUrl:", error);
+    }
+  }
+  const queryString = searchParams.toString();
+  const finalPath = queryString ? `${pathname}?${queryString}` : pathname;
 
   // 1. Explicit WebSocket URL override
   if (process.env.NEXT_PUBLIC_WS_URL) {
     const baseWs = process.env.NEXT_PUBLIC_WS_URL.replace(/\/+$/, "");
-    return `${baseWs}${normPath}${getWsQueryString()}`;
+    return `${baseWs}${finalPath}`;
   }
 
-  // 2. Derive from configured public API URL (e.g. https://api.onrender.com -> wss://api.onrender.com)
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    try {
-      const url = new URL(process.env.NEXT_PUBLIC_API_URL);
-      const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-      return `${wsProtocol}//${url.host}${normPath}${getWsQueryString()}`;
-    } catch {
-      // fallback to standard resolution
-    }
+  // 2. Derive directly from resolved API base URL (works across Vercel -> Render and local dev)
+  const apiBase = getApiBaseUrl();
+  try {
+    const url = new URL(apiBase);
+    const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProtocol}//${url.host}${finalPath}`;
+  } catch {
+    return `ws://127.0.0.1:3001${finalPath}`;
   }
-
-  // 3. Browser runtime detection (handles localhost:3000 -> localhost:3001 and relative origins)
-  let host = "";
-  let protocol = "ws:";
-  if (typeof window !== "undefined") {
-    protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    host = window.location.port === "3000" ? `${window.location.hostname}:3001` : window.location.host;
-  } else {
-    const apiUrl = getApiBaseUrl();
-    try {
-      const url = new URL(apiUrl);
-      protocol = url.protocol === "https:" ? "wss:" : "ws:";
-      host = url.host;
-    } catch {
-      host = "127.0.0.1:3001";
-    }
-  }
-  return `${protocol}//${host}${normPath}${getWsQueryString()}`;
 }
 
