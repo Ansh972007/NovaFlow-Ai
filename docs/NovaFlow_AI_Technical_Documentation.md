@@ -762,7 +762,7 @@ To add a new custom node type to the Workflow Engine:
 | Symptom | Probable Cause | Corrective Action |
 | :--- | :--- | :--- |
 | **`Error 400: redirect_uri_mismatch`** | Google Cloud Console missing authorized callback URL. | Add `https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/callback` (and `http://localhost:3001/api/v1/auth/oauth/google/callback` for local dev) to Authorized Redirect URIs in Google Cloud Console. |
-| **`500 Internal Server Error` on Webhook** | Invalid parameter format or missing bot token. | Verify bot token in Credentials page (`https://novaflow-ai.vercel.app/credentials`). |
+| **`500 Internal Server Error` on Webhook** | Invalid parameter format or missing bot token. | Verify bot token in Credentials page (`https://nova-flow-ai-alpha.vercel.app/credentials`). |
 | **Milvus Connection Refused** | Milvus standalone container starting up or unhealthy. | System automatically operates in fallback vector mode; restart via `docker compose restart novaflow-milvus`. |
 
 ---

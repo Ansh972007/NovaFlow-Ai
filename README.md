@@ -4,7 +4,7 @@
 
 ### *Enterprise AI Operating System, Autonomous Workflow Fabric & Knowledge Engine*
 
-[![Production Live](https://img.shields.io/badge/Production%20Live-novaflow--ai.vercel.app-00C853?style=for-the-badge&logo=vercel)](https://novaflow-ai.vercel.app)
+[![Production Live](https://img.shields.io/badge/Production%20Live-nova--flow--ai--alpha.vercel.app-00C853?style=for-the-badge&logo=vercel)](https://nova-flow-ai-alpha.vercel.app)
 [![API Live](https://img.shields.io/badge/Backend%20API-novaflow--ai.onrender.com-46E3B7?style=for-the-badge&logo=render)](https://novaflow-ai.onrender.com)
 [![Swagger Docs](https://img.shields.io/badge/Swagger%20Docs-Live%20API-009688?style=for-the-badge&logo=fastapi)](https://novaflow-ai.onrender.com/docs)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
@@ -16,7 +16,7 @@
 
 **Build, automate, orchestrate, and deploy production AI agents and multi-node workflows from a single unified enterprise workspace.**
 
-[🌐 Live Production App](https://novaflow-ai.vercel.app) • [⚙️ Live Backend API](https://novaflow-ai.onrender.com) • [📑 OpenAPI Docs](https://novaflow-ai.onrender.com/docs) • [Master Technical Documentation](docs/NovaFlow_AI_Technical_Documentation.md)
+[🌐 Live Production App](https://nova-flow-ai-alpha.vercel.app) • [⚙️ Live Backend API](https://novaflow-ai.onrender.com) • [📑 OpenAPI Docs](https://novaflow-ai.onrender.com/docs) • [Master Technical Documentation](docs/NovaFlow_AI_Technical_Documentation.md)
 
 </div>
 
@@ -422,7 +422,7 @@ docker compose up -d --build
 ```
 
 Access the services:
-- 🌐 **Frontend Application**: `http://localhost:3000` (Local) / [`https://novaflow-ai.vercel.app`](https://novaflow-ai.vercel.app) (Live Production)
+- 🌐 **Frontend Application**: `http://localhost:3000` (Local) / [`https://nova-flow-ai-alpha.vercel.app`](https://nova-flow-ai-alpha.vercel.app) (Live Production)
 - ⚙️ **Backend API Gateway**: `http://localhost:3001` (Local) / [`https://novaflow-ai.onrender.com`](https://novaflow-ai.onrender.com) (Live Production)
 - 📑 **OpenAPI Swagger Docs**: `http://localhost:3001/docs` (Local) / [`https://novaflow-ai.onrender.com/docs`](https://novaflow-ai.onrender.com/docs) (Live Production)
 - 💓 **API Health Check**: `http://localhost:3001/api/health` (Local) / [`https://novaflow-ai.onrender.com/api/health`](https://novaflow-ai.onrender.com/api/health) (Live Production)
@@ -430,25 +430,128 @@ Access the services:
 
 ---
 
-## ☁️ Cloud Deployment & Production Stack
+## ☁️ Cloud Deployment & Production Architecture
 
-NovaFlow AI is deployed in production using a high-availability, free-tier multi-cloud architecture:
+NovaFlow AI operates in production on a resilient, high-performance, and cost-effective multi-cloud infrastructure designed for sub-100ms response times, zero-loss message delivery, and enterprise security compliance:
 
-### 🛠️ What We Use:
-- **Frontend**: [Vercel](https://vercel.com/) (Next.js 16 + React 19 + Turbopack)
-- **Backend API**: [Render](https://render.com/) (FastAPI + Docker Container + Uvicorn ASGI)
-- **Database**: [Supabase](https://supabase.com/) (Managed PostgreSQL 15 Relational Store)
-- **Cache & Presence**: [Upstash](https://upstash.com/) (Serverless Redis with TLS)
-- **Authentication**: Google OAuth 2.0 (Gmail) with dynamic JWT state routing
-- **Integrations**: Telegram Bot API Webhook Gateway & AI Model Providers
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   LIVE PRODUCTION TOPOLOGY                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                  │
+│  🌐 Vercel Edge Network (Global CDN)                                                             │
+│     └── Next.js 16.2.10 / React 19.2.4 Web UI  ──►  https://nova-flow-ai-alpha.vercel.app        │
+│                                                               ▲                                  │
+│                                      REST / WSS Streams       │   OAuth Return-To                │
+│                                                               ▼                                  │
+│  ⚙️ Render Web Service (Docker Linux Container)                                                  │
+│     ├── FastAPI 0.115.6 ASGI Kernel            ──►  https://novaflow-ai.onrender.com             │
+│     ├── Interactive OpenAPI Swagger            ──►  https://novaflow-ai.onrender.com/docs        │
+│     ├── Application Health Liveness Probe      ──►  https://novaflow-ai.onrender.com/api/health  │
+│     └── Full-Duplex WebSocket Streaming        ──►  wss://novaflow-ai.onrender.com               │
+│                                                               │                                  │
+│                      ┌────────────────────────────────────────┼─────────────────────────┐        │
+│                      ▼                                        ▼                         ▼        │
+│  🗄️ Supabase Cloud (PostgreSQL 15)           ⚡ Upstash Redis (TLS)         🔐 External Services │
+│     ├── Multi-Tenant Relational Data            ├── Token Session Validity (TTL)  ├── Google ID  │
+│     ├── Workflow Directed Acyclic Graphs        ├── User Presence & Heartbeats    ├── Telegram   │
+│     ├── Execution Step Histories & Logs         ├── Distributed Rate Limiting     └── LLM APIs   │
+│     └── Zero-Trust Vault Encrypted Blobs        └── Real-Time WebSocket Pub/Sub                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-### 🔗 Live Production Endpoints:
-- 🌐 **Web Application**: [`https://novaflow-ai.vercel.app`](https://novaflow-ai.vercel.app)
-- ⚙️ **Backend API Gateway**: [`https://novaflow-ai.onrender.com`](https://novaflow-ai.onrender.com)
-- 📑 **Interactive OpenAPI Docs**: [`https://novaflow-ai.onrender.com/docs`](https://novaflow-ai.onrender.com/docs)
-- 💓 **Health Check Probe**: [`https://novaflow-ai.onrender.com/api/health`](https://novaflow-ai.onrender.com/api/health)
-- 🔐 **Google OAuth Redirect URI**: `https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/callback`
-- 🤖 **Telegram Webhook**: `https://novaflow-ai.onrender.com/api/v1/integrations/telegram/webhook`
+### 🛠️ Production Stack & Technology Inventory:
+
+1. **Frontend Presentation & Edge Layer ([Vercel](https://vercel.com/))**:
+   - **Framework**: `Next.js 16.2.10` utilizing the App Router, React Server Components (RSC), and Turbopack compiler.
+   - **User Interface**: `React 19.2.4`, Framer Motion spring physics animations, custom SVG `GodBorder` telemetry containers, and Lucide React iconography.
+   - **Live Production URL**: [`https://nova-flow-ai-alpha.vercel.app`](https://nova-flow-ai-alpha.vercel.app)
+   - **Deployment Environment**: Vercel Global Edge Network with automatic Brotli/Gzip compression, instant SSL termination, and sub-second asset hydration.
+   - **Key Configuration**: Configured with `NEXT_PUBLIC_API_URL=https://novaflow-ai.onrender.com` to establish unified communication with the backend.
+
+2. **Backend Application Kernel & Streaming Gateway ([Render](https://render.com/))**:
+   - **Framework**: `FastAPI 0.115.6` running on Python 3.11+ via high-concurrency `Uvicorn` ASGI servers.
+   - **Containerization**: Standalone Linux Docker image with multi-stage build optimization and non-root execution privileges.
+   - **Live Production API Gateway**: [`https://novaflow-ai.onrender.com`](https://novaflow-ai.onrender.com)
+   - **Interactive API Documentation**: [`https://novaflow-ai.onrender.com/docs`](https://novaflow-ai.onrender.com/docs) (Swagger UI) & [`https://novaflow-ai.onrender.com/redoc`](https://novaflow-ai.onrender.com/redoc) (ReDoc).
+   - **Live Liveness & Health Probe**: [`https://novaflow-ai.onrender.com/api/health`](https://novaflow-ai.onrender.com/api/health).
+   - **Real-Time Telemetry**: Full-duplex `wss://novaflow-ai.onrender.com` WebSocket streaming for real-time LLM token generation, DAG step transitions, and system notifications.
+
+3. **Enterprise Relational Persistence Layer ([Supabase](https://supabase.com/))**:
+   - **Engine**: Managed `PostgreSQL 15` with automated connection pooling on port `6543`.
+   - **Schema Lifecycle**: Handled via `SQLAlchemy 2.0` ORM and `Alembic` auto-migrations during container initialization (`init_db()`).
+   - **Data Domain**: Stores workspace multi-tenancy mappings, user credentials, workflow AST graphs, conversation logs, and AES-256 encrypted credential blobs.
+
+4. **Distributed Caching & Real-Time Presence Layer ([Upstash](https://upstash.com/))**:
+   - **Engine**: Serverless `Redis` with end-to-end TLS encryption (`rediss://...`).
+   - **Functions**: Handles distributed rate-limiting counters (sliding window), active user presence heartbeats, session token lifecycle (`sid`), and asynchronous WebSocket pub/sub message dispatching.
+
+5. **Zero-Trust Identity & Authentication Subsystem ([Google Cloud Identity](https://console.cloud.google.com/))**:
+   - **Protocol**: `OAuth 2.0` with signed HMAC-SHA256 JWT state parameters preventing CSRF and authorization replay attacks.
+   - **Dynamic Routing**: Automatic `return_to` parameter decoding routes authenticated users seamlessly back to the Vercel production frontend.
+   - **Live OAuth Initiation**: [`https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/start`](https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/start).
+   - **Authorized Redirect URI**: `https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/callback`.
+
+6. **Omni-Channel Webhook & Integration Gateway ([Telegram Bot API](https://core.telegram.org/bots/api))**:
+   - **Webhook Endpoint**: `https://novaflow-ai.onrender.com/api/v1/integrations/telegram/webhook`.
+   - **Security**: Inbound payload verification against tenant-specific secret tokens with automated AES-256 encrypted credential retrieval.
+
+---
+
+### 📋 Production Environment Configuration Matrix:
+
+#### Render Backend Environment Variables:
+| Variable Name | Production Value / Type | Purpose & Description |
+| :--- | :--- | :--- |
+| `NOVAFLOW_ENV` | `production` | Enables strict production security headers, CSP rules, and disables debug endpoints. |
+| `DATABASE_URL` | `postgresql://...@...pooler.supabase.com:6543/postgres` | Supabase PostgreSQL connection URI with session pooler. |
+| `REDIS_URL` | `rediss://default:...@...upstash.io:6379` | Upstash Serverless Redis TLS connection string for caching and sessions. |
+| `JWT_SECRET` | `64-character hex string` | Cryptographic secret for signing and validating session access tokens. |
+| `ENCRYPTION_KEY` | `32-byte base64 string` | Master encryption key for the zero-trust AES-256-GCM Credential Vault. |
+| `FRONTEND_URL` | `https://nova-flow-ai-alpha.vercel.app` | Target frontend origin for CORS policies and OAuth redirects. |
+| `GOOGLE_CLIENT_ID` | `<client-id>.apps.googleusercontent.com` | Google Cloud OAuth 2.0 Web Application Client ID. |
+| `GOOGLE_CLIENT_SECRET` | `<google-client-secret>` | Google Cloud OAuth 2.0 Client Secret for code-to-token exchange. |
+| `ALLOW_PASSWORD_LOGIN` | `1` | Allows username and password authentication fallback. |
+| `ALLOW_PUBLIC_REGISTER` | `1` | Enables self-service registration for new tenant accounts. |
+| `GMAIL_ONLY_AUTH` | `0` | Allows general email registration while supporting Google Workspace OAuth. |
+
+#### Vercel Frontend Environment Variables:
+| Variable Name | Production Value | Purpose & Description |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_API_URL` | `https://novaflow-ai.onrender.com` | Directs all frontend REST and WebSocket API requests to the Render backend. |
+| `NEXT_PUBLIC_APP_NAME` | `NovaFlow AI` | Application branding and page title metadata. |
+| `NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED` | `true` | Enables the full real-time AIOS conversational and workflow synthesis interface. |
+
+---
+
+### 🚀 Production Deployment & Maintenance Playbook:
+
+1. **Step 1 — Database & Cache Provisioning**:
+   - Provision a PostgreSQL 15 database on [Supabase](https://supabase.com/). Copy the connection URI using the **Session Pooler (port 6543)** for optimal serverless connection handling.
+   - Provision a serverless Redis database on [Upstash](https://upstash.com/) with TLS enabled and copy the `rediss://` URL.
+
+2. **Step 2 — Backend Deployment on Render**:
+   - Create a new **Web Service** on [Render](https://render.com/) linked to the `Ansh972007/NovaFlow-Ai` GitHub repository.
+   - Set **Language / Runtime** to `Docker` and **Root Directory** to `backend`.
+   - Populate all backend environment variables from the configuration matrix above.
+   - Set the health check path to `/api/health`.
+
+3. **Step 3 — Frontend Deployment on Vercel**:
+   - Import the `Ansh972007/NovaFlow-Ai` repository into [Vercel](https://vercel.com/).
+   - Set framework preset to `Next.js` and build command to `npm run build`.
+   - Add `NEXT_PUBLIC_API_URL=https://novaflow-ai.onrender.com` to Vercel Environment Variables.
+   - Trigger deployment to generate your live domain at `https://nova-flow-ai-alpha.vercel.app`.
+
+4. **Step 4 — Google Cloud OAuth Finalization**:
+   - In [Google Cloud Console](https://console.cloud.google.com/), navigate to **APIs & Services** → **Credentials**.
+   - Under **Authorized JavaScript Origins**, add `https://nova-flow-ai-alpha.vercel.app` and `https://novaflow-ai.onrender.com`.
+   - Under **Authorized Redirect URIs**, add `https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/callback`.
+
+5. **Step 5 — Telegram Bot Gateway Integration**:
+   - Create a bot via `@BotFather` on Telegram to receive your bot token.
+   - In NovaFlow AI web interface, navigate to **Credentials Vault** (`/credentials`), click **+ Add Credential**, and enter your Telegram token.
+   - The platform automatically registers and validates the incoming webhook at `https://novaflow-ai.onrender.com/api/v1/integrations/telegram/webhook`.
 
 ---
 
