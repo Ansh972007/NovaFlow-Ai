@@ -1,8 +1,13 @@
 import axios from "axios";
 import { getApiBaseUrl } from "./config";
 
+export function getClientBaseUrl() {
+  const base = getApiBaseUrl().replace(/\/+$/, "");
+  return `${base}/api/v1`;
+}
+
 const client = axios.create({
-  baseURL: "/api/v1",
+  baseURL: getClientBaseUrl(),
   withCredentials: true,
   headers: { "Content-Type": "application/json" },
   timeout: 60000,
@@ -123,7 +128,7 @@ async function refreshAccessToken() {
       throw new Error("No refresh token");
     }
     const res = await axios.post(
-      "/api/v1/user/refresh",
+      `${getClientBaseUrl()}/user/refresh`,
       { refresh_token: refresh },
       { headers: { "Content-Type": "application/json" }, timeout: 15000 }
     );
@@ -140,6 +145,8 @@ async function refreshAccessToken() {
 }
 
 client.interceptors.request.use(async (config) => {
+  // Ensure baseURL is always dynamically up-to-date with getApiBaseUrl()
+  config.baseURL = getClientBaseUrl();
   if (typeof window !== "undefined") {
     try {
       // Proactive token refresh if token is about to expire

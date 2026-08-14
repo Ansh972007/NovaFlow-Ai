@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Logo from "@/components/Logo";
 import Magnetic from "@/components/Magnetic";
+import { getApiBaseUrl } from "@/lib/api/config";
 import { startOAuthLogin } from "@/lib/api/oauth";
 import { startSamlLogin } from "@/lib/api/saml";
 
@@ -357,7 +358,7 @@ export default function AuthFormPanel({
                           </p>
                           <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-amber-900/85">
                             <li>Create OAuth credentials in Google Cloud Console</li>
-                            <li>Set redirect URI: <code className="rounded bg-amber-100 px-1">http://localhost:3001/api/v1/auth/oauth/google/callback</code></li>
+                            <li>Set redirect URI: <code className="rounded bg-amber-100 px-1">{typeof window !== "undefined" ? `${getApiBaseUrl().replace(/\/+$/, "")}/api/v1/auth/oauth/google/callback` : "http://localhost:3001/api/v1/auth/oauth/google/callback"}</code></li>
                             <li>Add <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_ID</code> and <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_SECRET</code> to your <code className="rounded bg-amber-100 px-1">.env</code> file</li>
                             <li>Run <code className="rounded bg-amber-100 px-1">docker compose up -d --build</code></li>
                           </ol>

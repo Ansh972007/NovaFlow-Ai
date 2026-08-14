@@ -10,7 +10,7 @@ async function probe(url) {
   });
   if (!res.ok) return false;
   const data = await res.json().catch(() => ({}));
-  return data.status_code === 200 || data.ok === true;
+  return data.status_code === 200 || data.ok === true || data.status === "ok" || data.service === "novaflow-api";
 }
 
 async function probeWithRetry(url) {

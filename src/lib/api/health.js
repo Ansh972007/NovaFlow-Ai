@@ -23,7 +23,7 @@ export async function checkBackendHealth() {
           signal: AbortSignal.timeout(12_000),
         });
         const data = await direct.json().catch(() => ({}));
-        if (data.status_code === 200 || data.data?.status === "ok") {
+        if (data.status_code === 200 || data.data?.status === "ok" || data.status === "ok" || data.service === "novaflow-api") {
           return { ok: true, apiUrl };
         }
       } catch {
