@@ -53,7 +53,10 @@ function LoginForm() {
   useEffect(() => {
     probeBackend();
     getOAuthProviders()
-      .then((list) => setOauthProviders(Array.isArray(list) ? list : []))
+      .then((list) => {
+        const providers = Array.isArray(list) ? list : Array.isArray(list?.data) ? list.data : [];
+        setOauthProviders(providers);
+      })
       .catch(() => setOauthProviders([]));
     getLdapStatus()
       .then((s) => setLdapEnabled(!!s?.enabled))

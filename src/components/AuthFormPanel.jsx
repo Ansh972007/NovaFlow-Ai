@@ -174,9 +174,16 @@ export default function AuthFormPanel({
     }
   }
 
+  const providers = Array.isArray(oauthProviders)
+    ? oauthProviders
+    : Array.isArray(oauthProviders?.data)
+      ? oauthProviders.data
+      : [];
   const showPasswordForm = passwordLogin || ldapEnabled;
-  const showOAuth = oauthProviders.length > 0 || samlEnabled;
-  const googleProvider = oauthProviders.find((p) => p.id === "google");
+  const showOAuth = providers.length > 0 || samlEnabled;
+  const googleProvider = providers.find(
+    (p) => p && (p.id === "google" || p.id === "gmail" || p.name?.toLowerCase() === "google")
+  );
   const showOAuthConfigWarning = !showPasswordForm && !googleProvider;
 
   if (!clientReady) {
@@ -508,7 +515,7 @@ export default function AuthFormPanel({
                             SAML SSO
                           </button>
                         )}
-                        {oauthProviders.map((provider) => (
+                        {providers.map((provider) => (
                           <button
                             key={provider.id}
                             type="button"
@@ -516,7 +523,7 @@ export default function AuthFormPanel({
                             onClick={() => startOAuthLogin(provider.id)}
                             className="flex items-center justify-center gap-2 rounded-full border border-border bg-white py-3 text-sm font-semibold transition hover:bg-surface disabled:opacity-50"
                           >
-                            {provider.label}
+                            {provider.label || provider.id}
                           </button>
                         ))}
                       </div>
