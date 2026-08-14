@@ -8,7 +8,7 @@ This guide provides the complete, step-by-step instructions for deploying NovaFl
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  GitHub Repository (Source)                                                 │
 │    ├── Vercel Web Service       ──►  Next.js 16 / React 19 Frontend         │
-│    ├── Render Web Service       ──►  FastAPI Python Backend ASGI Kernel     │
+│    ├── Render Web Service       ──►  FastAPI Backend (Docker Container)     │
 │    ├── Supabase Project         ──►  Cloud PostgreSQL 15 Relational DB      │
 │    ├── Upstash Redis            ──►  Serverless Redis Cache & Presence      │
 │    └── External Services        ──►  LLM Providers, Telegram & Google OAuth │
@@ -22,7 +22,7 @@ This guide provides the complete, step-by-step instructions for deploying NovaFl
 1. [Prerequisites](#1-prerequisites)
 2. [Step 1: Database Setup (Supabase PostgreSQL)](#2-step-1-database-setup-supabase-postgresql)
 3. [Step 2: Cache & Presence Setup (Upstash Redis)](#3-step-2-cache--presence-setup-upstash-redis)
-4. [Step 3: Backend Deployment (Render Web Service)](#4-step-3-backend-deployment-render-web-service)
+4. [Step 3: Backend Deployment (Render Web Service via Docker)](#4-step-3-backend-deployment-render-web-service-via-docker)
 5. [Step 4: Frontend Deployment (Vercel)](#5-step-4-frontend-deployment-vercel)
 6. [Step 5: Database Migrations](#6-step-5-database-migrations)
 7. [Step 6: Telegram Webhook & Integration Setup](#7-step-6-telegram-webhook--integration-setup)
@@ -68,23 +68,17 @@ Before starting, create free accounts on the following platforms:
 
 ---
 
-## 4. Step 3: Backend Deployment (Render Web Service)
+## 4. Step 3: Backend Deployment (Render Web Service via Docker)
 
 1. Log into **[Render Dashboard](https://dashboard.render.com/)**.
 2. Click **New +** → **Web Service** → Connect your **`NovaFlow-Ai`** GitHub repository.
 3. Configure the service settings:
    - **Name**: `novaflow-api`
-   - **Region**: Same or close to your Supabase region.
+   - **Region**: Singapore (or nearest to your Supabase region)
+   - **Language / Environment**: `Docker`
    - **Root Directory**: `backend`
-   - **Environment / Runtime**: `Python 3`
-   - **Build Command**:
-     ```bash
-     pip install --no-cache-dir -r requirements.txt
-     ```
-   - **Start Command**:
-     ```bash
-     uvicorn app.main:app --host 0.0.0.0 --port $PORT
-     ```
+   - **Dockerfile Path**: `Dockerfile` (or leave default)
+   - **Docker Context**: `.` (or leave default)
    - **Plan**: `Free`
 4. Under **Advanced** → **Health Check Path**, enter: `/health`
 5. Under **Environment Variables**, add the following:

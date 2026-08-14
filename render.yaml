@@ -1,11 +1,11 @@
 services:
   - type: web
     name: novaflow-api
-    env: python
+    env: docker
     rootDir: backend
+    dockerfilePath: Dockerfile
+    dockerContext: .
     plan: free
-    buildCommand: pip install --no-cache-dir -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeploy: true
     envVars:

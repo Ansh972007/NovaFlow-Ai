@@ -435,7 +435,7 @@ NovaFlow AI is 100% production-ready for free, Git-based cloud hosting without r
 ```
 GitHub Repository (Source)
   ├── Vercel Web Service       ──►  Next.js 16 / React 19 Frontend
-  ├── Render Web Service       ──►  FastAPI Python Backend ASGI Kernel
+  ├── Render Web Service       ──►  FastAPI Backend (Docker Container)
   ├── Supabase Project         ──►  Cloud PostgreSQL 15 Database
   ├── Upstash Redis            ──►  Serverless Redis Cache & Presence
   └── External Services        ──►  LLM Providers, Telegram & Google OAuth
@@ -444,7 +444,7 @@ GitHub Repository (Source)
 ### Quick Deployment Steps:
 1. **Database**: Create a free PostgreSQL instance on [Supabase](https://supabase.com/).
 2. **Redis**: Create a free serverless Redis database on [Upstash](https://upstash.com/).
-3. **Backend**: Deploy `backend/` to [Render](https://render.com/) Web Service using `render.yaml` or python uvicorn start command.
+3. **Backend**: Deploy `backend/` to [Render](https://render.com/) Web Service using **Docker** environment (`Root Directory = backend`, `Dockerfile = Dockerfile`).
 4. **Frontend**: Deploy root repository to [Vercel](https://vercel.com/) with `NEXT_PUBLIC_API_URL=https://your-backend.onrender.com`.
 5. **Telegram**: Register public bot webhook directly via the Credentials Vault in the web UI.
 
