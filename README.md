@@ -656,3 +656,14 @@ NovaFlow AI is advancing from **No-Code Visual Graphing** to **Zero-Code Autonom
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
 Developed with ❤️ by **[Ansh Vekariya](https://github.com/Ansh972007)** and the NovaFlow AI Engineering Team.
+
+---
+
+<div align="center">
+
+### ⭐ Support the Project
+**If you find NovaFlow AI useful, interesting, or exciting, please consider starring the repository on GitHub! It helps support open-source innovation and continuous improvements.**
+
+[![Star on GitHub](https://img.shields.io/github/stars/Ansh972007/NovaFlow-Ai?style=social)](https://github.com/Ansh972007/NovaFlow-Ai)
+
+</div>

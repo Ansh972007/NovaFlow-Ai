@@ -1138,7 +1138,7 @@ def test_friendly_summary_no_uuid_and_email_goal():
                 "recipe_name": "Generic Field Automation",
                 "node_types": ["trigger", "llm", "notify", "output"],
                 "missing_credentials": ["smtp_password"],
-                "goal": "send emails daily to kishorevekariya70@gmail.com government",
+                "goal": "send emails daily to team@example.com government",
             },
         },
         {"type": "aios_credentials_needed", "data": {"missing": ["smtp_password"]}},
@@ -1146,11 +1146,11 @@ def test_friendly_summary_no_uuid_and_email_goal():
     ]
     text = friendly_summary(
         events,
-        goal="hello my name is Ansh and I need to send emails daily on this subject on kishorevekariya70@gmail.com government",
+        goal="hello my name is Alex and I need to send emails daily on this subject on team@example.com government",
     )
     assert "cba695b62ffb47e7aee3e915fe1cef58" not in text
     assert "Generic Field Automation" not in text
-    assert "kishorevekariya70@gmail.com" in text
+    assert "team@example.com" in text
     assert "email password" in text.lower() or "smtp" not in text.lower()
     assert "Approve" in text or "Credentials" in text or "credential" in text.lower()
 
@@ -1159,9 +1159,9 @@ def test_friendly_summary_no_uuid_and_email_goal():
     assert "for me" in polished.lower()
 
     email_polished = polish_transcript(
-        "send daily email to kishore at gmail dot com about government updates"
+        "send daily email to partner at gmail dot com about government updates"
     )
-    assert "kishore@gmail.com" in email_polished.lower()
+    assert "partner@gmail.com" in email_polished.lower()
 
 
 def test_nl_credential_extract_gmail_app_password():

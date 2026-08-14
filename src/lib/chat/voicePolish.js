@@ -20,7 +20,7 @@ const WORD_FIXES = [
 
 /**
  * Convert spoken email fragments into an address when possible.
- * e.g. "kishore at gmail dot com" → kishore@gmail.com
+ * e.g. "alex at gmail dot com" → alex@gmail.com
  */
 export function polishSpokenEmail(text) {
   let t = String(text || "");
