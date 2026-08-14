@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      gcc default-libmysqlclient-dev curl \
+      gcc default-libmysqlclient-dev libpq-dev curl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 novaflow \
     && useradd --system --uid 1001 -g novaflow novaflow
