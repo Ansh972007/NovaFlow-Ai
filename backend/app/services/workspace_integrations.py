@@ -32,6 +32,15 @@ def get_or_create(db: Session, workspace_id: int) -> WorkspaceIntegration:
     return row
 
 
+def _gmail_oauth_enabled(db: Session, workspace_id: int) -> bool:
+    try:
+        from app.services.gmail_jira import gmail_oauth_enabled_for_workspace
+
+        return bool(gmail_oauth_enabled_for_workspace(db, workspace_id))
+    except Exception:
+        return False
+
+
 def resolve_telegram_token(
     db: Session,
     workspace_id: int | None,
@@ -321,7 +330,7 @@ def integrations_dict(db: Session, workspace_id: int) -> dict:
             "source": "oauth"
             if oauth_connected and auth_mode == "oauth"
             else ("workspace" if row.smtp_host or row.smtp_user else ("env" if SMTP_HOST else "none")),
-            "oauth_enabled": gmail_oauth_enabled_for_workspace(db, workspace_id),
+            "oauth_enabled": _gmail_oauth_enabled(db, workspace_id),
             "oauth_connected": oauth_connected,
             "oauth_email": row.gmail_oauth_email or "",
             "oauth_connected_at": row.gmail_oauth_connected_at.isoformat() if row.gmail_oauth_connected_at else None,
