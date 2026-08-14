@@ -100,6 +100,7 @@ export default function AuthFormPanel({
   switchMode,
   handleSubmit,
   oauthProviders = [],
+  loadingProviders = false,
   ldapEnabled = false,
   samlEnabled = false,
   passwordLogin = false,
@@ -184,7 +185,7 @@ export default function AuthFormPanel({
   const googleProvider = providers.find(
     (p) => p && (p.id === "google" || p.id === "gmail" || p.name?.toLowerCase() === "google")
   );
-  const showOAuthConfigWarning = !showPasswordForm && !googleProvider;
+  const showOAuthConfigWarning = !loadingProviders && !showPasswordForm && !googleProvider;
 
   if (!clientReady) {
     return (
@@ -327,7 +328,7 @@ export default function AuthFormPanel({
                     </div>
                   </div>
 
-                  {(showOAuth || showOAuthConfigWarning) && !showPasswordForm && (
+                  {(showOAuth || showOAuthConfigWarning || loadingProviders) && !showPasswordForm && (
                     <div className="mt-8 space-y-4">
                       {error && (
                         <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -356,7 +357,13 @@ export default function AuthFormPanel({
                           SAML SSO
                         </button>
                       )}
-                      {!googleProvider && (
+                      {loadingProviders && !googleProvider && (
+                        <div className="flex w-full items-center justify-center gap-2 rounded-full border border-border bg-surface py-4 text-sm text-muted">
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-foreground" />
+                          Checking authentication providers…
+                        </div>
+                      )}
+                      {!loadingProviders && !googleProvider && (
                         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-950">
                           <p className="font-semibold">Google sign-in is not configured yet</p>
                           <p className="mt-2 text-amber-900/90">

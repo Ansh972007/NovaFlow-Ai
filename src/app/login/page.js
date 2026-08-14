@@ -37,6 +37,7 @@ function LoginForm() {
   const [passwordLogin, setPasswordLogin] = useState(false);
   const [gmailOnly, setGmailOnly] = useState(true);
   const [resetMode, setResetMode] = useState(false);
+  const [loadingProviders, setLoadingProviders] = useState(true);
 
   async function probeBackend() {
     setCheckingBackend(true);
@@ -52,19 +53,19 @@ function LoginForm() {
 
   useEffect(() => {
     probeBackend();
-    getOAuthProviders()
+    const p1 = getOAuthProviders()
       .then((list) => {
         const providers = Array.isArray(list) ? list : Array.isArray(list?.data) ? list.data : [];
         setOauthProviders(providers);
       })
       .catch(() => setOauthProviders([]));
-    getLdapStatus()
+    const p2 = getLdapStatus()
       .then((s) => setLdapEnabled(!!s?.enabled))
       .catch(() => setLdapEnabled(false));
-    getSamlStatus()
+    const p3 = getSamlStatus()
       .then((s) => setSamlEnabled(!!s?.enabled))
       .catch(() => setSamlEnabled(false));
-    getLoginMode()
+    const p4 = getLoginMode()
       .then((mode) => {
         setPasswordLogin(!!mode?.password_login);
         setGmailOnly(!!mode?.gmail_only);
@@ -73,6 +74,10 @@ function LoginForm() {
         setPasswordLogin(false);
         setGmailOnly(true);
       });
+
+    Promise.allSettled([p1, p2, p3, p4]).finally(() => {
+      setLoadingProviders(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -204,6 +209,7 @@ function LoginForm() {
           switchMode={switchMode}
           handleSubmit={handleSubmit}
           oauthProviders={oauthProviders}
+          loadingProviders={loadingProviders}
           ldapEnabled={ldapEnabled}
           samlEnabled={samlEnabled}
           passwordLogin={passwordLogin}

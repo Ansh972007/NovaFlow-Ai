@@ -178,10 +178,23 @@ client.interceptors.request.use(async (config) => {
 
 client.interceptors.response.use(
   (response) => {
-    if (response.data?.status_code === 200) {
-      return response.data.data;
+    const data = response.data;
+    if (data && typeof data === "object") {
+      if (data.status_code === 200) {
+        return data.data !== undefined ? data.data : data;
+      }
+      if (data.code === 200) {
+        return data.data !== undefined ? data.data : data;
+      }
+      if (data.status_code && data.status_code !== 200) {
+        const msg = data.status_message || data.detail || "Request failed";
+        return Promise.reject(new Error(msg));
+      }
     }
-    const message = response.data?.status_message || "Request failed";
+    if (response.status >= 200 && response.status < 300) {
+      return data;
+    }
+    const message = data?.status_message || data?.detail || "Request failed";
     return Promise.reject(new Error(message));
   },
   async (error) => {
