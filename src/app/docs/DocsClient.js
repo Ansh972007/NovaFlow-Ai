@@ -24,6 +24,7 @@ const CATEGORY_STATS = {
   digests: 5,
   prompts: 5,
   nodes: 12,
+  deployment: 5,
 };
 
 const INNER_POOL = ["matrix", "constellation", "radar", "orbit", "cascade", "pulsefield", "stream", "hex"];

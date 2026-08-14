@@ -93,17 +93,17 @@ Before starting, create free accounts on the following platforms:
 | `ALLOW_PASSWORD_LOGIN` | `1` | Allows username & password login. |
 | `ALLOW_PUBLIC_REGISTER` | `1` | Allows new user registration. |
 | `GMAIL_ONLY_AUTH` | `0` | Allows any email address to register. |
-| `FRONTEND_URL` | `https://your-app.vercel.app` | Updated in Step 4. |
+| `FRONTEND_URL` | `https://novaflow-ai.vercel.app` | Updated in Step 4. |
 
 6. Click **Create Web Service**. Render will build and launch your backend at:
-   `https://novaflow-api.onrender.com`
+   `https://novaflow-ai.onrender.com`
 
 ---
 
 ## 5. Step 4: Frontend Deployment (Vercel)
 
 1. Log into **[Vercel Dashboard](https://vercel.com/dashboard)**.
-2. Click **Add New...** → **Project** → Import your **`NovaFlow-Ai`** GitHub repository.
+2. Click **Add New...** → **Project** → Import your **`NovaFlow-Ai`** GitHub repository (`Ansh972007/NovaFlow-Ai`).
 3. In the project configuration:
    - **Framework Preset**: `Next.js`
    - **Root Directory**: `./` (leave default repository root)
@@ -113,13 +113,13 @@ Before starting, create free accounts on the following platforms:
 
 | Key | Value | Description |
 | :--- | :--- | :--- |
-| `NEXT_PUBLIC_API_URL` | `https://novaflow-api.onrender.com` | Your Render Backend URL from Step 3. |
+| `NEXT_PUBLIC_API_URL` | `https://novaflow-ai.onrender.com` | Your Render Backend URL from Step 3. |
 | `NEXT_PUBLIC_APP_NAME` | `NovaFlow AI` | App Brand Title. |
 | `NEXT_PUBLIC_UNIVERSAL_CHAT_ENABLED` | `true` | Enables real-time AIOS Chat. |
 
 5. Click **Deploy**. Vercel will build and publish your frontend at:
-   `https://your-app.vercel.app`
-6. *(Important)* Return to your Render backend dashboard and update `FRONTEND_URL` to your Vercel URL (`https://your-app.vercel.app`).
+   `https://novaflow-ai.vercel.app`
+6. *(Important)* Return to your Render backend dashboard and ensure `FRONTEND_URL` is set to `https://novaflow-ai.vercel.app`.
 
 ---
 
@@ -140,11 +140,11 @@ alembic upgrade head
 
 1. Message **`@BotFather`** on Telegram and create a bot using `/newbot`.
 2. Copy your **Bot Token** (e.g. `123456789:ABCdef...`).
-3. Log into your deployed NovaFlow web app at `https://your-app.vercel.app`.
+3. Log into your deployed NovaFlow web app at `https://novaflow-ai.vercel.app`.
 4. Navigate to **Credentials Vault** → Click **+ Add Credential** → Choose **Telegram Bot Token** → Enter your token.
 5. In your workflow canvas, add a **Telegram Trigger** or **Notify Node**.
 6. The public webhook is automatically registered at:
-   `https://novaflow-api.onrender.com/api/v1/integrations/telegram/webhook/<workflow_id>`
+   `https://novaflow-ai.onrender.com/api/v1/integrations/telegram/webhook/<workflow_id>`
 7. Test your bot on any mobile device by sending **`/greetings`**!
 
 ---
@@ -152,10 +152,10 @@ alembic upgrade head
 ## 8. Step 7: Production Verification & Smoke Testing
 
 Verify the deployed stack with these checks:
-1. **Liveness Probe**: Open `https://novaflow-api.onrender.com/health` → Should return `{"status": "ok", "service": "novaflow-api"}`.
-2. **Swagger Docs**: Open `https://novaflow-api.onrender.com/docs` → Browse interactive OpenAPI documentation.
-3. **Frontend Hydration**: Open `https://your-app.vercel.app` → Register an admin account and log in.
-4. **WebSocket Test**: Open the **Chat** page → Send a prompt → Verify real-time streaming tokens and action card rendering.
+1. **Liveness Probe**: Open `https://novaflow-ai.onrender.com/api/health` → Should return `{"status": "ok", "service": "novaflow-api"}`.
+2. **Swagger Docs**: Open `https://novaflow-ai.onrender.com/docs` → Browse interactive OpenAPI documentation.
+3. **Frontend Hydration**: Open `https://novaflow-ai.vercel.app` → Register an account and log in.
+4. **WebSocket Test**: Open the **Chat** page → Send a prompt → Verify real-time streaming tokens and action card rendering over `wss://novaflow-ai.onrender.com`.
 5. **Workflow Execution**: Build a 3-node workflow and click **Run** → Verify execution step logs in **Runs** history.
 
 ---
@@ -169,10 +169,10 @@ Verify the deployed stack with these checks:
 ### Google OAuth `redirect_uri_mismatch`
 - In **Google Cloud Console**, add your production callback URL under **Authorized redirect URIs**:
   ```text
-  https://novaflow-api.onrender.com/api/v1/integrations/gmail/oauth/callback
-  https://novaflow-api.onrender.com/api/v1/auth/oauth/google/callback
+  https://novaflow-ai.onrender.com/api/v1/integrations/gmail/oauth/callback
+  https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/callback
   ```
 
 ---
 
-🎉 **Congratulations! Your NovaFlow AI platform is now live in production!**
+🎉 **Congratulations! Your NovaFlow AI platform is now live in production at https://novaflow-ai.vercel.app!**

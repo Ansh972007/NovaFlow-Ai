@@ -6,6 +6,7 @@ export const DOC_CATEGORIES = [
   { id: "digests", label: "Digests", desc: "Scheduled delivery", borderAnim: "shimmer", innerAnim: "nodes" },
   { id: "prompts", label: "Apps & prompts", desc: "Assistant presets", borderAnim: "pulse", innerAnim: "wave" },
   { id: "nodes", label: "Node reference", desc: "How pieces connect", borderAnim: "trace", innerAnim: "spark" },
+  { id: "deployment", label: "Cloud Deployment", desc: "Vercel, Render & URLs", borderAnim: "beam", innerAnim: "orbit" },
 ];
 
 export const NODE_TYPES = [
@@ -565,6 +566,116 @@ export const TEMPLATE_DOCS = [
     integrations: ["LLM provider"],
     tips: ["Use enrich workflow for bulk email polish."],
     links: [{ href: "/projects?tab=assistants", label: "Projects" }],
+  },
+  {
+    id: "deploy_vercel",
+    category: "deployment",
+    name: "Vercel Frontend (Next.js 16)",
+    desc: "Production Web UI & Edge Deployment",
+    tagline: "Live App: https://novaflow-ai.vercel.app",
+    nodes: ["Next.js 16", "React 19", "Turbopack", "Vercel Edge"],
+    configure: [
+      { title: "Connect GitHub", detail: "Import Ansh972007/NovaFlow-Ai repository into Vercel Dashboard.", href: "https://vercel.com/new" },
+      { title: "Configure NEXT_PUBLIC_API_URL", detail: "Set NEXT_PUBLIC_API_URL=https://novaflow-ai.onrender.com", href: "/settings" },
+      { title: "Deploy", detail: "Trigger automatic build with Next.js 16 Turbopack optimization.", href: "https://novaflow-ai.vercel.app" },
+    ],
+    integrations: ["Vercel", "GitHub Actions", "Turbopack"],
+    tips: [
+      "All WebSocket traffic routes automatically to wss://novaflow-ai.onrender.com.",
+      "Live deployment is accessible worldwide at https://novaflow-ai.vercel.app."
+    ],
+    links: [
+      { href: "https://novaflow-ai.vercel.app", label: "Live Frontend ↗" },
+      { href: "https://github.com/Ansh972007/NovaFlow-Ai", label: "GitHub Repo ↗" },
+    ],
+  },
+  {
+    id: "deploy_render",
+    category: "deployment",
+    name: "Render Docker API (FastAPI)",
+    desc: "Production Backend & WebSocket Gateway",
+    tagline: "Live API: https://novaflow-ai.onrender.com",
+    nodes: ["FastAPI 0.115", "Docker", "Python 3.11+", "Uvicorn"],
+    configure: [
+      { title: "Render Web Service", detail: "Deploy Docker environment with Root Directory = backend.", href: "https://dashboard.render.com" },
+      { title: "Configure Environment", detail: "Set DATABASE_URL (Supabase), REDIS_URL (Upstash), JWT_SECRET, and ENCRYPTION_KEY.", href: "/credentials" },
+      { title: "Health Check", detail: "Probe GET /api/health to confirm Uvicorn application lifecycle.", href: "https://novaflow-ai.onrender.com/api/health" },
+    ],
+    integrations: ["Render", "Docker", "FastAPI", "Uvicorn"],
+    tips: [
+      "Swagger OpenAPI documentation is interactive at https://novaflow-ai.onrender.com/docs.",
+      "Render automatically handles TLS termination and HTTP/2 WebSocket streaming."
+    ],
+    links: [
+      { href: "https://novaflow-ai.onrender.com/docs", label: "Swagger Docs ↗" },
+      { href: "https://novaflow-ai.onrender.com/api/health", label: "API Health ↗" },
+    ],
+  },
+  {
+    id: "deploy_oauth",
+    category: "deployment",
+    name: "Google OAuth (Gmail) Login",
+    desc: "Zero-Trust Enterprise Authentication",
+    tagline: "Callback: https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/callback",
+    nodes: ["Google Cloud Console", "OAuth 2.0", "JWT State", "Gmail Security"],
+    configure: [
+      { title: "Google Cloud Console", detail: "Create an OAuth 2.0 Client ID under APIs & Services → Credentials.", href: "https://console.cloud.google.com" },
+      { title: "Authorized Redirect URI", detail: "Add https://novaflow-ai.onrender.com/api/v1/auth/oauth/google/callback", href: "/settings" },
+      { title: "Set Render Environment", detail: "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to Render dashboard.", href: "/login" },
+    ],
+    integrations: ["Google Identity", "Gmail OAuth", "OpenID Connect"],
+    tips: [
+      "NovaFlow embeds return_to dynamically in the signed JWT state to automatically route back to Vercel.",
+      "Set GMAIL_ONLY_AUTH=1 if you wish to restrict authentication strictly to @gmail.com accounts."
+    ],
+    links: [
+      { href: "/login", label: "Login Page" },
+      { href: "https://console.cloud.google.com", label: "Google Console ↗" },
+    ],
+  },
+  {
+    id: "deploy_db",
+    category: "deployment",
+    name: "Supabase & Upstash Infrastructure",
+    desc: "Managed PostgreSQL & Serverless Redis",
+    tagline: "Cloud Relational Store & Distributed Presence",
+    nodes: ["Supabase PostgreSQL", "Upstash Redis TLS", "Milvus Vector Store", "Alembic"],
+    configure: [
+      { title: "Supabase Database", detail: "Provision a free PostgreSQL 15 instance and copy session pooler URI on port 6543.", href: "https://supabase.com" },
+      { title: "Upstash Redis", detail: "Create a serverless Redis database with TLS (rediss:// connection string).", href: "https://upstash.com" },
+      { title: "Auto-Migration", detail: "NovaFlow runs schema migrations on container startup automatically.", href: "/developer" },
+    ],
+    integrations: ["Supabase", "Upstash", "PostgreSQL", "Redis"],
+    tips: [
+      "Compatible with pgvector or standalone Milvus instances for high-throughput vector search.",
+      "Connection pooling is optimized for low-latency serverless execution."
+    ],
+    links: [
+      { href: "/developer", label: "Developer Hub" },
+      { href: "https://supabase.com", label: "Supabase Console ↗" },
+    ],
+  },
+  {
+    id: "deploy_telegram",
+    category: "deployment",
+    name: "Telegram Bot Integration Gateway",
+    desc: "Multi-Tenant Conversational Webhooks",
+    tagline: "Webhook: https://novaflow-ai.onrender.com/api/v1/integrations/telegram/webhook",
+    nodes: ["Telegram Bot API", "FastAPI Gateway", "AES-256 Vault", "Webhook Dispatch"],
+    configure: [
+      { title: "Create Bot with @BotFather", detail: "Generate a Telegram Bot token and save it to the Credential Vault.", href: "/credentials" },
+      { title: "Register Webhook", detail: "Point webhook to https://novaflow-ai.onrender.com/api/v1/integrations/telegram/webhook", href: "/settings" },
+      { title: "Chat in Telegram", detail: "Send commands or questions directly from mobile or desktop Telegram apps.", href: "/chat" },
+    ],
+    integrations: ["Telegram", "Webhook", "Credential Vault"],
+    tips: [
+      "Supports multi-assistant routing, audio transcripts, and automated notifications.",
+      "Webhook secret token verification prevents spoofed incoming messages."
+    ],
+    links: [
+      { href: "/credentials", label: "Credential Vault" },
+      { href: "https://t.me/BotFather", label: "Telegram BotFather ↗" },
+    ],
   },
 ];
 
