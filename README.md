@@ -509,11 +509,17 @@ This engineering document provides complete implementation specifications across
 
 ---
 
-## 🗺️ Future Roadmap
+## 🗺️ Future Roadmap & Strategic Vision
 
-- [ ] **Multi-Agent Swarm Debate**: Autonomous multi-agent consensus voting on complex coding and analytical tasks.
-- [ ] **WASM Sandboxed Execution**: In-browser WebAssembly execution for ultra-fast, zero-overhead code nodes.
-- [ ] **Fine-Tuning Flywheel**: Direct conversion of production execution traces into instruction-tuning datasets.
+NovaFlow AI is advancing from **No-Code Visual Graphing** to **Zero-Code Autonomous Conversational Automation**, empowering non-technical operators to build, run, and scale enterprise automation entirely through chat:
+
+- [ ] **Zero-Barrier Conversational Synthesis**: Non-technical users build complex multi-step pipelines through plain natural language prompts without touching node graphs.
+- [ ] **Conversational Delta Refinement**: Modify and adjust live workflows iteratively via chat (*"Route VIP emails to priority Slack"*).
+- [ ] **Self-Healing Supervisor**: Autonomous anomaly recovery, schema-drift correction, and fallback routing for failing third-party APIs.
+- [ ] **Voice-First Executive Operations**: Real-time hands-free voice streaming for triggering and monitoring workflows on mobile.
+- [ ] **Multi-Modal Document-to-Workflow**: Drop spreadsheets, PDFs, and invoices into chat to instantly generate recurring automated ETL pipelines.
+- [ ] **Multi-Agent Swarm Debate & Consensus**: Autonomous subagent verification for high-stakes business decisions.
+- [ ] **Continuous Fine-Tuning Flywheel**: Converting production traces into fine-tuning datasets for sovereign local LLMs.
 
 ---
 
