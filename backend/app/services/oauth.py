@@ -97,10 +97,13 @@ def redirect_uri(provider: str, db: Session | None = None, workspace_id: int | N
     return f"{base}/api/v1/auth/oauth/{provider}/callback"
 
 
-def create_oauth_state(provider: str) -> str:
+def create_oauth_state(provider: str, return_to: str | None = None) -> str:
     expire = datetime.utcnow() + timedelta(minutes=10)
+    payload = {"provider": provider, "nonce": secrets.token_urlsafe(12), "exp": expire}
+    if return_to:
+        payload["return_to"] = return_to.strip().rstrip("/")
     return jwt.encode(
-        {"provider": provider, "nonce": secrets.token_urlsafe(12), "exp": expire},
+        payload,
         JWT_SECRET,
         algorithm="HS256",
     )
@@ -114,7 +117,21 @@ def verify_oauth_state(state: str, provider: str) -> bool:
         return False
 
 
-def build_authorize_url(provider: str, db: Session | None = None) -> str | None:
+def decode_oauth_state(state: str, provider: str) -> dict[str, Any] | None:
+    try:
+        payload = jwt.decode(state, JWT_SECRET, algorithms=["HS256"])
+        if payload.get("provider") == provider:
+            return payload
+        return None
+    except JWTError:
+        return None
+
+
+def build_authorize_url(
+    provider: str,
+    db: Session | None = None,
+    return_to: str | None = None,
+) -> str | None:
     cfg = _provider_config(db).get(provider)
     if not cfg or not cfg["client_id"] or not cfg["client_secret"]:
         return None
@@ -123,7 +140,7 @@ def build_authorize_url(provider: str, db: Session | None = None) -> str | None:
         "redirect_uri": redirect_uri(provider),
         "response_type": "code",
         "scope": cfg["scope"],
-        "state": create_oauth_state(provider),
+        "state": create_oauth_state(provider, return_to=return_to),
         "access_type": "online",
         "prompt": "select_account",
     }
@@ -253,6 +270,6 @@ def find_or_create_oauth_user(
     return user
 
 
-def frontend_callback_url(access_token: str) -> str:
-    base = FRONTEND_URL.rstrip("/")
+def frontend_callback_url(access_token: str, base_url: str | None = None) -> str:
+    base = (base_url or FRONTEND_URL or "http://localhost:3000").rstrip("/")
     return f"{base}/login/oauth-callback?token={access_token}"

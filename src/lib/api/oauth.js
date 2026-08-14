@@ -24,6 +24,8 @@ export async function getOAuthProviders() {
 
 export function startOAuthLogin(provider) {
   const base = getApiBaseUrl().replace(/\/+$/, "");
-  window.location.href = `${base}/api/v1/auth/oauth/${provider}/start`;
+  const returnTo = typeof window !== "undefined" && window.location?.origin ? window.location.origin : "";
+  const query = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "";
+  window.location.href = `${base}/api/v1/auth/oauth/${provider}/start${query}`;
 }
 
