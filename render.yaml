@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: novaflow-api
+    env: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NOVAFLOW_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # Set to your Supabase PostgreSQL connection string
+      - key: REDIS_URL
+        sync: false # Set to your Upstash Redis connection string (e.g. rediss://...)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false # Set to your deployed Vercel frontend URL (e.g. https://your-app.vercel.app)
+      - key: ALLOW_PASSWORD_LOGIN
+        value: "1"
+      - key: ALLOW_PUBLIC_REGISTER
+        value: "1"
+      - key: GMAIL_ONLY_AUTH
+        value: "0"

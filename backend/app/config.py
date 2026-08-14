@@ -10,12 +10,19 @@ DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-PORT = int(os.getenv("NOVAFLOW_PORT", "3001"))
+PORT = int(os.getenv("PORT") or os.getenv("NOVAFLOW_PORT", "3001"))
 NOVAFLOW_ENV = os.getenv("NOVAFLOW_ENV", "development")
-DATABASE_URL = os.getenv(
+
+_raw_db_url = os.getenv(
     "DATABASE_URL",
     f"sqlite:///{(DATA_DIR / 'novaflow.db').as_posix()}",
 )
+# Normalize Supabase / Heroku legacy postgres:// schema to standard postgresql://
+if _raw_db_url.startswith("postgres://"):
+    DATABASE_URL = _raw_db_url.replace("postgres://", "postgresql://", 1)
+else:
+    DATABASE_URL = _raw_db_url
+
 REDIS_URL = os.getenv("REDIS_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "novaflow-dev-secret-change-in-prod")
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "72"))
@@ -55,12 +62,21 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 MICROSOFT_CLIENT_ID = os.getenv("MICROSOFT_CLIENT_ID", "")
 MICROSOFT_CLIENT_SECRET = os.getenv("MICROSOFT_CLIENT_SECRET", "")
-OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", f"http://localhost:{PORT}")
+
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-# Public HTTPS base for Telegram/Slack webhooks (e.g. ngrok URL). Set via .env or scripts/start-with-ngrok.*
+# Public HTTPS base for Telegram/Slack webhooks & Render external domain
 PUBLIC_BASE_URL = (
-    os.getenv("NOVAFLOW_PUBLIC_BASE_URL", os.getenv("PUBLIC_BASE_URL", "")).strip().rstrip("/")
-)
+    os.getenv("NOVAFLOW_PUBLIC_BASE_URL")
+    or os.getenv("PUBLIC_BASE_URL")
+    or os.getenv("RENDER_EXTERNAL_URL")
+    or ""
+).strip().rstrip("/")
+
+OAUTH_REDIRECT_BASE = (
+    os.getenv("OAUTH_REDIRECT_BASE")
+    or PUBLIC_BASE_URL
+    or f"http://localhost:{PORT}"
+).rstrip("/")
 OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", FRONTEND_URL)
 OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "NovaFlow AI")
 

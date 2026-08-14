@@ -39,6 +39,7 @@
 - [WebSocket Protocols](#-websocket-protocols)
 - [Database Schema & ER Model](#-database-schema--er-model)
 - [Quickstart & Installation](#-quickstart--installation)
+- [☁️ Free Cloud Deployment (Vercel + Render)](#-free-cloud-deployment-vercel--render--supabase--upstash)
 - [Configuration & Environment Variables](#-configuration--environment-variables)
 - [Testing & Quality Verification](#-testing--quality-verification)
 - [📚 Comprehensive Documentation](#-documentation)
@@ -424,6 +425,30 @@ Access the services:
 - 🌐 **Frontend Application**: `http://localhost:3000`
 - ⚙️ **Backend API Gateway**: `http://localhost:3001`
 - 📑 **OpenAPI Swagger Docs**: `http://localhost:3001/docs`
+
+---
+
+## ☁️ Free Cloud Deployment (Vercel + Render + Supabase + Upstash)
+
+NovaFlow AI is 100% production-ready for free, Git-based cloud hosting without requiring a paid VPS:
+
+```
+GitHub Repository (Source)
+  ├── Vercel Web Service       ──►  Next.js 16 / React 19 Frontend
+  ├── Render Web Service       ──►  FastAPI Python Backend ASGI Kernel
+  ├── Supabase Project         ──►  Cloud PostgreSQL 15 Database
+  ├── Upstash Redis            ──►  Serverless Redis Cache & Presence
+  └── External Services        ──►  LLM Providers, Telegram & Google OAuth
+```
+
+### Quick Deployment Steps:
+1. **Database**: Create a free PostgreSQL instance on [Supabase](https://supabase.com/).
+2. **Redis**: Create a free serverless Redis database on [Upstash](https://upstash.com/).
+3. **Backend**: Deploy `backend/` to [Render](https://render.com/) Web Service using `render.yaml` or python uvicorn start command.
+4. **Frontend**: Deploy root repository to [Vercel](https://vercel.com/) with `NEXT_PUBLIC_API_URL=https://your-backend.onrender.com`.
+5. **Telegram**: Register public bot webhook directly via the Credentials Vault in the web UI.
+
+👉 **[Read the Full Step-by-Step Cloud Deployment Guide (docs/DEPLOYMENT.md)](docs/DEPLOYMENT.md)**
 
 ---
 

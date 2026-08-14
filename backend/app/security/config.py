@@ -21,8 +21,15 @@ MAX_SESSIONS_PER_USER = int(os.getenv("MAX_SESSIONS_PER_USER", "10"))
 SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "60"))
 
 # CORS — comma-separated. Never use * with credentials in production.
-_raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", FRONTEND_URL or "http://127.0.0.1:3000")
-CORS_ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+_raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+_origin_set = {"http://localhost:3000", "http://127.0.0.1:3000"}
+if FRONTEND_URL:
+    _origin_set.add(FRONTEND_URL.strip().rstrip("/"))
+if _raw_origins:
+    for o in _raw_origins.split(","):
+        if o.strip():
+            _origin_set.add(o.strip().rstrip("/"))
+CORS_ALLOWED_ORIGINS = sorted(list(_origin_set))
 
 import sys
 

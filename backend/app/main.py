@@ -241,3 +241,11 @@ def health_detail(user: User = Depends(get_current_user)):
 @app.get("/")
 def root():
     return ok({"name": "NovaFlow API", "version": "9.9.0"})
+
+
+if __name__ == "__main__":
+    import uvicorn
+    from app.config import PORT
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=PORT, reload=False)
+
