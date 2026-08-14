@@ -79,6 +79,31 @@ function AuthInput({ id, label, type, value, onChange, onFocus, onBlur, focused,
   );
 }
 
+function findGoogleProvider(list) {
+  if (!list) return null;
+  const arr = Array.isArray(list)
+    ? list
+    : Array.isArray(list?.data)
+      ? list.data
+      : typeof list === "object"
+        ? Object.values(list)
+        : [];
+  for (const item of arr) {
+    if (!item) continue;
+    if (typeof item === "string" && (item.toLowerCase() === "google" || item.toLowerCase() === "gmail")) {
+      return { id: "google", label: "Google" };
+    }
+    if (typeof item === "object") {
+      const id = String(item.id || item.provider || item.name || item.key || "").toLowerCase();
+      const label = String(item.label || item.name || "").toLowerCase();
+      if (id === "google" || id === "gmail" || label.includes("google") || label.includes("gmail")) {
+        return { id: item.id || "google", label: item.label || "Google" };
+      }
+    }
+  }
+  return null;
+}
+
 export default function AuthFormPanel({
   isRegister,
   email,
@@ -179,12 +204,12 @@ export default function AuthFormPanel({
     ? oauthProviders
     : Array.isArray(oauthProviders?.data)
       ? oauthProviders.data
-      : [];
+      : typeof oauthProviders === "object" && oauthProviders !== null
+        ? Object.values(oauthProviders)
+        : [];
   const showPasswordForm = passwordLogin || ldapEnabled;
-  const showOAuth = providers.length > 0 || samlEnabled;
-  const googleProvider = providers.find(
-    (p) => p && (p.id === "google" || p.id === "gmail" || p.name?.toLowerCase() === "google")
-  );
+  const googleProvider = findGoogleProvider(oauthProviders);
+  const showOAuth = providers.length > 0 || !!googleProvider || samlEnabled;
   const showOAuthConfigWarning = !loadingProviders && !showPasswordForm && !googleProvider;
 
   if (!clientReady) {

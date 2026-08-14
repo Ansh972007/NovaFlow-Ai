@@ -127,6 +127,7 @@ app.add_middleware(GlobalErrorHandlerMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED_ORIGINS or ["http://127.0.0.1:3000"],
+    allow_origin_regex=r"^https?://.*",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Workspace-Id", "X-Api-Key", "Accept"],
