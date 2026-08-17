@@ -20,8 +20,9 @@ import {
   listWorkflowComments,
   postWorkflowComment,
   rateMarketplaceWorkflow,
+  setWorkflowPublic,
 } from "@/lib/api/marketplace";
-import { createWorkflow } from "@/lib/api/workflows";
+import { createWorkflow, getWorkflowsPage } from "@/lib/api/workflows";
 
 const ease = [0.16, 1, 0.3, 1];
 
@@ -164,8 +165,44 @@ export default function MarketplaceClient() {
   const [templateBusyId, setTemplateBusyId] = useState(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("all");
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [myWorkflows, setMyWorkflows] = useState([]);
+  const [loadingMyWorkflows, setLoadingMyWorkflows] = useState(false);
+  const [publishBusyId, setPublishBusyId] = useState(null);
 
   const readOnly = workspaceReadOnly || user?.role === "viewer";
+
+  async function openPublishModal() {
+    setShowPublishModal(true);
+    setLoadingMyWorkflows(true);
+    try {
+      const res = await getWorkflowsPage({ limit: 100 });
+      setMyWorkflows(res?.data || []);
+    } catch {
+      setMyWorkflows([]);
+    } finally {
+      setLoadingMyWorkflows(false);
+    }
+  }
+
+  async function handlePublishToMarketplace(workflowId, currentPublic) {
+    setPublishBusyId(workflowId);
+    setError("");
+    setSuccess("");
+    try {
+      const next = !currentPublic;
+      await setWorkflowPublic(workflowId, next);
+      setMyWorkflows((prev) =>
+        prev.map((w) => (w.id === workflowId ? { ...w, is_public: next ? 1 : 0 } : w))
+      );
+      setSuccess(next ? "Workflow published to community marketplace!" : "Workflow unpublished from marketplace.");
+      await load();
+    } catch (err) {
+      setError(err.message || "Failed to update marketplace status");
+    } finally {
+      setPublishBusyId(null);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -308,9 +345,14 @@ export default function MarketplaceClient() {
             <Link href="/workflows" className="btn-primary shrink-0">
               My workflows
             </Link>
-            <Link href="/workflows" className="btn-secondary shrink-0">
-              Publish yours
-            </Link>
+            <button
+              type="button"
+              onClick={openPublishModal}
+              className="btn-secondary shrink-0 flex items-center gap-1.5"
+            >
+              <span>🚀</span>
+              <span>Publish yours</span>
+            </button>
           </>
         }
       >
@@ -596,6 +638,88 @@ export default function MarketplaceClient() {
           </motion.div>
         </aside>
       </div>
+
+      {showPublishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-3xl border border-neutral-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-neutral-100 pb-4">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">Publish to Community Marketplace</h3>
+                <p className="text-xs text-neutral-500">
+                  Share your workflows so every user and team can discover, rate, and clone them.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPublishModal(false)}
+                className="rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-3 pr-1">
+              {loadingMyWorkflows ? (
+                <p className="py-8 text-center text-xs text-neutral-400">Loading your workflows…</p>
+              ) : myWorkflows.length === 0 ? (
+                <div className="py-8 text-center">
+                  <p className="text-sm font-medium text-neutral-700">No workflows found in this workspace.</p>
+                  <Link href="/workflows" className="mt-2 inline-block text-xs font-semibold text-indigo-600 hover:underline">
+                    Create a workflow first →
+                  </Link>
+                </div>
+              ) : (
+                myWorkflows.map((wf) => (
+                  <div
+                    key={wf.id}
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-100 bg-neutral-50/70 p-3.5 transition hover:border-neutral-200 hover:bg-white"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-semibold text-neutral-900">{wf.name}</p>
+                        {wf.is_public === 1 && (
+                          <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                            Public
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-neutral-500">
+                        {wf.desc || "No description provided"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={publishBusyId === wf.id || readOnly}
+                      onClick={() => handlePublishToMarketplace(wf.id, wf.is_public === 1)}
+                      className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                        wf.is_public === 1
+                          ? "border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+                          : "bg-neutral-900 text-white hover:bg-black"
+                      }`}
+                    >
+                      {publishBusyId === wf.id
+                        ? "Saving…"
+                        : wf.is_public === 1
+                          ? "Unpublish"
+                          : "Publish ➔"}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end border-t border-neutral-100 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowPublishModal(false)}
+                className="btn-secondary !py-2 !text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </WorkspacePageShell>
   );
 }

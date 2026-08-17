@@ -19,6 +19,7 @@ import {
   getWorkflowsPage,
   setWorkflowStatus,
 } from "@/lib/api/workflows";
+import { setWorkflowPublic } from "@/lib/api/marketplace";
 import { WORKFLOW_TEMPLATES } from "@/lib/workflow/templates";
 import DigestsClient from "@/app/digests/DigestsClient";
 
@@ -261,51 +262,82 @@ function WorkflowsClientInner() {
               transition={{ delay: i * 0.03, ease }}
             >
               <TiltCard className="rounded-2xl border border-neutral-200 bg-white p-5">
-                <Link href={`/workflows/${wf.id}`} className="block">
-                  <p className="font-semibold text-neutral-900">{wf.name}</p>
-                  <p className="mt-1 text-xs text-neutral-500">{wf.status === 1 ? "Published" : "Draft"}</p>
-                </Link>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    className="text-xs text-neutral-600"
-                    disabled={busyId === wf.id}
-                    onClick={async () => {
-                      setBusyId(wf.id);
-                      setError("");
-                      try {
-                        await setWorkflowStatus(wf.id, wf.status === 1 ? 0 : 1);
-                        await load();
-                      } catch (err) {
-                        setError(err.message || "Status update failed");
-                      } finally {
-                        setBusyId(null);
-                      }
-                    }}
-                  >
-                    {wf.status === 1 ? "Unpublish" : "Publish"}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-red-600"
-                    disabled={busyId === wf.id}
-                    onClick={async () => {
-                      if (!window.confirm("Delete workflow?")) return;
-                      setBusyId(wf.id);
-                      setError("");
-                      try {
-                        await deleteWorkflow(wf.id);
-                        await load();
-                      } catch (err) {
-                        setError(err.message || "Delete failed");
-                      } finally {
-                        setBusyId(null);
-                      }
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
+                  <Link href={`/workflows/${wf.id}`} className="block">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-neutral-900">{wf.name}</p>
+                      {wf.is_public === 1 && (
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                          Marketplace
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-neutral-500">{wf.status === 1 ? "Published" : "Draft"}</p>
+                  </Link>
+                  <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-3">
+                    <button
+                      type="button"
+                      className="rounded-lg bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-200 transition"
+                      disabled={busyId === wf.id}
+                      onClick={async () => {
+                        setBusyId(wf.id);
+                        setError("");
+                        try {
+                          await setWorkflowStatus(wf.id, wf.status === 1 ? 0 : 1);
+                          await load();
+                        } catch (err) {
+                          setError(err.message || "Status update failed");
+                        } finally {
+                          setBusyId(null);
+                        }
+                      }}
+                    >
+                      {wf.status === 1 ? "Unpublish" : "Publish"}
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                        wf.is_public === 1
+                          ? "bg-violet-50 text-violet-700 hover:bg-violet-100"
+                          : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+                      }`}
+                      disabled={busyId === wf.id}
+                      onClick={async () => {
+                        setBusyId(wf.id);
+                        setError("");
+                        try {
+                          const next = wf.is_public !== 1;
+                          await setWorkflowPublic(wf.id, next);
+                          await load();
+                        } catch (err) {
+                          setError(err.message || "Marketplace share failed");
+                        } finally {
+                          setBusyId(null);
+                        }
+                      }}
+                    >
+                      {wf.is_public === 1 ? "Unshare from Market" : "Share to Market"}
+                    </button>
+                    <button
+                      type="button"
+                      className="ml-auto rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 transition"
+                      disabled={busyId === wf.id}
+                      onClick={async () => {
+                        if (!window.confirm("Delete workflow?")) return;
+                        setBusyId(wf.id);
+                        setError("");
+                        try {
+                          await deleteWorkflow(wf.id);
+                          await load();
+                        } catch (err) {
+                          setError(err.message || "Delete failed");
+                        } finally {
+                          setBusyId(null);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
               </TiltCard>
             </motion.div>
           ))}

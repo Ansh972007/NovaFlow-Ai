@@ -62,7 +62,7 @@ def list_marketplace_workflows(
 ):
     rows = (
         db.query(Workflow)
-        .filter(Workflow.is_public == 1, Workflow.status == 1)
+        .filter(Workflow.is_public == 1)
         .order_by(Workflow.update_time.desc())
         .limit(limit)
         .all()
@@ -89,7 +89,7 @@ def clone_marketplace_workflow(
     ctx=Depends(require_workspace_editor),
 ):
     src = db.get(Workflow, workflow_id)
-    if not src or not src.is_public or src.status != 1:
+    if not src or not src.is_public:
         return fail(404, "Public workflow not found")
     clone = Workflow(
         name=f"{src.name} (copy)",
@@ -115,9 +115,13 @@ def share_workflow(
     w = ctx.fetch(Workflow, workflow_id)
     if not w:
         return fail(404, "Workflow not found")
-    w.is_public = 1 if body.get("is_public") else 0
+    is_pub = 1 if body.get("is_public") else 0
+    w.is_public = is_pub
+    if is_pub:
+        w.status = 1
     db.commit()
-    return ok({"id": w.id, "is_public": w.is_public})
+    db.refresh(w)
+    return ok({"id": w.id, "is_public": w.is_public, "status": w.status})
 
 
 @router.post("/marketplace/workflows/{workflow_id}/rate")
@@ -128,7 +132,7 @@ def rate_marketplace_workflow(
     ctx=Depends(require_workspace_editor),
 ):
     w = db.get(Workflow, workflow_id)
-    if not w or not w.is_public or w.status != 1:
+    if not w or not w.is_public:
         return fail(404, "Public workflow not found")
     score = int(body.get("score") or 0)
     if score < 1 or score > 5:
@@ -165,7 +169,7 @@ def list_workflow_comments(
     ctx=Depends(get_workspace_ctx),
 ):
     w = db.get(Workflow, workflow_id)
-    if not w or not w.is_public or w.status != 1:
+    if not w or not w.is_public:
         return fail(404, "Public workflow not found")
     rows = (
         db.query(WorkflowComment)
@@ -196,7 +200,7 @@ def post_workflow_comment(
     ctx=Depends(require_workspace_editor),
 ):
     w = db.get(Workflow, workflow_id)
-    if not w or not w.is_public or w.status != 1:
+    if not w or not w.is_public:
         return fail(404, "Public workflow not found")
     text = (body.get("body") or "").strip()
     if not text:
