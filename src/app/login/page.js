@@ -31,13 +31,37 @@ function LoginForm() {
   const [checkingBackend, setCheckingBackend] = useState(false);
   const [focused, setFocused] = useState(null);
   const [greeting, setGreeting] = useState(0);
-  const [oauthProviders, setOauthProviders] = useState([]);
+  const [oauthProviders, setOauthProviders] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = sessionStorage.getItem("nf_oauth_providers");
+        if (cached) return JSON.parse(cached);
+      } catch {}
+    }
+    return [];
+  });
   const [ldapEnabled, setLdapEnabled] = useState(false);
   const [samlEnabled, setSamlEnabled] = useState(false);
-  const [passwordLogin, setPasswordLogin] = useState(false);
-  const [gmailOnly, setGmailOnly] = useState(true);
+  const [passwordLogin, setPasswordLogin] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = sessionStorage.getItem("nf_password_login");
+        if (cached !== null) return cached === "true";
+      } catch {}
+    }
+    return true;
+  });
+  const [gmailOnly, setGmailOnly] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = sessionStorage.getItem("nf_gmail_only");
+        if (cached !== null) return cached === "true";
+      } catch {}
+    }
+    return false;
+  });
   const [resetMode, setResetMode] = useState(false);
-  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [loadingProviders, setLoadingProviders] = useState(false);
 
   async function probeBackend() {
     setCheckingBackend(true);
@@ -57,8 +81,11 @@ function LoginForm() {
       .then((list) => {
         const providers = Array.isArray(list) ? list : Array.isArray(list?.data) ? list.data : [];
         setOauthProviders(providers);
+        try {
+          sessionStorage.setItem("nf_oauth_providers", JSON.stringify(providers));
+        } catch {}
       })
-      .catch(() => setOauthProviders([]));
+      .catch(() => {});
     const p2 = getLdapStatus()
       .then((s) => setLdapEnabled(!!s?.enabled))
       .catch(() => setLdapEnabled(false));
@@ -67,12 +94,17 @@ function LoginForm() {
       .catch(() => setSamlEnabled(false));
     const p4 = getLoginMode()
       .then((mode) => {
-        setPasswordLogin(!!mode?.password_login);
-        setGmailOnly(!!mode?.gmail_only);
+        const pLogin = mode?.password_login !== false;
+        const gOnly = !!mode?.gmail_only;
+        setPasswordLogin(pLogin);
+        setGmailOnly(gOnly);
+        try {
+          sessionStorage.setItem("nf_password_login", String(pLogin));
+          sessionStorage.setItem("nf_gmail_only", String(gOnly));
+        } catch {}
       })
       .catch(() => {
-        setPasswordLogin(false);
-        setGmailOnly(true);
+        setPasswordLogin(true);
       });
 
     Promise.allSettled([p1, p2, p3, p4]).finally(() => {

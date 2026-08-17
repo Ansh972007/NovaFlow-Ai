@@ -7,6 +7,9 @@ export function getApiBaseUrl() {
     if (window.location.port === "3000") {
       return `${window.location.protocol}//${window.location.hostname}:3001`;
     }
+    if (window.location.hostname.includes("vercel.app")) {
+      return "https://novaflow-ai.onrender.com";
+    }
     if (window.location.origin) {
       return window.location.origin;
     }
@@ -19,7 +22,7 @@ export function getServerApiBaseUrl() {
   return (
     process.env.API_INTERNAL_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    "http://localhost:3001"
+    (process.env.VERCEL ? "https://novaflow-ai.onrender.com" : "http://localhost:3001")
   ).replace(/\/+$/, "");
 }
 
